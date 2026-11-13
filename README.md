@@ -91,9 +91,6 @@ Presets enable standard FXAA and preserve HUD quality, gamma, and brightness. Re
 
 The renderer's native replacement loader uses Xbox texture hashes and PNG files at `hd/textures/<16-digit-hash>.png`. No replacement pack is included. Replacement decoding runs on a background worker; large packs can still increase memory and loading costs. Shader caching already exists in the renderer.
 
-**PCSX2 texture packs do not work directly.** PS2 identifiers differ from Xbox hashes; DDS images also need conversion to PNG. Reusing artwork requires matching replacements to Xbox textures, not renaming a folder. A small mapping trial should precede a full conversion. Do not redistribute a pack without its author's permission.
-
-The supplied desktop folder is named `ULUS10021`: it is a **PSP** pack for *Midnight Club 3: DUB Edition*, not a PS2/PCSX2 pack or DUB Edition Remix. Its `textures.ini` uses PPSSPP quick hashes (24 hex digits); ReDUB's loader hashes the original Xbox texture bytes, format, dimensions, and palette into 16-digit filenames. It cannot identify this pack's replacements from those hashes. The original DUB Edition and Remix also differ in game content, so this is not a drop-in replacement set. No files from that pack are included in this repository. See [texture-pack compatibility](docs/TEXTURE-PACK-COMPATIBILITY.md).
 
 ## Controllers
 
