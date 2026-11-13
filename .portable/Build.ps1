@@ -131,6 +131,6 @@ try {
     if (Test-Path -LiteralPath (Join-Path $repo 'ReDUB Launcher.exe')) {
         & (Join-Path $PSScriptRoot 'Build-Launcher.ps1') -ShortcutsOnly
     }
-    Write-Host "Ready. Open ReDUB Launcher.exe or 'Play - Midnight Club 3 Remix.cmd'." -ForegroundColor Green
+    Write-Host "Ready. Open ReDUB Launcher.exe and choose Play." -ForegroundColor Green
     Write-Host 'Your game files, saves and existing settings were preserved.'
 } catch { Write-Host $_.Exception.Message -ForegroundColor Red; exit 1 }
