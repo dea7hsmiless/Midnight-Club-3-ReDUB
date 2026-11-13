@@ -305,11 +305,14 @@ static const char s_vk_prelude[] =
     "    vec4 u_vpoff;\n"
     "    vec2 u_aa;\n"
     "    int u_xform;\n"
+    "    float u_snapy;\n"
     "    vec4 u_mv[4];\n"
     "    vec4 u_fogplane;\n"
     "    vec4 u_fog0;\n"
     "    vec4 u_fog1;\n"
+    "    vec4 u_tm[16];\n"
     "};\n"
+    "#define NV2A_TM(v,i) vec4(dot(u_tm[i*4],v),dot(u_tm[i*4+1],v),dot(u_tm[i*4+2],v),dot(u_tm[i*4+3],v))\n"
     /* Transform constants, 192 per instance: an instanced draw (nv2a_vk.c)
      * repeats one mesh with each instance's own set. NV2A_VK_INSTANCES. */
     "layout(std140, set = 0, binding = 6) uniform VsC { vec4 c[192 * 16]; };\n"
@@ -349,7 +352,7 @@ static const char s_vk_prelude[] =
      * vertex is clipped by x/y anyway and its true z is about w: clamping it
      * to 0 skewed the interpolated depth of triangles crossing the eye plane
      * (walls in hood view turned transparent, objects showed through them). */
-    NV2A_SNAP_GLSL
+    NV2A_SNAP_GLSL_OFF("vec2(u_surf.w,u_snapy)")
     "vec4 nv2a_clip(vec3 sw, float w) {\n"
     "    float z = sw.z * u_surf.z;\n"
     "    sw.xy = nv2a_snap(sw.xy, w);\n"
@@ -662,8 +665,7 @@ float nv2a_ffp_fog_factor(const uint32_t *r, const float pos[4], float spec_a)
 const char *nv2a_gl_vsh_fixed(void)
 {
     /* Vulkan: these uniforms are members of the prelude's uniform block. */
-    /* The texture matrices (GL only: nv2a_vk has no u_tm and passes the
-     * coordinates through, as before): stage i's rows are u_tm[4i..4i+3],
+    /* Texture matrices in both renderers: stage i's rows are u_tm[4i..4i+3],
      * identity where the stage's matrix is off. A coordinate goes through
      * them as on the NV2A (xemu: oT = oT * texMat, the matrix as the
      * registers hold it): component j is row j dotted with it. Projected

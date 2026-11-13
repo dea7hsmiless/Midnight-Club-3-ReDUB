@@ -1180,6 +1180,23 @@ static DWORD WINAPI ohci_thread(LPVOID unused)
             }
         }
 
+        /* Descriptor publication is a transaction with the guest USB driver.
+         * The ISR already used the guest execution lock, but the DMA walker
+         * did not: a DPC could unlink/free a TD while this host thread was
+         * rewriting its next link and the ED head. MC3 Remix's crash dump
+         * followed an invalid chain to physical FFFFFFF0 (guest 7FFFFFF0);
+         * this unprotected host/driver overlap can corrupt those links.
+         * Serialize the short DMA pass with guest execution, including done
+         * list publication. Never hold this lock across a sleep or IRQ wait. */
+        xbox_gil_isr_begin();
+        /* A guest may have disabled a list while we waited for the lock. */
+        control = hc->reg[HcControl / 4];
+        enable = hc->reg[HcInterruptEnable / 4];
+        if ((control & 0xC0u) != 0x80u || !(enable & INTR_MIE)) {
+            xbox_gil_isr_end();
+            continue;
+        }
+
         /* The frame clock.
          *
          * INTR_SF was defined and never raised, and HcFmNumber only moved when
@@ -1231,7 +1248,7 @@ static DWORD WINAPI ohci_thread(LPVOID unused)
          * endpoints for another pass costs a few milliseconds of latency
          * and is what the controller is specified to do. */
         if (hc->reg[HcInterruptStatus / 4] & INTR_WDH)
-            goto deliver;
+            goto dma_done;
 
         /* PeriodicListEnable, bit 2 of HcControl. */
         if (control & 0x04u) {
@@ -1269,7 +1286,8 @@ static DWORD WINAPI ohci_thread(LPVOID unused)
          * this stops on its own -- and if it ever does not, the cap below says
          * so rather than spinning the ISR forever. */
         ohci_flush_done(hc);    /* publish TDs held while WDH was set */
-    deliver:
+    dma_done:
+        xbox_gil_isr_end();
         status = hc->reg[HcInterruptStatus / 4] & enable & 0x7Fu;
         if (!status)
             continue;

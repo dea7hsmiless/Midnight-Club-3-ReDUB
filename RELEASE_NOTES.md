@@ -1,5 +1,20 @@
 # Release notes
 
+## ReDUB Windows edition — 2026-11-13
+
+This source snapshot introduces the Windows-focused **Midnight Club 3: ReDUB** edition for the original Xbox release of *DUB Edition Remix*. No game data is included.
+
+### Highlights
+
+- Portable ReDUB launcher with Xbox Remix disc/folder import, setup verification, repair, local builds, shortcuts, renderer selection and launcher-bypass recovery.
+- Native in-game Port Options with graphics presets, render/HUD scale, live FXAA profiles, filtering, sharpening, gamma, brightness, VSync, FPS display and restore defaults.
+- OpenGL and Vulkan renderers, plus NVIDIA DLSS Super Resolution Quality, Balanced and Performance modes. DLSS jitter is disabled pending further work; frame generation is not included.
+- Xbox controller reconnect and vibration support, configurable rumble strength, and an optional raw SDL wheel compatibility path.
+- Windows media-session integration for Spotify, YouTube Music, Pandora and other compatible players, including volume, pause/resume, track skipping and native radio-title display with Unicode fallback.
+- Renderer parity fixes for effects buffers, texture matrices, GPU copies, fullscreen/resolution handling, Career transitions, minimap masking and Vulkan presentation edges.
+
+See `README.md` for requirements, setup, limitations and legal game-file guidance. Deferred work and current validation evidence are recorded in `docs/RELEASE-CHECKLIST.md`.
+
 ## v1.1.0
 
 **Headlight beams in both games, and the first Android beta.** At night your car finally lights up the road ahead and we're releasing the Android version for further testing.

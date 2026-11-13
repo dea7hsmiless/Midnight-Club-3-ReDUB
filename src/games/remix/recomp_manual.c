@@ -40,6 +40,9 @@
  * (RECOMP_TLS), and a plain `extern uint32_t g_eax` is a TLS mismatch that
  * GCC refuses to link on Linux and the Switch. */
 #include "recomp_types.h"
+#ifdef _WIN32
+static void port_media_frame(void);
+#endif
 
 /* ── Native replacements ───────────────────────────────────── */
 
@@ -127,6 +130,27 @@ static uint32_t s_fence_sem_va;
 static RECOMP_TLS uint32_t t_fence_target, t_fence_saved;
 static RECOMP_TLS int t_fence_fixed;
 extern void recomp_set_spin_hook(void (*fn)(void));
+typedef int (*PortWaitRecheck)(uint32_t);
+extern PortWaitRecheck xbox_kernel_wait_recheck_set(PortWaitRecheck fn);
+extern uint32_t nv2a_pb_last_fence_release(void);
+static int fence_event_recheck(uint32_t object)
+{
+    uint32_t device=MEM32(0x422D78u);
+    if(!device||object!=device+0x1DCCu||!s_fence_sem_va)return 0;
+    uint32_t gpu=__atomic_load_n((uint32_t *)XBOX_PTR(s_fence_sem_va),__ATOMIC_SEQ_CST);
+    if((int32_t)(gpu-t_fence_target)<0){
+        static RECOMP_TLS uint32_t watched;
+        static RECOMP_TLS uint64_t began,last;
+        struct timespec ts;clock_gettime(CLOCK_MONOTONIC,&ts);
+        uint64_t now=(uint64_t)ts.tv_sec*1000u+ts.tv_nsec/1000000u;
+        if(watched!=t_fence_target){watched=t_fence_target;began=last=now;}
+        if(now-began>=1000&&now-last>=2000){last=now;fprintf(stderr,"[D3D] fence event still pending: GPU=%08X target=%08X PUT=%08X GET=%08X lastRelease=%08X\n",gpu,t_fence_target,MEM32(0xFD800040u),MEM32(0xFD800044u),nv2a_pb_last_fence_release());}
+        return 0;
+    }
+    static int logged;
+    if(logged++<8)fprintf(stderr,"[D3D] fence event notification missed: GPU=%08X target=%08X; completion verified\n",gpu,t_fence_target);
+    return 1;
+}
 
 /* Compare-and-swap on guest memory: the executor writes it from its thread. */
 static uint32_t fence_cas(uint32_t va, uint32_t expect, uint32_t want)
@@ -192,7 +216,9 @@ void sub_004165A0(void)
     t_fence_target = MEM32(g_esp + 4);         /* (time, flags), stdcall */
     t_fence_fixed = 0;
     recomp_set_spin_hook(fence_spin_hook);
+    PortWaitRecheck save_wait=xbox_kernel_wait_recheck_set(fence_event_recheck);
     sub_004165A0_gen();
+    xbox_kernel_wait_recheck_set(save_wait);
     if (t_fence_fixed)
         fence_cas(s_fence_sem_va, t_fence_target, t_fence_saved);
     t_fence_target = save_target;
@@ -943,10 +969,14 @@ void sub_0020E140(void)
 volatile long g_mc3_d3d_vblanks;
 volatile uint32_t g_mc3_d3d_device;       /* ecx of the vblank handler: D3D's device */
 extern void sub_0041B250_gen(void);
+extern void xbox_Nv2aVblankTaken(void);
 void sub_0041B250(void)
 {
     g_mc3_d3d_vblanks++;
     g_mc3_d3d_device = g_ecx;
+    /* The caller has consumed the pending interrupt. Acknowledge the plain
+     * MMIO backing now, before D3D spins waiting for PMC bit 24 to drop. */
+    xbox_Nv2aVblankTaken();
     sub_0041B250_gen();
 }
 
@@ -963,6 +993,9 @@ void sub_002D5400(void)
 {
     g_mc3_loop_passes++;
     sub_002D5400_gen();
+#ifdef _WIN32
+    port_media_frame();
+#endif
 }
 
 /* ── D3D's PGRAPH handler: the trap protocol with an acknowledgement ──
@@ -2408,4 +2441,393 @@ void sub_003C3D23(void)
     if (block)
         apu_dsp_ack_add(block + 0x810);
     sub_003C3D23_gen();
+}
+
+/* Port Options uses the original Xbox list, text and controller navigation. */
+#ifdef _WIN32
+#include "input/xinput_xbox.h"
+#endif
+extern void sub_0018D610_gen(void);
+void sub_0018D610(void);
+extern void sub_00163830_gen(void);
+extern void sub_0018D590_gen(void);
+extern void sub_00348BE0(void),sub_00348950(void),sub_001395E0(void);
+#ifdef _WIN32
+#include <windows.h>
+static uint32_t port_self,port_list,port_rows[15];
+static uint32_t port_list_vtable;
+static int port_open,port_back_down,port_back_release;
+static int port_accept_down;
+static int port_building;
+static char port_saved_title[120];
+extern void windows_port_setting_change(int id);
+extern void windows_port_setting_label(int id,char *out,size_t size);
+extern int windows_port_pc_music_get(void);
+extern int windows_port_music_hud_get(void);
+extern void windows_port_music_backup(float);
+extern float windows_port_music_restore(void);
+extern void sub_0026C1F0(void),sub_00062BA0(void);
+extern void windows_media_context(int),windows_media_native_hud(int);
+extern void windows_media_skip(int);
+extern void windows_media_route_commit(const wchar_t *,int);
+extern int windows_media_gameplay_get(void),windows_media_banner_get(wchar_t *,int);
+extern void sub_00139520(void),sub_001395E0(void);
+typedef struct {uint32_t a,c,d,b,si,di,sp,bp,seh;} PortRegs;
+static PortRegs port_save(void) {return (PortRegs){g_eax,g_ecx,g_edx,g_ebx,g_esi,g_edi,g_esp,g_ebp,g_seh_ebp};}
+static void port_restore(PortRegs r) {g_eax=r.a;g_ecx=r.c;g_edx=r.d;g_ebx=r.b;g_esi=r.si;g_edi=r.di;g_esp=r.sp;g_ebp=r.bp;g_seh_ebp=r.seh;}
+static void port_push(uint32_t x) {g_esp-=4;MEM32(g_esp)=x;}
+static int port_ram(uint32_t p,uint32_t n)
+{
+    return n<=0x04000000u&&((p>=0x10000u&&p<=0x04000000u-n)||(p>=0x80000000u&&p<=0x84000000u-n));
+}
+/* Frontend row lists are destroyed/reused when gameplay or another menu takes
+ * over. port_open alone is not evidence that the cached list still exists. */
+static int port_context_valid(void)
+{
+    uint32_t front=MEM32(0x50F148u);
+    if(!port_ram(front,16)||!port_ram(port_self,0x100)||MEM32(front+0xC)!=port_self||
+       MEM32(port_self+0xFC)!=port_list||!port_ram(port_list,0x300)||MEM32(port_list)!=port_list_vtable)return 0;
+    uint32_t page=MEM32(port_list+0x258),cap=MEM32(port_list+0x230);
+    uint32_t columns=MEM32(port_list+0x234);
+    return page<=2&&cap>=16&&cap<=64&&columns>=3&&columns<=32&&MEM32(port_list+0x238+page*4)<=cap;
+}
+static void port_invalidate(void)
+{
+    port_open=port_back_release=port_back_down=port_accept_down=0;
+    port_self=port_list=port_list_vtable=0;memset(port_rows,0,sizeof port_rows);
+}
+/* Audio Options' music slider uses category 2, 0x53F308 + 0x2D4 + 8.
+ * Use its own setter and refresh; never mute the master/effects categories.
+ * The old music level is saved alongside the PC Music preference so it can
+ * be restored even after restarting while external music is enabled. */
+static void port_radio_sync(int menu_transition)
+{
+    static int applied,initialized;static uint64_t menu_restore_until;
+    int pc=windows_port_pc_music_get(),on=pc&&windows_media_gameplay_get();
+    if(!initialized){initialized=1;applied=pc&&!on;}
+    /* Career/profile loading can overwrite the audio config with the zero
+     * saved while PC Music was muting the radio. Repair that zero during the
+     * menu transition only; do not continuously override the Audio slider. */
+    if(menu_transition&&pc&&!on)menu_restore_until=GetTickCount64()+500;
+    if(on||!pc)menu_restore_until=0;
+    if(pc&&!on&&GetTickCount64()<menu_restore_until&&
+       MEMF(0x53F5E4u)==0.0f&&windows_port_music_restore()>0.0f)applied=1;
+    if(!MEM32(0x5366DCu))return;
+    if((on&&(!applied||MEMF(0x53F5E4u)!=0.0f))||(!on&&applied)){
+        PortRegs r=port_save();float volume=on?0.0f:windows_port_music_restore();uint32_t bits;
+        memcpy(&bits,&volume,4);port_push(bits);port_push(2);port_push(0);g_ecx=0x53F308u;sub_0026C1F0();
+        port_push(0);sub_00062BA0();port_restore(r);applied=on;
+        fprintf(stderr,"[PORT] PC Music %s: game music volume %.2f (effects unchanged)\n",on?"on":"off",volume);
+    }
+}
+/* Use the same live HUD and Flash properties as sub_00144220. No cached guest
+ * object survives a menu transition. The old overlay stays the Unicode/absence
+ * fallback, and all guest register/FPU state is preserved around HUD calls. */
+static int port_media_classify(uint32_t mode,uint32_t screen)
+{
+    if(mode<1||mode>7)return 0;
+    if(mode==2&&screen==1)return 1;
+    if((screen>=2&&screen<=0x100)||(mode!=2&&screen==1))return 2;
+    return 0;
+}
+/* The native message prompt's idle position is centred at (-53,93).
+ * Its 128px texture therefore still reaches x=11 on a fully visible PC
+ * framebuffer. The frame-2105 trace and hud_messageOn_en_x asset identify
+ * this as the blue/white edge. State 0 is idle (no message and no animation);
+ * retain the original draw for all entering, visible and exiting states. */
+extern void sub_000D1010_gen(void);
+void sub_000D1010(void)
+{
+    uint32_t self=g_ecx;
+    if(port_ram(self,0xD4)&&MEM32(self)==0x451DE0u&&
+       MEM32(self+0x54)==0&&MEM32(self+0x88)==0&&!MEM8(self+0xD0)){
+        g_esp+=4; /* native thiscall ret, no arguments */
+        return;
+    }
+    sub_000D1010_gen();
+}
+/* sub_0001BDF0 uses this non-Flash HUD for cruising: local player -> HUD
+ * owner -> text manager, slot 24. Resolve it anew on every tick. */
+extern void sub_000B4980(void);
+extern void sub_000B6330(void);
+extern void sub_000B3550(void);
+/* The original soundtrack also posts slot-24 announcements even when its
+ * volume is zero. PC Music owns the title while driving, including fallback
+ * tracks; keep the original notifications in menus and with PC Music off. */
+extern void sub_0001BDF0_gen(void);
+void sub_0001BDF0(void)
+{
+    if(windows_port_pc_music_get()&&windows_media_gameplay_get()){
+        g_esp+=8; /* ret 4: notification's player-index argument */
+        return;
+    }
+    sub_0001BDF0_gen();
+}
+static uint32_t port_media_slot(uint32_t *manager,uint32_t *buffer)
+{
+    uint32_t pool=MEM32(0x558814u);
+    if(!port_ram(pool,12))return 0;
+    uint32_t player=MEM32(pool+8);
+    if(!port_ram(player,0x5C))return 0;
+    uint32_t owner=MEM32(player+0x58);
+    if(!port_ram(owner,0x54))return 0;
+    uint32_t m=MEM32(owner+0x50);
+    if(!port_ram(m,0x300)||!MEM8(m+0x84))return 0;
+    uint32_t slot=MEM32(m+0xC+24*4);
+    if(!port_ram(slot,0x8C)||MEM32(slot)!=0x44F6D0u)return 0;
+    uint32_t b=MEM32(slot+0x84),queue=MEM32(slot+0x10);
+    /* This title slot is constructed with a 100-wchar allocation. Validate
+     * the allocator's recorded 200-byte size before touching the text. */
+    if(queue>=32||!port_ram(m,0x8C+(queue+1)*0xAC)||
+       !port_ram(b,200)||!port_ram(b-16,16)||MEM32(b-12)!=200)return 0;
+    *manager=m;*buffer=b;return slot;
+}
+/* The native font covers printable ASCII. Decompose accented Latin letters
+ * and omit unsupported glyphs; retain the Unicode overlay when no meaningful
+ * native text remains (for example, a title written entirely in Japanese). */
+static int port_media_native_text(const wchar_t *source,wchar_t *dest,size_t capacity)
+{
+    wchar_t expanded[1024];size_t n=0;int meaningful=0;
+    if(!capacity)return 0;
+    if(!FoldStringW(MAP_COMPOSITE,source,-1,expanded,(int)(sizeof expanded/sizeof expanded[0])))return 0;
+    for(const wchar_t *p=expanded;*p;p++){
+        wchar_t c=*p;if(c<32||c>126)continue;
+        if(n+1>=capacity)return 0;
+        dest[n++]=c;if((c>=L'A'&&c<=L'Z')||(c>=L'a'&&c<=L'z')||(c>=L'0'&&c<=L'9'))meaningful=1;
+    }
+    dest[n]=0;
+    if(meaningful){
+        size_t first=0;while(first<n&&!((dest[first]>=L'A'&&dest[first]<=L'Z')||
+            (dest[first]>=L'a'&&dest[first]<=L'z')||(dest[first]>=L'0'&&dest[first]<=L'9')))first++;
+        if(first)memmove(dest,dest+first,(n-first+1)*sizeof *dest);
+    }
+    return meaningful;
+}
+static int port_media_cruising_title(const wchar_t *song,int visible)
+{
+    static uint32_t previous_slot;static wchar_t previous[100];
+    uint32_t manager=0,buffer=0,slot=port_media_slot(&manager,&buffer);
+    size_t n=wcslen(song);int supported=visible&&windows_port_music_hud_get()&&n>0&&n<90;
+    for(size_t i=0;i<n;i++)if(song[i]<32||song[i]>126)supported=0;
+    if(!slot||!supported){
+        if(slot&&slot==previous_slot){
+            MEM16(buffer)=0;
+            port_push(24);port_push(0);g_ecx=manager;sub_000B4980();
+            /* Queued text is copied by B39F0/B6330. Clearing the source
+             * buffer alone cannot remove an already-running announcement. */
+            port_push(0);g_ecx=slot;sub_000B3550();
+        }
+        previous_slot=0;previous[0]=0;return 0;
+    }
+    if(slot!=previous_slot||wcscmp(previous,song)){
+        for(size_t i=0;i<=n;i++)MEM16(buffer+2*i)=(uint16_t)song[i];
+        port_push(24);port_push(0);g_ecx=manager;sub_000B4980();
+        port_push(0);port_push(0);port_push(24);port_push(0);g_ecx=manager;sub_000B6330();
+        previous_slot=slot;wcscpy(previous,song);
+        fprintf(stderr,"[MEDIA] song banner sent to cruising radio HUD (slot 24)\n");
+    }
+    return 1;
+}
+static void port_media_frame(void)
+{
+    static uint32_t previous_movie;static wchar_t previous_text[512];static int shown,last_context=-1;
+    uint32_t hud=MEM32(0x50F12Cu),movie=0;
+    if(port_ram(hud,0x1A24))movie=MEM32(hud+0x14);
+    int hud_ready=port_ram(movie,0x40)&&port_ram(MEM32(movie+8),12);
+    uint32_t fsm=MEM32(0x557ED0u),mode=port_ram(fsm,8)?MEM32(fsm+4):0;
+    uint32_t front=MEM32(0x50F148u),owner=port_ram(front,16)?MEM32(front+12):0;
+    uint32_t header=port_ram(owner,16)?MEM32(owner+12):0;
+    uint32_t screen=port_ram(header,0xDC)?MEM32(header+0xD8):0;
+    /* Measured on-road: mode 2, screen 1. Paused: mode 2, screen 2.
+     * HUD availability is independent: this mode uses the non-Flash HUD. */
+    int context=port_media_classify(mode,screen);
+    int gameplay=context==1;
+    windows_media_context(context);
+    /* Edge-triggered: a held direction skips once, and holding through a menu
+     * transition does not issue a fresh command. Never run WinRT on this thread. */
+    static uint16_t media_dpad;
+    XBOX_INPUT_STATE media_input={0};uint16_t dpad=0;
+    if(xbox_InputGetState(0,&media_input)==0)dpad=media_input.Gamepad.wButtons&
+        (XBOX_GAMEPAD_DPAD_LEFT|XBOX_GAMEPAD_DPAD_RIGHT);
+    uint16_t pressed=dpad&~media_dpad;media_dpad=dpad;
+    if(gameplay&&windows_port_pc_music_get()){
+        if(pressed==XBOX_GAMEPAD_DPAD_LEFT)windows_media_skip(0);
+        else if(pressed==XBOX_GAMEPAD_DPAD_RIGHT)windows_media_skip(1);
+    }
+    if(context!=last_context){fprintf(stderr,"[MEDIA] context %s mode=%u screen=%u HUD=%08X movie=%08X\n",context==1?"gameplay":context==2?"menu":"unknown",mode,screen,hud,movie);last_context=context;}
+    PortRegs r=port_save();
+    RecompXmm xs[]={g_xmm0,g_xmm1,g_xmm2,g_xmm3,g_xmm4,g_xmm5,g_xmm6,g_xmm7};
+    double fp[8];memcpy(fp,g_fp_stack,sizeof fp);int top=g_fp_top;
+    static uint32_t last_music_screen;
+    int menu_transition=context==2&&screen!=last_music_screen;
+    last_music_screen=context==2?screen:0;
+    port_radio_sync(menu_transition);
+    /* Reserve the announcement while selecting/updating its native route.
+     * The render thread must not sample the fallback between the native draw
+     * being enabled and the final route publication below. Release it only
+     * after obsolete native text has been cleared. */
+    windows_media_native_hud(1);
+    wchar_t text[512]={0};int visible=windows_media_banner_get(text,512),native=0;
+    const wchar_t *track=!wcsncmp(text,L"NOW PLAYING: ",13)?text+13:text;
+    wchar_t native_song[512]={0};int have_native=port_media_native_text(track,native_song,512);
+    int cruising=port_media_cruising_title(native_song,gameplay&&visible&&have_native);
+    native=cruising;
+    if(gameplay&&visible&&hud_ready&&!cruising){
+        const wchar_t *song=native_song;
+        char utf8[150];int bytes=WideCharToMultiByte(CP_UTF8,0,song,-1,utf8,sizeof utf8,NULL,NULL);
+        int supported=have_native&&bytes>0&&windows_port_music_hud_get();
+        /* Native fonts do not cover every Windows media title. */
+        for(const wchar_t *p=song;*p;p++)if(*p>126||*p<32)supported=0;
+        if(supported){
+            if(!shown||movie!=previous_movie||wcscmp(previous_text,text)){
+                memcpy((void *)XBOX_PTR(hud+0x198D),utf8,bytes);
+                port_push(hud+0x198D);port_push(0x459D3Cu);port_push(0);g_ecx=movie;sub_001395E0();
+                port_push(1);port_push(0x459D2Cu);port_push(0);g_ecx=movie;sub_00139520();
+                wcscpy(previous_text,text);previous_movie=movie;shown=1;
+                fprintf(stderr,"[MEDIA] song banner sent to native radio HUD\n");
+            }
+            native=1;
+        }
+    }
+    if(shown&&(!native||!visible||cruising)){
+        if(hud_ready&&movie==previous_movie){
+            MEM8(hud+0x198D)=0;
+            port_push(hud+0x198D);port_push(0x459D3Cu);port_push(0);g_ecx=movie;sub_001395E0();
+            port_push(0);port_push(0x459D2Cu);port_push(0);g_ecx=movie;sub_00139520();
+        }
+        shown=0;previous_movie=0;previous_text[0]=0;
+    }
+    windows_media_route_commit(text,native);
+    port_restore(r);g_xmm0=xs[0];g_xmm1=xs[1];g_xmm2=xs[2];g_xmm3=xs[3];g_xmm4=xs[4];g_xmm5=xs[5];g_xmm6=xs[6];g_xmm7=xs[7];memcpy(g_fp_stack,fp,sizeof fp);g_fp_top=top;
+}
+static void port_text(uint32_t row,const char *text)
+{
+    if(!port_context_valid()||!port_ram(row,12))return;
+    uint32_t column=MEM32(port_list+0x244),cell=MEM32(row+8);
+    if(!port_ram(column,32)||!port_ram(cell,20))return;
+    uint32_t cap=MEM32(column+28);
+    if(cap<2 || cap>1024)return;
+    uint32_t dst=MEM32(cell+16);
+    if(!port_ram(dst,cap*2))return;
+    size_t n=strlen(text);if(n>=cap)n=cap-1;
+    for(size_t i=0;i<n;i++)MEM16(dst+i*2)=(unsigned char)text[i];
+    MEM16(dst+n*2)=0;
+}
+static void port_labels(void)
+{
+    if(!port_context_valid())return;
+    for(int i=0;i<15;i++) {char text[96];windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);}
+}
+static uint32_t port_add(uint32_t event,const char *text)
+{
+    uint32_t page=MEM32(port_list+0x258),count=MEM32(port_list+0x238+page*4);
+    uint32_t args[]={count,0,0,MEM32(port_self+0xC),0x00163830u,event,2};
+    for(int k=6;k>=0;k--)port_push(args[k]);
+    port_push(0);g_ecx=port_list;sub_00348BE0();
+    uint32_t row=g_eax;if(text)port_text(row,text);return row;
+}
+static void port_title(int enter)
+{
+    if(!port_context_valid())return;
+    uint32_t title=MEM32(port_self+0xC)+0x60;
+    if(!port_ram(title,120))return;
+    if(enter) {if(enter==1)memcpy(port_saved_title,(void *)XBOX_PTR(title),120);memset((void *)XBOX_PTR(title),0,120);memcpy((void *)XBOX_PTR(title),"PORT OPTIONS",12);}
+    else memcpy((void *)XBOX_PTR(title),port_saved_title,120);
+    uint32_t movie=MEM32(0x50F15Cu);
+    if(port_ram(movie,0xFB0) && (movie=MEM32(movie+0xFAC)) && port_ram(movie,4)) {
+        uint32_t sp=g_esp;
+        port_push(title);port_push(0x45B9F8u);port_push(0);
+        g_ecx=movie;sub_001395E0();g_esp=sp;
+    }
+}
+static void port_build(void)
+{
+    if(!port_context_valid()||port_building)return;
+    port_building=1;
+    port_push(1);port_push(0);g_ecx=port_list;sub_00348950();
+    uint32_t page=MEM32(port_list+0x258),state=port_list+page*16;
+    MEM32(port_list+0x238+page*4)=0;
+    MEM8(state+0x26C)=0;MEM32(state+0x268)=0;
+    MEM8(state+0x29C)=0;MEM32(state+0x298)=0;
+    const int order[]={0,5,2,12,3,4,6,13,14,1,7,9,10,11,8};
+    for(int k=0;k<15;k++){int i=order[k];port_rows[i]=port_add(0x7F00u+i,NULL);}
+    port_add(0x7F11u,"BACK");port_labels();
+    port_building=0;
+}
+static void port_enter(void)
+{
+    if(!port_context_valid()) {port_invalidate();return;}
+    PortRegs r=port_save();port_open=1;
+    XBOX_INPUT_STATE input={0};
+    port_back_down=xbox_InputGetState(0,&input)==0 && input.Gamepad.bAnalogButtons[XBOX_BUTTON_B]>XBOX_ANALOG_BUTTON_THRESHOLD;
+    port_accept_down=input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]>XBOX_ANALOG_BUTTON_THRESHOLD;
+    port_build();port_title(1);
+    fprintf(stderr,"[PORT] opened Port Options\n");port_restore(r);
+}
+static void port_parent(void)
+{
+    if(!port_context_valid()) {port_invalidate();return;}
+    PortRegs r=port_save();port_open=0;
+    port_push(0);sub_0018D610();port_title(0);
+    fprintf(stderr,"[PORT] returned to Options\n");port_restore(r);
+}
+#endif
+void sub_0018D610(void)
+{
+#ifdef _WIN32
+    if(port_open&&!port_context_valid()) {fprintf(stderr,"[PORT] Options owner replaced; clearing cached page\n");port_invalidate();}
+    if(port_open&&!port_building) {PortRegs r=port_save();port_build();port_restore(r);g_esp+=4;return;}
+#endif
+    sub_0018D610_gen();
+#ifdef _WIN32
+    port_open=0;port_self=MEM32(MEM32(0x50F148u)+0xCu);port_list=MEM32(port_self+0xFC);
+    port_list_vtable=port_ram(port_list,0x300)?MEM32(port_list):0;
+    if(port_ram(port_list,0x300))fprintf(stderr,"[PORT] Options context self=%08X list=%08X vtable=%08X page=%u capacity=%u columns=%u\n",port_self,port_list,port_list_vtable,MEM32(port_list+0x258),MEM32(port_list+0x230),MEM32(port_list+0x234));
+    if(!port_context_valid()) {port_invalidate();return;}
+    uint32_t page=MEM32(port_list+0x258),count=MEM32(port_list+0x238+page*4),capacity=MEM32(port_list+0x230);
+    if(page>2 || count+1>capacity || MEM32(port_list+0x234)<3)return;
+    PortRegs r=port_save();port_add(0x7F10u,"PORT OPTIONS");port_restore(r);
+#endif
+}
+void sub_00163830(void)
+{
+#ifdef _WIN32
+    uint32_t event=MEM32(g_esp+4);
+    if(port_open&&!port_context_valid())port_invalidate();
+    if(event==0x7F10) {port_enter();g_eax=0;g_esp+=8;return;}
+    if(event==0x7F11) {port_parent();g_eax=0;g_esp+=8;return;}
+    if(port_open && event>=0x7F00 && event<0x7F0F) {
+        if(port_accept_down){g_eax=0;g_esp+=8;return;}
+        port_accept_down=1;
+        if(event==0x7F09&&!windows_port_pc_music_get())windows_port_music_backup(MEMF(0x53F5E4u));
+        windows_port_setting_change(event-0x7F00);g_eax=0;g_esp+=8;return;
+    }
+#endif
+    sub_00163830_gen();
+}
+void sub_0018D590(void)
+{
+#ifdef _WIN32
+    if(port_open&&!port_context_valid()) {fprintf(stderr,"[PORT] Options owner replaced; clearing cached page\n");port_invalidate();}
+    port_radio_sync(0);
+    if(port_open || port_back_release) {
+        XBOX_INPUT_STATE input={0};
+        int down=xbox_InputGetState(0,&input)==0 && input.Gamepad.bAnalogButtons[XBOX_BUTTON_B]>XBOX_ANALOG_BUTTON_THRESHOLD;
+        if(input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]<=XBOX_ANALOG_BUTTON_THRESHOLD)port_accept_down=0;
+        if(port_open && down && !port_back_down) {
+            port_parent();port_back_release=1;port_back_down=down;g_esp+=4;return;
+        }
+        port_back_down=down;
+        if(port_back_release) {
+            /* +0x44 bit 0 enables the entire native menu, not the B button.
+             * Swallow only this held press; never disable the parent page. */
+            if(!down)port_back_release=0;
+            g_esp+=4;return;
+        }
+    }
+#endif
+    sub_0018D590_gen();
+#ifdef _WIN32
+    if(port_open) {PortRegs r=port_save();port_labels();port_restore(r);}
+#endif
 }

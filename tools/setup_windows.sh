@@ -13,7 +13,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 P="${MINGW_PACKAGE_PREFIX:?run this in the MSYS2 CLANG64 or CLANGARM64 shell}"
 echo "== MSYS2 packages for $MSYSTEM"
-PKGS=(make git "$P-clang" "$P-cmake" "$P-ninja" "$P-pkgconf" "$P-SDL2" "$P-ffmpeg"
+PKGS=(make git "$P-clang" "$P-cmake" "$P-ninja" "$P-pkgconf" "$P-sdl2-compat" "$P-ffmpeg"
       "$P-python" "$P-python-capstone" "$P-python-pillow")
 # The mirrors rate-limit (HTTP 429, "Too Many Requests"): about 190 packages
 # five at a time made pacman give up on a first install (2026-10-23). Try

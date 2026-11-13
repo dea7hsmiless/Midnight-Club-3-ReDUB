@@ -1,290 +1,163 @@
-<p align="center"><img src="logo.png" alt="Midnight Club 3: DUB Edition (Remix)" width="500"></p>
+<p align="center"><img src="launcher/art/logo.png" alt="Midnight Club 3 ReDUB Edition" width="720"></p>
 
-<p align="center"><img src="https://img.shields.io/badge/version-0.3.0-blue.svg"> <img src="https://img.shields.io/badge/Nintendo%20Switch-21.0.0-orange?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPGcgZmlsbD0iI2ZmZiI%2BPHBhdGggZD0iTTkuNSAxLjVINi4yQTQuNyA0LjcgMCAwIDAgMS41IDYuMnYxMS42YTQuNyA0LjcgMCAwIDAgNC43IDQuN2gzLjN6TTggM3YxOEg2LjJBMy4yIDMuMiAwIDAgMSAzIDE3LjhWNi4yQTMuMiAzLjIgMCAwIDEgNi4yIDN6Ii8%2BPGNpcmNsZSBjeD0iNS44IiBjeT0iNy40IiByPSIxLjkiLz48cGF0aCBkPSJNMTQuNSAxLjVoMy4zYTQuNyA0LjcgMCAwIDEgNC43IDQuN3YxMS42YTQuNyA0LjcgMCAwIDEtNC43IDQuN2gtMy4zeiIvPjwvZz48Y2lyY2xlIGN4PSIxOC4yIiBjeT0iMTQuNiIgcj0iMS45IiBmaWxsPSIjNTU1Ii8%2BPC9zdmc%2BCg%3D%3D"> <img src="https://img.shields.io/badge/Mac-%20Sequoia%2015.6-green?logo=apple"> <img src="https://img.shields.io/badge/Linux-Ubuntu 22.04-purple?logo=linux"> <img src="https://img.shields.io/badge/Android-15-yellow?logo=android"> <img src="https://img.shields.io/badge/Windows-11-blue?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTIgMmg5LjV2OS41SDJ6TTEyLjUgMkgyMnY5LjVoLTkuNXpNMiAxMi41aDkuNVYyMkgyek0xMi41IDEyLjVIMjJWMjJoLTkuNXoiLz48L3N2Zz4K"> <img src="https://img.shields.io/badge/OpenGL-renderer-blue?logo=opengl"></p>
+# Midnight Club 3: ReDUB
 
-The original Xbox release of *Midnight Club 3: DUB Edition* and *Midnight Club 3: DUB Edition Remix*, recompiled and lifted instruction by instruction to C with [xboxrecomp](https://github.com/sp00nznet/xboxrecomp) and compiled natively for the Nintendo Switch, Linux, macOS and Windows without the requirement of emulation.
+A Windows-focused community edition of **Midnight Club 3: DUB Edition Remix**, built on [mcdub3-nx](https://github.com/laureladastra/mcdub3-nx) and [xboxrecomp](https://github.com/sp00nznet/xboxrecomp).
 
-Organised after the release of [nfsu2-sw](https://github.com/antoxa2584x/nfsu2-sw), whose Switch layer has been a great inspiration for this toolkit.
+ReDUB combines a portable setup launcher, native in-game Port Options, graphics adjustments, Xbox controller support, and optional PC music integration.
 
-> [!WARNING]
-> **No game data is included.** You need your own copy of the Xbox disc.
->
+**Bring your own original Xbox Remix game files. No disc image, game assets, soundtrack, or saves are included.** This project is unofficial and is not affiliated with Rockstar Games, Take-Two, or Microsoft.
 
-## ✨ Status
+## Which game files do I need?
 
-The Switch build can play towards the end until 100% career progress. Playing requires maximum overclock with the game running at 20-25 FPS of the game's maximum 30 FPS. Improvements are focused on performance.
+Use **Midnight Club 3: DUB Edition Remix for the original Xbox** (the first Xbox console). Supply your own supported Xbox ISO/XISO disc dump, or the complete extracted Xbox disc folder containing `default.xbe` and all remaining game data.
 
-<p align="center"><img src="assets/switch.png" alt="Midnight Club 3: DUB Edition" width="450"></p>
+**PS2/PCSX2 images, the non-Remix DUB Edition, and Nintendo Switch NSP/XCI/NRO files are not compatible inputs.** Xbox 360/One/Series controller support does not change the required source game. Upstream Switch builds are an output platform, not a source disc format.
 
+Use only game files you are legally authorized to use. Where permitted, these may come from your own disc backup; applicable law and license terms vary. ReDUB does not provide game downloads or permission to redistribute copyrighted game data. Its source-code license does not license the game's executable, assets, or soundtrack.
 
-<hr>
+## Quick start
 
-Playing on Mac or Linux, 30 FPS is consistently achieved with 5x upscale settings (close to 4K) support. Improvements are focused on graphics and minor bug fixes.
+1. Put the self-contained **ReDUB Launcher.exe** in the writable folder where you want to install and build, such as `D:\Games\ReDUB`. It includes artwork and setup source and restores missing setup files beside itself. A full source checkout also works.
+2. Open **ReDUB Launcher.exe**. From source without that executable, open **Launch ReDUB.cmd** to compile the launcher using Windows' .NET Framework compiler.
+3. For a new installation, select your **original Xbox DUB Edition Remix ISO** or complete extracted Xbox folder.
+4. Choose **Build / Repair**. The first build installs missing tools, extracts or copies game data, converts game code, and compiles the Windows executable. Internet access is required for missing dependencies. Later builds reuse conversion and compiler caches.
+5. Choose **Play**. Open **Options → Port Options** for graphics and PC Music settings.
 
-<p align="center"><img src="assets/preview.png" alt="Midnight Club 3: DUB Edition" width="450"></p>
+An existing installation is detected automatically and can play without rebuilding. The launcher does not download games or pull source updates from GitHub.
 
-> [!WARNING]
-> Windows support is currently experimental and still being tested.
+## Launcher
 
-## Platforms
+The sidebar layout is inspired by [SafeHouse](https://github.com/FridiNaTor1/SafeHouse/tree/main/launcher/ui), with ReDUB's own code and branding.
 
-| Platform        | Support | Tested         | Hardware                              |
-| --------------- | ------- | -------------- | ------------------------------------- |
-| Nintendo Switch | ✅       | 21.0.0         | V1                                    |
-| Linux           | ✅       | Ubuntu 22.04.5 | Virtual Machine                       |
-| Mac             | ✅       | Sequoia 15.6   | M1                                    |
-| PC              | ⚠️       | Windows 11     | Virtual Machine and Intel i7 Hardware |
+| Page | Purpose |
+| --- | --- |
+| Game | Installation status, Play/Install, verification, repair, game folder, desktop/library shortcuts. |
+| Install | Choose Xbox Remix data, build/repair, or perform a full game-code rebuild. |
+| Settings | Display, Graphics, Controls, Music, Diagnostics, and Launcher groups. |
+| Support | Local build output, setup checks, logs, and this guide. |
+| About | Project identity, features, limitations, and upstream credits. |
 
-## Supported Editions
+Enable **Settings → Launcher → Skip launcher on startup** to start the installed game directly. This is off by default. Hold **Shift** while starting, or use **Open ReDUB Launcher.cmd**, to open the launcher again. Missing required files fall back to setup. The preference is stored separately in `launcher/preferences.ini`.
 
-| File                   | Game                               | Edition                                                 |
-| ---------------------- | ---------------------------------- | ------------------------------------------------------- |
-| mcdub3-nx-usa.nro      | Midnight Club 3: Dub Edition       | NTSC-U (English)                                        |
-| mcdub3-nx-eur.nro      | Midnight Club 3: Dub Edition       | PAL (Europe: English, French, German, Spanish, Italian) |
-| mcdub3remix-nx-usa.nro | Midnight Club 3: Dub Edition Remix | NTSC-U (English)                                        |
-| mcdub3remix-nx-eur.nro | Midnight Club 3: Dub Edition Remix | PAL (Europe: English, French, German, Spanish, Italian) |
+**Settings → Graphics → Render queue** exposes the existing renderer queue limit. One frame can reduce queued input delay; two frames is the default and may tolerate uneven rendering better. Restart to apply it. This does not unlock the original frame-rate target.
 
-## Installation
+Close the game before changing launcher game settings. During gameplay, use native Port Options for supported live changes. Launcher saves preserve comments and unrelated settings, write atomically, and retain an initial `.launcher-backup`. Graphics presets preserve HUD quality, gamma, brightness, and music preferences.
 
-### Nintendo Switch
+Setup output appears on Support. Save and close the game before installing a build. Existing game files, saves, and settings are preserved; there is no destructive reset/delete button. Move the complete installation together to retain installed game data and recreate shortcuts afterward. Moving only the launcher carries artwork and setup source, not game data. It builds in its new folder rather than using an old installation. Paths with spaces use a build-tool junction alias; files stay in the selected folder. Paths are relative and compiler caches are separated by location.
 
-Visit the [installation](https://laureladastra.github.io/mcdub3-homepage/) page for a guided experience or manually package the folder by downloading the files from our [releases](https://github.com/laureladastra/mcdub3-nx/releases) and organise the folder according to the following hierarchy:
+Optional artwork lives in `launcher/art`: `hero.jpg` or `hero.png`, `logo.png`, and `redub.ico`. Restart to reload images. Missing or unreadable images use the gradient/text fallback. See the [artwork guide and provenance](launcher/art/ARTWORK.md).
 
-```
+## Graphics and display
 
-SD card (sdmc:)
-└── switch/
-    ├── mcdub3-nx/                    ← DUB Edition
-    │   ├── mcdub3-nx-usa.nro
-    │   ├── mcdub3-nx-eur.nro
-    │   ├── game-usa/                 ← USA disc
-    │   └── game-eur/                 ← European disc
-    │
-    └── mcdub3remix-nx/               ← Dub Edition Remix
-        ├── mcdub3remix-nx-usa.nro
-        ├── mcdub3remix-nx-eur.nro
-        ├── game-usa/                 ← USA disc
-        └── game-eur/                 ← European disc
-```
+These settings are available through native **Port Options** with controller navigation. Render queue is currently launcher-only.
 
-Copy the game files to the `/game` directory within this folder. Move this folder to `sdmc:/switch/mcdub3-nx/` on the Nintendo Switch. Install the .nsp to get a plug-and-play experience.
+### Experimental Vulkan and DLSS
 
-### Android
+The original OpenGL renderer remains available. **Settings → Graphics → Graphics API** selects OpenGL or Vulkan; both renderers share Career/profile data and local Xbox system data. Its **DLSS Super Resolution** control is a familiar On/Off switch, with **Quality**, **Balanced**, and **Performance** modes. Choosing **Play** builds missing Vulkan/DLSS files automatically. All three modes passed controlled GPU evaluations on an RTX 3070. Quality, Balanced, and Performance also passed short user driving checks on that system with jitter disabled. Other GPUs/drivers and longer sessions remain unverified. If DLSS cannot initialize, Vulkan falls back to native rendering. NVIDIA runtime files are downloaded into ignored build data and are not part of the GitHub source package. Fullscreen and resolution settings are shared with Vulkan and persist across launches.
 
-1. Download the APK for your game from the [release page](https://github.com/laureladastra/mcdub3-nx/releases/tag/v1.1.0): `mcdub3-<version>.apk` for DUB Edition, `mcdub3remix-<version>.apk` for Remix. Both can be installed side by side.
-2. Open the APK on your phone to install it. Android asks you to allow installing apps from your browser or file manager; allow it. If Google Play Protect warns about an unknown app, choose **More details › Install without scanning**. The app is not on the Play Store, so Play Protect does not know it.
-3. Start the app once before the next step. The `Android/data/…/files/` folder will be created only after starting the application for the first tinme.
-4. Copy your extracted disc (the folder with `default.xbe` in it) to the app's own folder:
-   - DUB Edition: `Android/data/io.github.laureladastra.mcdub3/files/game/`
-   - Remix: `Android/data/io.github.laureladastra.mcdub3remix/files/game/`
+Vulkan now follows OpenGL for small effects-buffer scaling, render-texture padding sampling, and fixed-function texture matrices. User checks found the earlier white border and blurred right-side strip resolved, with particles and race markers animating correctly. No presentation crop is applied. DLSS jitter is temporarily disabled by default: enabling it still causes fine-detail shaking, and that investigation is deferred. See [the follow-up notes](docs/DLSS-JITTER-FOLLOWUP.md). No frame generation or higher simulation rate is included.
 
-   The app finds it there by itself and needs no extra permission. On Android 11 and newer most file managers cannot open `Android/data`, so copy it from a computer over USB. Note that Android deletes this folder, saves included, when you uninstall the app.
+| Setting | Behavior |
+| --- | --- |
+| Fullscreen | Live borderless desktop fullscreen; **F11** and **Alt+Enter** also toggle it. |
+| VSync | Off, On, Adaptive; unsupported adaptive mode falls back through SDL. |
+| Presets | Performance, Balanced, Quality, and Custom after adjustments. |
+| Render scale | 1×, 1.5×, 2×, 3×, 5×; restart required. |
+| HUD texture quality | Independent 1×, 2×, 3×, 5× upscaling; restart required. Improves existing art rather than supplying an HD asset pack. |
+| FXAA | Off, Low, Standard, High; changes live while driving. Menus/loading bypass it for sharp text, and DLSS bypasses it to avoid double anti-aliasing. |
+| Texture filtering | 1×, 4×, 16× anisotropic filtering; restart required. |
+| Sharpening | 0–100% in 25% steps, live; uses the FXAA presentation path. |
+| Gamma | 0.8–1.4, live even with FXAA off; default 1.0. |
+| Brightness | 80–120%, live even with FXAA off; default 100%. |
+| FPS overlay | Frame rate and smoothed frame-time display. |
+| Restore Graphics Defaults | Balanced graphics, HUD 2×, neutral image adjustments, FPS overlay off; music and fullscreen retained. |
 
-   **Or keep the game elsewhere:** put it at the top of your internal storage or SD card (`/sdcard/mcdub3-nx/`)
-    `sdcard/mcdub3-nx/` (Remix: `sdcard/mcdub3remix-nx/`)where it is found by itself. Alternatively you can pick any folder with **Add folder** on the start screen. Both need **All files access**, which the app asks for.
-5. Optionally choose how the on-screen gamepad behaves: **Automatic** (hidden while a controller is connected), **Always**, or **Never**. Controllers (Bluetooth pads, Joy-Cons) and keyboards work without setup.
-6. Press **Play** to start the game.
+| Preset | World scale | Filtering | Sharpening | VSync |
+| --- | --- | --- | --- | --- |
+| Performance | 1.5× | 4× | 25% | Off |
+| Balanced | 2× | 16× | 50% | Off |
+| Quality | 3× | 16× | 50% | On |
 
-If the game doesn't start, the log is `mcdub3_log.txt` (Remix: `mcdub3remix_log.txt`) in the same app folder as in step 3, one level up from `game/`. Please attach it to a bug report.
+Presets enable standard FXAA and preserve HUD quality, gamma, and brightness. Restart for scale and filtering changes; FXAA changes live. VSync Off may reduce display latency with possible tearing; no setting guarantees zero input lag.
 
-> [!WARNING]
-> **The most common mistakes are: copying the disc image (`.iso`) instead of its extracted files, or the wrong game's disc (the DUB Edition application with the Remix disc, or the other way round).** The app needs the folder of extracted files, with `default.xbe` in it. To unpack an `.iso`, use [xdvdfs](https://github.com/antangelo/xdvdfs): `xdvdfs unpack <your disc>.iso <folder>`. The wrong game's disc is refused with a message when you press **Play**.
->
+## HD texture packs
 
-### Mac
+The renderer's native replacement loader uses Xbox texture hashes and PNG files at `hd/textures/<16-digit-hash>.png`. No replacement pack is included. Replacement decoding runs on a background worker; large packs can still increase memory and loading costs. Shader caching already exists in the renderer.
 
-The Mac application can be packaged and installed by following these instructions:
+**PCSX2 texture packs do not work directly.** PS2 identifiers differ from Xbox hashes; DDS images also need conversion to PNG. Reusing artwork requires matching replacements to Xbox textures, not renaming a folder. A small mapping trial should precede a full conversion. Do not redistribute a pack without its author's permission.
 
-1. Install the Xcode command line tools (`xcode-select --install`) and
-   [Homebrew](https://brew.sh).
-2. Clone the repository and install the requirements for building the game:
+The supplied desktop folder is named `ULUS10021`: it is a **PSP** pack for *Midnight Club 3: DUB Edition*, not a PS2/PCSX2 pack or DUB Edition Remix. Its `textures.ini` uses PPSSPP quick hashes (24 hex digits); ReDUB's loader hashes the original Xbox texture bytes, format, dimensions, and palette into 16-digit filenames. It cannot identify this pack's replacements from those hashes. The original DUB Edition and Remix also differ in game content, so this is not a drop-in replacement set. No files from that pack are included in this repository. See [texture-pack compatibility](docs/TEXTURE-PACK-COMPATIBILITY.md).
 
-   ```sh
-   git clone https://github.com/laureladastra/mcdub3-nx.git
-   cd mcdub3-nx
-   make setup
-   ```
+## Controllers
 
-3. Put your extracted disc in `game/`: `default.xbe` and all the other files
-   from the disc, not the ISO. A disc extraction utility is bundled with this repo. To extract your disc you can run:
+Xbox controllers use SDL's controller mappings, including Xbox 360 and Xbox One-family devices recognized by the runtime. Windows setup preserves the tested native SDL2 runtime. Connect before launching if detection is inconsistent. Port Options uses normal controller navigation.
 
-   ```sh
-   make extract ISO=<file.iso>
-   ```
+With PC Music enabled while driving, **D-pad Left/Right** request previous/next tracks. Holding a direction sends one request. The player must expose Windows media-session skip controls. Menu navigation and normal radio behavior with PC Music off are retained.
 
-   A second edition goes beside it in `game-<edition>/`: `make extract ISO=<file.iso> EDITION=eur` unpacks the European disc into `game-eur/`, `make mac-app DISC=$PWD/game-eur` builds the app with it, and `make run EDITION=eur` plays it from the repo.
-4. Lift the game's code to C, once (10 to 20 minutes; every edition uses the same lift):
+**Settings → Controls** adjusts controller and wheel rumble strength. Raw SDL steering-wheel input is an experimental compatibility path with device/axis selection, inversion, and deadzone controls. It maps wheel steering, pedals, hats, and buttons into the game's Xbox controller input. It has not been tested across a range of physical wheels. Rumble works only when the connected device/runtime exposes it; full wheel force-feedback effects, wheel-specific shifter/clutch mappings, and per-game sensitivity curves are not implemented.
 
-   ```sh
-   make lift
-   ```
+## PC Music / Now Playing
 
-5. Build the app:
+Start Spotify, YouTube, or another Windows player normally, then enable **PC Music (Driving)**. No Spotify login or account connection is needed.
 
-   ```sh
-   make mac-app DISC=$PWD/game
-   ```
+- Audio continues through Windows; ReDUB does **not** capture and replay system audio.
+- Driving silences the game's radio/music category while retaining engine, dialogue, and effects.
+- Menus restore game music. The helper pauses the selected external session once per menu visit and resumes that exact session when driving resumes. It does not start a player that was already manually paused and avoids resuming over another playing app.
+- Failed resume requests retain ownership and retry. Start the desired player once before testing, especially after changing apps.
+- Title and artist appear for about **six seconds**. A new track triggers a fresh announcement; repeated metadata polls do not.
+- **Song Display: Radio + Fallback** prefers the native cruising radio-title area. Unsupported fonts, long titles, or unavailable HUDs use the Unicode backup. Shared routing stops native animation before fallback and suppresses muted game-radio notifications while PC Music owns the display.
+- **Song Display: Overlay** selects the backup directly.
+- **PC Music Volume** adjusts the matched player's Windows mixer session in 10% steps. This affects that app outside the game too; browser tabs may share a session. Windows master volume is unchanged.
 
-   The application file lands in `work-dub/mac_app/Midnight Club 3.app`. Drag it to your `Applications folder`. By default the app renders at scale 5 (3600x2400) with menu and HUD art at 5 too; a slower Mac plays more smoothly with lower values, for example `make mac-app SCALE=1.5 UI_SCALE=2` (see [Upscaling](#upscaling)). `SETTINGS` bakes in any other setting from the [Settings](#settings) tables as a default, space-separated: `make mac-app SETTINGS="RECOMP_GL_SHARPEN=0.3 MC3_MOVIE_VOLUME=80"`. Without `GAME`, the first start opens the folder where the app wants the disc: `~/Library/Application Support/mcdub3/game/`. Settings, saves and the log live in that `mcdub3` folder too.
+Features depend on the player's Windows metadata and transport support. Not every app/tab supports title reporting, volume matching, skip, pause, or resume. Metadata normally updates once a second; playback commands run through a background helper. Unsupported operations appear in the log.
 
-You can also play the game without making the app by running `make build run`.
+## Stability work and limitations
 
-### Linux
+Included fixes developed through local testing:
 
-The game can be run locally without packaging:
+- Native menu ownership/lifetime validation, row bounds, and build re-entry protection.
+- Port Options Back handling preserves the native input-enable flag; confirmation presses are debounced.
+- Asynchronous Windows settings dispatch avoids waiting on the window thread from guest callbacks.
+- Atomic settings saves no longer add a blank line on every adjustment.
+- OHCI DMA/guest interrupt synchronization for a captured USB descriptor race.
+- Startup vblank acknowledgement and verified GPU-fence notification recovery.
+- Bounded pushbuffer execution publishes actual GET, retains incomplete packets, and refreshes stale endpoints after ring reuse. Captured race-command replay checks cover the failure that prompted this work.
+- Career-menu music restoration after a zero-volume configuration reset.
+- Idle native message-prompt handling removes a clipped blue/white screen edge.
 
-1. Get the code and install what the build needs:
+**Windows remains experimental.** These fixes do not establish that every crash or hitch is eliminated. A later long-running local session produced invalid GPU pushbuffer jump warnings; that case remains under investigation. Multiplayer and every career event have not been exhaustively validated.
 
-   ```sh
-   git clone https://github.com/laureladastra/mcdub3-nx.git
-   cd mcdub3-nx
-   make setup
-   ```
+The original **30 FPS simulation target** remains. 60/120 FPS modes, frame generation, and ray tracing are not included.
 
-2. Put the extracted disc in `game/` (`make extract ISO=<file.iso>` from an ISO). A second edition goes in `game-<edition>/` beside it (`make extract ISO=<file.iso> EDITION=eur`) and plays with `make run EDITION=eur`.
-3. Lift the game's code to C, then build and play:
+## Requirements and troubleshooting
 
-   ```sh
-   make lift
-   make build run
-   ```
-   
-   Settings go on the command line, for example `make run RECOMP_GL_SCALE=2`. The keyboard plays as player 1 and SDL game controllers (Xbox, DualSense) are supported.
+- x64 Windows and a GPU/driver supporting the existing OpenGL renderer (OpenGL 3.3 or newer).
+- Complete supported original Xbox Remix data. Modified/unsupported executables may not match converted code.
+- A writable folder, free space for extracted data and build caches, and internet for missing dependencies.
+- Source builds use MSYS2/Clang tools. The launcher uses Windows' .NET Framework compiler, with no separate Node/Python launcher runtime download.
 
-### Windows
+Start with **Verify setup** or **Support → Check setup**. For performance, try Performance and restart; high HUD scale also increases GPU work. For controllers, check Windows recognition and retain the supplied SDL2 runtime. For music, start the desired player once and check its Windows media controls.
 
-The game can be run locally or packaged by following these instructions:
+Logs: `work-remix/logs`. Build backups: `work-remix/build-backups`. Inspect logs for personal paths/media titles before choosing to share them. Do not delete saves as a troubleshooting step.
 
-1. Copy the code to a folder without spaces in its path (e.g. `C:\Games\mcdub3-nx`):
+## Building and project layout
 
-   ```sh
-   git clone https://github.com/laureladastra/mcdub3-nx.git
-   ```
-2. Put your extracted disc (`default.xbe` and the rest) or `.iso` in the `game` folder. The installer will automatically unpack the .iso. A second edition goes in a `game-<edition>` folder beside it (`game-eur` for the European disc); `make build EDITION=eur` makes the game start that one.
-3. Double-click the installer **`install_windows.bat`**. The installer sets up [MSYS2](https://www.msys2.org) (the build tools, in `C:\msys64`) if it doesn't exist, lifts the game's code, builds it and puts a **Midnight Club 3** shortcut on the desktop. The first run takes about an hour and requires an internet connection to install the dependencies.
+See [Windows build instructions](BUILDING-WINDOWS.md). Original upstream documentation is preserved in [docs/development/UPSTREAM-README.md](docs/development/UPSTREAM-README.md).
 
-The game lives in `work\build-windows-<arch>\dist\` (`x86_64`, or `aarch64` on Windows on ARM): `mcdub3.exe` and its DLLs. Start it with the desktop shortcut or by double-clicking `mcdub3.exe`. Every build makes or refreshes the shortcut. Keep the exe in that folder (it needs its DLLs and finds the disc in the repo's `game` folder). Settings go in **`mcdub3_env.txt`** in that same folder, one `NAME=value` per line, for example `RECOMP_GL_SCALE=2`, according to the specifications in [Settings](#settings). By default the game renders at scale 5 (3600x2400) with menu and HUD art at 5 too. The keyboard plays as player 1 and SDL game controllers are supported.
+- `.portable/Launcher.cs`: launcher source.
+- `.portable/Build-Launcher.ps1`: compile launcher/create shortcuts.
+- `.portable/Build.ps1`: setup, repair, build, and prerequisite checks.
+- `src/windows_settings.c`: native options dispatch/persistence.
+- `src/windows_media.c` and `tools/windows/now_playing.ps1`: optional Windows media integration.
+- `work-remix/build-windows-x86_64/dist`: installed game/settings.
 
-For developers: `make` and the other tools come with MSYS2 and only work in its own shell, not in Command Prompt or PowerShell (there, "make" is not recognised). Double-click **`tools\windows\shell.bat`**: it opens that shell in the repo folder, for x86-64 or ARM as your PC needs (by hand: `C:\msys64\msys2_shell.cmd -clang64 -here`, or `-clangarm64` on Windows on ARM). Then the same commands as on Mac and Linux: `make setup`, `make lift`, `make build run`, `make run RECOMP_GL_SCALE=2`. `make build` also takes the app defaults, like `make mac-app`: `make build SCALE=2 UI_SCALE=3 SETTINGS="RECOMP_GL_SHARPEN=0.3"`.
+Use `-NoInstall` to stage a game build while playing. Save and close before installation. The launcher does not automatically update source or publish to GitHub.
 
-## Upscale Defaults
+## Credits and licensing
 
-| Platform                    | Default (`SCALE` / `UI_SCALE`) | How to change it                                                                                                                                                                                            |
-| --------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mac app                     | **5 / 5**                      | When building: `make mac-app SCALE=2 UI_SCALE=3`. Afterwards: `RECOMP_GL_SCALE=2` and `RECOMP_GL_UI_SCALE=3` in `~/Library/Application Support/mcdub3/mcdub3_env.txt`                                       |
-| Windows                     | **5 / 5**                      | `RECOMP_GL_SCALE=2` and `RECOMP_GL_UI_SCALE=3` in `mcdub3_env.txt` beside `mcdub3.exe` (every option is listed there, commented out). Or when building, in the MSYS2 shell: `make build SCALE=2 UI_SCALE=3` |
-| Mac or Linux, from the repo | 1 / 2                          | `make run RECOMP_GL_SCALE=2 RECOMP_GL_UI_SCALE=3`                                                                                                                                                           |
-| Nintendo Switch             | 1 / 2                          | `RECOMP_GL_SCALE=1.5` in `sdmc:/switch/mcdub3-nx/mcdub3_env.txt`; stay at `1.5` or below there                                                                                                              |
+ReDUB builds on [laureladastra/mcdub3-nx](https://github.com/laureladastra/mcdub3-nx), [sp00nznet/xboxrecomp](https://github.com/sp00nznet/xboxrecomp), and their contributors. SafeHouse inspired the launcher layout; ReDUB has its own implementation. SDL, FFmpeg, and other dependencies retain their licenses/notices. See repository license files and upstream documentation.
 
-A setting in `mcdub3_env.txt` always wins over what the app was built with.
+Game names, trademarks, executable code, soundtrack, and original artwork belong to their rights holders. Artwork provenance is documented separately; inclusion does not grant redistribution rights for third-party material. The source-code license does not license game data or texture packs.
 
-## Saves
-
-Profiles live where the Xbox kept them, in `UDATA/54540079/` inside the game folder: `game/` on Mac/Linux, `sdmc:/switch/mcdub3-nx/game/` on the Switch, `~/Library/Application Support/mcdub3/game/`, for the Mac application. Each profile is a folder with `<name>.mc3` and `SaveMeta.xbx`. A uniform structure across platforms. We added build tools to work with saves. A tool to recognize saves and import them and a tool to sync save files.
-
-**Between the Nintendo Switch and a computer.** With an FTP server running on the Switch (ftpd, sphaira, ...) and both on the same network, you can:
-
-```sh
-make save-sync-down HOST_IP=192.168.1.20   # Switch -> computer
-make save-sync-up   HOST_IP=192.168.1.20   # computer -> Switch
-
-make save-sync-down HOST_IP=192.168.1.20 GAME=remix              # the Remix's profiles
-make save-sync-down HOST_IP=192.168.1.20 GAME=remix EDITION=usa  # its USA disc's
-```
-
-On the Switch the profiles are inside the disc folder the game plays from: `game-<edition>/UDATA` when that folder is on the card (e.g. `sdmc:/switch/mcdub3remix-nx/game-eur/`), otherwise `game/UDATA`. The tool looks there by itself; on the computer it uses the disc folder `make run` would play (`game-remix-eur/` for the Remix), `EDITION=` picks another.
-
-Both commands show the direction before copying (Switch to computer, or computer to Switch) and which profiles will be created or overwritten, and ask to confirm (`YES=1` skips the question). `HOST_IP` is the Switch's address, shown by its FTP server. The port is 21 by default; for another, add it after the IP: `HOST_IP=192.168.1.20:5000`. Profiles are added or replaced, never deleted, and the receiving side is backed up to `work-dub/saves-backup/` first. `PROFILE=` syncs one profile, by folder or by name (`PROFILE=laurd`), `LIST=1` only shows both sides, `FTP_USER=`/`FTP_PASS=` if the server asks for a login (a server that requires encryption, FTPS, works too). The Mac app keeps its saves elsewhere: add `UDATA="$HOME/Library/Application Support/mcdub3/game/UDATA"` (the Remix app: `.../mcdub3remix/game/UDATA`). On a Mac, "No route to host" while `ping` works means the app you run `make` in lacks macOS's Local Network permission. It's per app (Terminal, iTerm, VS Code, VSCodium): allow it in System Settings > Privacy & Security > Local Network, then restart that app.
-
-**Importing a save from a real Xbox.** Profiles from an original Xbox, such as a memory unit dump (`.gsx`) from a save site, need re-signing first: the game calls them "damaged" otherwise. One command does both:
-
-```sh
-make import-save FILE=~/Downloads/midnight-club-3-dub-edition.gsx
-```
-
-It takes a `.gsx` or raw memory unit dump, an extracted save folder, a bare `.mc3`, or a PS2 save (`.max`, `.sps`, `.xps`) to check. Your saves are backed up to `work-dub/saves-backup/` first, and an existing profile is never overwritten (`REPLACE=1` to do so). `LIST=1` only shows what is in the file. `UDATA=<folder>` installs elsewhere, for example the Mac app's folder. For the Switch, import on a computer and copy the new folder to the SD card.
-
-An imported profile keeps its owner's settings, controller layout included. If driving or nitrous sit on the wrong buttons, pick the default layout in the game's controller options.
-
-> [!warning]
-> **PS2 saves cannot be used.**
->
-
-The PS2 release of the same game (SLUS-21029) stores its profiles in its own layout, about a third smaller than the Xbox's and with most fields elsewhere. `make import-save` reads PS2 saves and says which version they are. Saves made by this port won't load on a real Xbox.
-
-## Technical Overview
-
-| Area          | State                                                                                                                                                               |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Lift          | 21,585 functions, 2.98 M lines of C                                                                                                                                 |
-| Movies        | Bink decoded natively with FFmpeg, sound in sync, upscaled on the GPU                                                                                               |
-| Audio         | XACT sound effects and the WMA music                                                                                                                                |
-| Graphics      | OpenGL renderer: up to 3x resolution, square pixels in 16:9, 4:3 screens filled to widescreen, mipmaps and 16x anisotropic filtering, FXAA, sharpening, motion blur |
-| Texture packs | Optional HD replacements. Dumped from the game, upscaled (Real-ESRGAN), loaded in the background and DXT-compressed.                                                |
-| Input         | Nintendo Switch controllers; on Mac/Linux the keyboard and SDL pads (DualSense, Xbox). Vibration supported.                                                         |
-
-## ⚠️ &nbsp;Known Bugs
-
-* we're currently at v0.3.0, expect crashes and latency
-* driving on the Nintendo Switch runs at 18-25 frames per second.
-* a race can occasionally hang (the screen stops, the game does not crash)
-* rain introduces quite some latency during racing
-
-## ⚙️ &nbsp;Configuration
-
-Several settings can be configured for the runtime environment. These settings are `KEY=VALUE` pairs and can be configured by defining them in a text file and saving the file as `sdmc:/switch/mcdub3-nx/mcdub3_env.txt` on the Switch, one setting per line, with `#` starting a comment and excluding the setting from execution.
-
-The full list, with every setting explained and commented out at its
-default, is [switch/mcdub3_env.example.txt](switch/mcdub3_env.example.txt). The following settings are likely convenient to configure:
-
-
-### Graphics
-
-| Setting              | Default                         | What it does                                                                                                                                                        |
-| -------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RECOMP_GL_SCALE`    | `1` (Mac and Windows apps: `5`) | Rendering resolution as a multiple of the Xbox's 720x480 (0.5 to 5). `1.5` gives 1280x720, the best match for a 720p screen; higher costs frame rate on the Switch. |
-| `RECOMP_WIDESCREEN`  | `1`                             | Tells the game the TV is widescreen, so it renders 16:9 itself.                                                                                                     |
-| `RECOMP_GL_SQUARE`   | `1`                             | Shows the widescreen picture at its true shape (square pixels).                                                                                                     |
-| `RECOMP_GL_FILL`     | `1`                             | Menus and videos laid out for 4:3 fill the whole width instead of showing black side bands.                                                                         |
-| `MC3_FILL_SKIP`      | `rockstar,sdlogo,mc3intro`      | Movies that keep their original 4:3 framing (names from `game/video/`, without `.bik`).                                                                             |
-| `RECOMP_GL_ASPECT`   | *(unset)*                       | `fill` stretches the picture to the whole screen, whatever its shape.                                                                                               |
-| `RECOMP_GL_FXAA`     | `1`                             | Smooths jagged edges.                                                                                                                                               |
-| `RECOMP_GL_SHARPEN`  | `0.5`                           | Sharpening strength, from 0 (off) to 1.                                                                                                                             |
-| `RECOMP_GL_MIPS`     | `1`                             | Smoother textures in the distance, with less shimmering.                                                                                                            |
-| `RECOMP_GL_ANISO`    | `16`                            | Keeps road textures sharp at shallow angles. 1 is off, 16 the maximum.                                                                                              |
-| `RECOMP_GL_LOD_BIAS` | `-0.25`                         | Texture detail: negative is sharper, positive softer.                                                                                                               |
-| `RECOMP_GL_UI_SCALE` | `2` (Mac and Windows apps: `5`) | Draws menu and HUD art this many times larger: 1 (off) to 5, whole numbers.                                                                                         |
-
-### Input and controllers
-
-| Setting             | Default   | What it does                                                                                                                                 |
-| ------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RECOMP_PAD_LAYOUT` | `label`   | Switch: `label` maps buttons by name (Switch A = Xbox A, as the on-screen prompts say). `position` maps them by position, as on an Xbox pad. |
-| `RECOMP_NX_JOYCON`  | *(unset)* | Switch: `single` turns two detached Joy-Cons into one player each, held sideways.                                                            |
-| `RECOMP_RUMBLE`     | `1`       | Rumble.                                                                                                                                      |
-| `RECOMP_KEYBOARD`   | `1`       | Linux and macOS: the keyboard plays as player 1, alongside any connected controller.                                                         |
-
-### Performance and logging
-
-| Setting               | Default       | What it does                                                                                                                                                                                                               |
-| --------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RECOMP_GL_THREAD`    | `1` on Switch | Draws on a thread of its own.                                                                                                                                                                                              |
-| `RECOMP_PROG_PREWARM` | *(unset)*     | Shader compiling. By default the remembered shaders compile one per frame behind the legal screen. `boot` compiles them all at start (a few seconds of black); `0` compiles none ahead (stutters when each is first used). |
-| `RECOMP_FPS_LOG`      | `0`           | Writes the frame rate to the log every 10 seconds.                                                                                                                                                                         |
-| `MC3_PERF`            | *(unset)*     | Writes a performance report every N seconds: where the game waits, CPU use per thread, audio pacing.                                                                                                                       |
-| `RECOMP_QUIET`        | `1` on Switch | Fewer log lines; every line costs an SD-card write.                                                                                                                                                                        |
-
-Some settings undo a fix, for comparison only: `MC3_FENCE_FIX`,
-`MC3_FLIP_PACE`, `MC3_TRAP_HOOK`, `RECOMP_TIMER_BATCH`. Others are required
-and set by the game itself: `RECOMP_VBLANK`, `RECOMP_PB_EXEC`, `RECOMP_USB`,
-`RECOMP_AC97_READY`, `RECOMP_NET_LINK`, `RECOMP_FLIP_VBLANK` and
-`RECOMP_APU_DSP_ACK`. Leave both groups alone. The developer traces are
-described in the example file and in the source.
-
-## License
-
-The project's own code is under the MIT license ([LICENSE](LICENSE)). The vendored toolkit in `xboxrecomp/` keeps its own license ([xboxrecomp/LICENSE](xboxrecomp/LICENSE), third-party parts in `xboxrecomp/LICENSES/`). No game code or data is part of this repository.
-
-## Legal
-
-Midnight Club is a trademark of Take-Two Interactive / Rockstar Games. This is an unofficial fan project, not affiliated with or endorsed by them, Microsoft or Nintendo.
+The current feature inventory and remaining release issues are tracked in [Requested features](docs/development/REQUESTED-FEATURES.md) and the [renderer settings audit](docs/development/RENDERER-SETTINGS-AUDIT.md). Anti-aliasing offers FXAA Low, standard FXAA, and FXAA High during driving; menus and loading screens bypass it to preserve sharp text, and DLSS does not stack it. MSAA is deferred because it requires multisampled render targets, depth handling, and resolve support rather than a simple presentation toggle; SMAA is not included.

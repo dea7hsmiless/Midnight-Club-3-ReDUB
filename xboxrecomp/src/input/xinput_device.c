@@ -14,6 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+static WORD rumble_scale(WORD value)
+{
+    static int strength=-1;
+    if(strength<0){const char *v=getenv("MC3_RUMBLE_STRENGTH");strength=v?atoi(v):100;if(strength<0)strength=0;if(strength>200)strength=200;}
+    {unsigned scaled=((unsigned)value*(unsigned)strength+50u)/100u;return (WORD)(scaled>65535u?65535u:scaled);}
+}
+
 /* ======================================================================== */
 #if defined(_WIN32) && !defined(XBOXRECOMP_SDL_HOST)
 /* ====================  XInput backend  ================================== */
@@ -217,8 +224,8 @@ DWORD xbox_InputSetState(DWORD dwPort, const XBOX_VIBRATION *pVibration)
     if (dwPort >= XBOX_MAX_CONTROLLERS || !pVibration)
         return ERROR_DEVICE_NOT_CONNECTED;
 
-    xi_vib.wLeftMotorSpeed = pVibration->wLeftMotorSpeed;
-    xi_vib.wRightMotorSpeed = pVibration->wRightMotorSpeed;
+    xi_vib.wLeftMotorSpeed = rumble_scale(pVibration->wLeftMotorSpeed);
+    xi_vib.wRightMotorSpeed = rumble_scale(pVibration->wRightMotorSpeed);
     return XInputSetState(dwPort, &xi_vib);
 }
 
@@ -258,6 +265,65 @@ DWORD xbox_InputGetCapabilities(DWORD dwPort, DWORD dwFlags, XBOX_INPUT_CAPABILI
 static SDL_GameController *g_pads[XBOX_MAX_CONTROLLERS];
 static BOOL  g_controller_connected[XBOX_MAX_CONTROLLERS];
 static DWORD g_packet[XBOX_MAX_CONTROLLERS];
+#if defined(_WIN32) && defined(XBOXRECOMP_SDL_HOST)
+static SDL_Joystick *g_wheel;
+static int wheel_enabled(void){const char *v=getenv("MC3_WHEEL");return v&&*v=='1';}
+static int wheel_device(void){const char *v=getenv("MC3_WHEEL_DEVICE");return v&&strcmp(v,"auto")?atoi(v):-1;}
+static int wheel_setting(const char *key,int fallback){const char *v=getenv(key);int n=v?atoi(v):fallback;return n<0?fallback:n;}
+static int wheel_invert(const char *key){const char *v=getenv(key);return v&&*v=='1';}
+static int wheel_rumble_strength(void){const char *v=getenv("MC3_WHEEL_RUMBLE");int n=v?atoi(v):100;return n<0?0:n>200?200:n;}
+static void wheel_open(void)
+{
+    if(!wheel_enabled()){if(g_wheel){SDL_JoystickClose(g_wheel);g_wheel=NULL;}return;}
+    if(g_wheel&&!SDL_JoystickGetAttached(g_wheel)){fprintf(stderr,"  [INPUT] raw wheel removed\n");SDL_JoystickClose(g_wheel);g_wheel=NULL;}
+    if(!g_wheel){
+        int count=SDL_NumJoysticks(),selected=wheel_device(),candidate=-1;
+        if(selected>=0&&selected<count)candidate=selected;
+        else {
+            for(int i=0;i<count;i++)if(SDL_JoystickGetDeviceType(i)==SDL_JOYSTICK_TYPE_WHEEL){candidate=i;break;}
+            if(candidate<0)for(int i=0;i<count;i++)if(!SDL_IsGameController(i)){
+                SDL_Joystick *probe=SDL_JoystickOpen(i);int axes=probe?SDL_JoystickNumAxes(probe):0;if(probe)SDL_JoystickClose(probe);
+                if(axes>=3){candidate=i;break;}
+            }
+        }
+        if(candidate>=0){SDL_Joystick *j=SDL_JoystickOpen(candidate);if(j&&SDL_JoystickNumAxes(j)>=3){g_wheel=j;fprintf(stderr,"  [INPUT] raw wheel: %s (%d axes, %d buttons)\n",SDL_JoystickName(j)?SDL_JoystickName(j):"?",SDL_JoystickNumAxes(j),SDL_JoystickNumButtons(j));}else if(j)SDL_JoystickClose(j);}
+    }
+    if(g_wheel){
+        SDL_JoystickID wid=SDL_JoystickInstanceID(g_wheel);
+        for(int slot=0;slot<XBOX_MAX_CONTROLLERS;slot++)if(g_pads[slot]&&SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pads[slot]))==wid){SDL_GameControllerClose(g_pads[slot]);g_pads[slot]=NULL;g_controller_connected[slot]=FALSE;}
+        g_controller_connected[0]=TRUE;
+    }
+}
+static SHORT wheel_steer(void)
+{
+    int axis=wheel_setting("MC3_WHEEL_STEER_AXIS",0),v=0,dead=wheel_setting("MC3_WHEEL_DEADZONE",1638);
+    if(dead>32766)dead=32766;
+    if(axis<SDL_JoystickNumAxes(g_wheel))v=SDL_JoystickGetAxis(g_wheel,axis);
+    if(wheel_invert("MC3_WHEEL_STEER_INVERT"))v=-v;
+    if(v> -dead&&v<dead)return 0;
+    if(v>0)v=(v-dead)*32767/(32767-dead);else v=(v+dead)*32768/(32768-dead);
+    if(v>32767)v=32767;if(v< -32768)v=-32768;return (SHORT)v;
+}
+static BYTE wheel_pedal(const char *key,int fallback,const char *invert)
+{
+    int axis=wheel_setting(key,fallback),v=0;if(axis<SDL_JoystickNumAxes(g_wheel))v=SDL_JoystickGetAxis(g_wheel,axis);
+    if(wheel_invert(invert))v=-v;if(v< -32768)v=-32768;if(v>32767)v=32767;return (BYTE)((v+32768)>>8);
+}
+static void wheel_state(XBOX_INPUT_STATE *pState)
+{
+    static const WORD mapped[]={0,0,0,0,0,0,XBOX_GAMEPAD_BACK,XBOX_GAMEPAD_START,XBOX_GAMEPAD_LEFT_THUMB,XBOX_GAMEPAD_RIGHT_THUMB};
+    memset(pState,0,sizeof *pState);pState->dwPacketNumber=++g_packet[0];SDL_JoystickUpdate();
+    pState->Gamepad.sThumbLX=wheel_steer();
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_RTRIGGER]=wheel_pedal("MC3_WHEEL_THROTTLE_AXIS",1,"MC3_WHEEL_THROTTLE_INVERT");
+    pState->Gamepad.bAnalogButtons[XBOX_BUTTON_LTRIGGER]=wheel_pedal("MC3_WHEEL_BRAKE_AXIS",2,"MC3_WHEEL_BRAKE_INVERT");
+    for(int i=0;i<SDL_JoystickNumButtons(g_wheel)&&i<16;i++)if(SDL_JoystickGetButton(g_wheel,i)){
+        if(i<4)pState->Gamepad.bAnalogButtons[i]=255;
+        if(i>=6&&i<(int)(sizeof mapped/sizeof mapped[0]))pState->Gamepad.wButtons|=mapped[i];
+        if(i==4)pState->Gamepad.bAnalogButtons[XBOX_BUTTON_BLACK]=255;if(i==5)pState->Gamepad.bAnalogButtons[XBOX_BUTTON_WHITE]=255;
+    }
+    if(SDL_JoystickNumHats(g_wheel)>0){Uint8 h=SDL_JoystickGetHat(g_wheel,0);if(h&SDL_HAT_UP)pState->Gamepad.wButtons|=XBOX_GAMEPAD_DPAD_UP;if(h&SDL_HAT_DOWN)pState->Gamepad.wButtons|=XBOX_GAMEPAD_DPAD_DOWN;if(h&SDL_HAT_LEFT)pState->Gamepad.wButtons|=XBOX_GAMEPAD_DPAD_LEFT;if(h&SDL_HAT_RIGHT)pState->Gamepad.wButtons|=XBOX_GAMEPAD_DPAD_RIGHT;}
+}
+#endif
 
 /* Open the attached game controllers into free ports, closing any that
  * went away. Called at start and again every second while a port is
@@ -266,6 +332,9 @@ static DWORD g_packet[XBOX_MAX_CONTROLLERS];
 static void open_controllers(void)
 {
     int i, slot;
+#if defined(_WIN32) && defined(XBOXRECOMP_SDL_HOST)
+    wheel_open();
+#endif
     for (slot = 0; slot < XBOX_MAX_CONTROLLERS; slot++)
         if (g_pads[slot] && !SDL_GameControllerGetAttached(g_pads[slot])) {
             fprintf(stderr, "  [INPUT] pad %d: %s removed\n", slot + 1,
@@ -280,6 +349,9 @@ static void open_controllers(void)
         if (!SDL_IsGameController(i))
             continue;
         id = SDL_JoystickGetDeviceInstanceID(i);
+#if defined(_WIN32) && defined(XBOXRECOMP_SDL_HOST)
+        if(g_wheel&&id==SDL_JoystickInstanceID(g_wheel))continue;
+#endif
         for (slot = 0; slot < XBOX_MAX_CONTROLLERS; slot++)
             if (g_pads[slot]
                 && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pads[slot])) == id)
@@ -312,7 +384,11 @@ static void open_controllers(void)
                 continue;
         }
 #endif
+#if defined(_WIN32) && defined(XBOXRECOMP_SDL_HOST)
+        for (slot = g_wheel?1:0; slot < XBOX_MAX_CONTROLLERS && g_pads[slot]; slot++) { }
+#else
         for (slot = 0; slot < XBOX_MAX_CONTROLLERS && g_pads[slot]; slot++) { }
+#endif
         if (slot == XBOX_MAX_CONTROLLERS)
             break;
         if ((g_pads[slot] = SDL_GameControllerOpen(i)) != NULL) {
@@ -409,6 +485,9 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
 
     if (dwPort == 0 && xbox_host_on_main())
         input_poll_devices();
+#if defined(_WIN32) && defined(XBOXRECOMP_SDL_HOST)
+    if(dwPort==0&&g_wheel&&SDL_JoystickGetAttached(g_wheel)){g_controller_connected[0]=TRUE;wheel_state(pState);return ERROR_SUCCESS;}
+#endif
     SDL_GameController *c = g_pads[dwPort];
     if (!c || !SDL_GameControllerGetAttached(c)) {
 #if !defined(__SWITCH__)
@@ -427,6 +506,7 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
         }
 #endif
         g_controller_connected[dwPort] = FALSE;
+        memset(pState,0,sizeof *pState);
         return ERROR_DEVICE_NOT_CONNECTED;
     }
 
@@ -497,13 +577,20 @@ DWORD xbox_InputSetState(DWORD dwPort, const XBOX_VIBRATION *pVibration)
                        pVibration->wRightMotorSpeed);
     return ERROR_SUCCESS;
 #else
+#if defined(_WIN32) && defined(XBOXRECOMP_SDL_HOST) && SDL_VERSION_ATLEAST(2,0,18)
+    if(dwPort==0&&g_wheel){int strength=wheel_rumble_strength();unsigned l=((unsigned)pVibration->wLeftMotorSpeed*(unsigned)strength+50u)/100u,r=((unsigned)pVibration->wRightMotorSpeed*(unsigned)strength+50u)/100u;if(l>65535u)l=65535u;if(r>65535u)r=65535u;if(SDL_JoystickRumble(g_wheel,(Uint16)l,(Uint16)r,1000)==0)return ERROR_SUCCESS;return ERROR_DEVICE_NOT_CONNECTED;}
+#endif
     SDL_GameController *c = g_pads[dwPort];
     if (!c) return ERROR_DEVICE_NOT_CONNECTED;
 
     /* SDL rumble needs a duration; refresh for ~1s on each call (the game
      * polls vibration continuously). */
-    SDL_GameControllerRumble(c, pVibration->wLeftMotorSpeed,
-                             pVibration->wRightMotorSpeed, 1000);
+    if(SDL_GameControllerRumble(c, rumble_scale(pVibration->wLeftMotorSpeed),
+                             rumble_scale(pVibration->wRightMotorSpeed), 1000)!=0){
+        static unsigned reported;
+        if(reported++<4)SDL_Log("Controller vibration failed on port %u: %s",(unsigned)dwPort,SDL_GetError());
+        return ERROR_DEVICE_NOT_CONNECTED;
+    }
     return ERROR_SUCCESS;
 #endif
 }
@@ -519,8 +606,12 @@ DWORD xbox_InputGetCapabilities(DWORD dwPort, DWORD dwFlags, XBOX_INPUT_CAPABILI
     (void)dwFlags;
     if (dwPort >= XBOX_MAX_CONTROLLERS || !pCaps)
         return ERROR_DEVICE_NOT_CONNECTED;
-    if (!g_pads[dwPort])
+    if (!g_pads[dwPort]) {
+#if defined(_WIN32) && defined(XBOXRECOMP_SDL_HOST)
+        if(dwPort==0&&g_wheel){memset(pCaps,0,sizeof *pCaps);pCaps->Type=1;pCaps->SubType=0x10;return ERROR_SUCCESS;}
+#endif
         return ERROR_DEVICE_NOT_CONNECTED;
+    }
 
     memset(pCaps, 0, sizeof(XBOX_INPUT_CAPABILITIES));
     pCaps->Type    = 1;   /* XINPUT_DEVTYPE_GAMEPAD */

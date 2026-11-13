@@ -225,7 +225,7 @@ void nv2a_pb_resync(uint32_t get_phys)
     s_in_call = 0;
 }
 
-void nv2a_pb_scan(uint32_t put_phys)
+uint32_t nv2a_pb_scan(uint32_t put_phys)
 {
     const uint8_t *mem = (const uint8_t *)xbox_GetMemoryOffset();
     uint32_t put = put_phys & PB_PHYS_MASK;
@@ -234,13 +234,18 @@ void nv2a_pb_scan(uint32_t put_phys)
     if (s_exec_enabled < 0)
         s_exec_enabled = getenv("RECOMP_PB_EXEC") != NULL;
     if (!(s_exec_enabled || getenv("RECOMP_PB_SCAN")))
-        return;
+        return put;
     if (s_get == 0xFFFFFFFFu) {               /* never resynced: start at PUT */
         s_get = put;
-        return;
+        return s_get;
     }
 
-    while (s_get != put) {
+    for (;;) {
+        /* Keep a bounded submitted batch. Following a moving PUT on every
+         * header can chase the producer across many frames before servicing
+         * the rest of the device loop. Refresh only a provably reused stop
+         * marker below. */
+        if(s_get==put)break;
         uint32_t at = s_get, target;
         uint32_t w;
 
@@ -256,7 +261,6 @@ void nv2a_pb_scan(uint32_t put_phys)
             *(volatile uint32_t *)((uint8_t *)mem + 0xFD800044u) = s_get;
 
         if (s_get >= PB_RAM_BYTES) {
-            s_get = put;
             break;
         }
         w = *(const uint32_t *)(mem + (0x80000000u | s_get));
@@ -265,14 +269,27 @@ void nv2a_pb_scan(uint32_t put_phys)
         s_hist_n++;
 
         if (++words > 0x400000u || unknown > 64) {
-            s_get = put;                      /* lost sync, or runaway */
+            /* A silently discarded stream looks like an idle GPU with a
+             * pending fence. Preserve the point and recent control flow. */
+            fprintf(stderr,"  [PB] decode abort: GET=%08X PUT=%08X word=%08X words=%u unknown=%u\n",at,put,w,words,unknown);
+            for(unsigned k=0;k<PB_HIST&&k<s_hist_n;k++){
+                unsigned i=(s_hist_n-1-k)%PB_HIST;
+                fprintf(stderr,"  [PB] abort header %08X at %08X\n",s_hist[i].w,s_hist[i].at);
+            }
+            for(unsigned k=0;k<PB_HIST&&k<s_flow_n;k++){
+                unsigned i=(s_flow_n-1-k)%PB_HIST;
+                fprintf(stderr,"  [PB] abort flow %08X at %08X -> %08X\n",s_flow[i].w,s_flow[i].at,s_flow[i].to);
+            }
+            /* Yield at the actual unexecuted header. Never report PUT as
+             * consumed after a bounded pass: the producer could reuse data
+             * whose fence and drawing methods have not executed. */
             break;
         }
         s_get = (s_get + 4) & PB_PHYS_MASK;
 
         if ((w & 0xE0000003u) == 0x20000000u) {         /* old-style jump */
             target = w & 0x1FFFFFFCu;
-            if (pb_bad_target(w, at, target, put)) { s_get = put; break; }
+            if (pb_bad_target(w, at, target, put)) { s_get=at; break; }
             pb_flow(at, w, target);
             s_get = target;
             jumps++;
@@ -280,7 +297,7 @@ void nv2a_pb_scan(uint32_t put_phys)
         }
         if ((w & 3u) == 1u) {                            /* jump */
             target = w & 0xFFFFFFFCu;
-            if (pb_bad_target(w, at, target, put)) { s_get = put; break; }
+            if (pb_bad_target(w, at, target, put)) { s_get=at; break; }
             pb_flow(at, w, target);
             s_get = target;
             jumps++;
@@ -288,7 +305,7 @@ void nv2a_pb_scan(uint32_t put_phys)
         }
         if ((w & 3u) == 2u) {                            /* call */
             target = w & 0xFFFFFFFCu;
-            if (pb_bad_target(w, at, target, put)) { s_get = put; break; }
+            if (pb_bad_target(w, at, target, put)) { s_get=at; break; }
             s_ret = s_get;
             s_in_call = 1;
             pb_flow(at, w, target);
@@ -308,6 +325,20 @@ void nv2a_pb_scan(uint32_t put_phys)
             uint32_t subch  = (w >> 13) & 7u;
             uint32_t method =  w & 0x1FFCu;
             int noninc = (w & 0xE0000000u) == 0x40000000u;
+
+            if(s_exec_enabled&&put>=s_get&&put<s_get+count*4u){
+                uint32_t live=*(volatile const uint32_t *)(mem+0xFD800040u)&PB_PHYS_MASK;
+                if(live!=put){
+                    /* The old endpoint is now payload, not a command
+                     * boundary: the producer has wrapped/reused it. */
+                    put=live;
+                }
+                if(put>=s_get&&put<s_get+count*4u){
+                    /* A partially published packet must remain available
+                     * for retry, rather than reading beyond submitted data. */
+                    s_get=at;break;
+                }
+            }
 
             for (uint32_t i = 0; i < count && s_get < PB_RAM_BYTES; i++) {
                 uint32_t m = noninc ? method : method + i * 4;
@@ -331,4 +362,5 @@ void nv2a_pb_scan(uint32_t put_phys)
     s_tot_unknown += unknown;
     s_tot_jumps += jumps;
     s_tot_segments++;
+    return s_get;
 }

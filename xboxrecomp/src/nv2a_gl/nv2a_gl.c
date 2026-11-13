@@ -42,6 +42,9 @@
 #endif
 #include <unistd.h>
 #include "gl_api.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include "gl_merge.h"       /* state-changing GL calls flush a held draw first */
@@ -3653,6 +3656,10 @@ static void gl_make_window(void *unused)
         fprintf(stderr, "  [GL] window: %s\n", SDL_GetError());
         return;
     }
+#ifdef _WIN32
+    extern void windows_port_settings_attach(SDL_Window *win);
+    windows_port_settings_attach(s_win);
+#endif
     s_ctx = SDL_GL_CreateContext(s_win);
     if (!s_ctx && nv2a_gl_es) {
         /* ES 3.1: many phones, ANGLE (the Android emulator on a Mac) */
@@ -3695,6 +3702,9 @@ static int ready(void)
             return 0;
         }
     }
+    /* Apply the user's interval at presentation, once the renderer owns the
+     * context. Enabling it during the cross-thread window/context handoff
+     * can stall the Windows NVIDIA driver before the first frame. */
     SDL_GL_SetSwapInterval(0);
     if (nv2a_gl_load(SDL_GL_GetProcAddress) != 0)
         return 0;
@@ -5409,7 +5419,13 @@ static void gl_draw_raw(const Nv2aRawBatch *b)
                 fprintf(stderr, "  [WATCH] watching %s from frame %u, up to %d draws\n",
                         watch_all ? "every draw" : w, watch_all ? watch_frame : 0, watch_max);
         }
-#if (!defined(_WIN32) || defined(XBOXRECOMP_SDL_HOST)) && !defined(__SWITCH__)
+#if defined(_WIN32)
+        if (watch_all && watch_key && watch_frame == 0xFFFFFFFFu &&
+            (GetAsyncKeyState(VK_F12)&0x8000)) {
+            watch_frame = s_frame;
+            fprintf(stderr, "  [WATCH] F12: dumping frame %u\n", watch_frame);
+        }
+#elif (!defined(_WIN32) || defined(XBOXRECOMP_SDL_HOST)) && !defined(__SWITCH__)
         if (watch_all && watch_key && watch_frame == 0xFFFFFFFFu
             && (xbox_sdl_keyboard_down(SDL_SCANCODE_F12)
                 || xbox_sdl_keyboard_down(SDL_SCANCODE_P))) {   /* P: no Fn key on a Mac */
@@ -5491,12 +5507,15 @@ static void gl_draw_raw(const Nv2aRawBatch *b)
             fprintf(stderr, "          blend %u %04X %04X alphatest %u func %X ref %u zmask %u ztest %u cmask %08X\n",
                     r[0x304 / 4], r[0x344 / 4], r[0x348 / 4], r[0x300 / 4], r[0x33C / 4], r[0x340 / 4],
                     r[0x35C / 4], r[0x30C / 4], r[0x358 / 4]);
-            s_watch_hit = 1;
+            /* Whole-frame traces need geometry/state, not synchronous GPU
+             * readbacks after every draw. Keep pixel probes for targeted
+             * surface watches only. */
+            s_watch_hit = !watch_all;
             {
                 /* Stage 0's image where v0's texcoords point, if it is a surface. */
                 GlSurf *src = surf_find(b->tex_va[0]);
                 float u0 = 0, v0 = 0;
-                if (src && (b->attr_direct & 0x200) && b->direct[9].type == 2 && b->direct[9].ptr) {
+                if (!watch_all && src && (b->attr_direct & 0x200) && b->direct[9].type == 2 && b->direct[9].ptr) {
                     uint8_t px[4];
                     int q;
                     memcpy(&u0, b->direct[9].ptr, 4);
@@ -6045,7 +6064,7 @@ void nv2a_gl_fill_hold(int delta)
 }
 
 static GLint  s_fx_rcp, s_fx_max, s_fx_sharp, s_fx_full, s_fx_crop, s_fx_band, s_fx_fill;
-static GLint  s_fx_steady;
+static GLint  s_fx_steady, s_fx_gamma, s_fx_brightness, s_fx_aa;
 static float  s_fx_sharpness = -1.0f;
 static int    s_fx_on = -1;
 
@@ -6062,6 +6081,8 @@ static int fxaa_init(void)
     static const char *fs[1] = {
         "#version 330 core\n"
         "uniform sampler2D u_tex;\n"
+        "uniform float u_gamma, u_brightness;\n"
+        "uniform int u_aa;\n"
         "uniform vec2 u_rcp;           /* one texel */\n"
         "uniform vec2 u_max;           /* last drawn texel centre */\n"
         "uniform float u_sharp;        /* CAS weight: 0 = off */\n"
@@ -6074,6 +6095,7 @@ static int fxaa_init(void)
         "in vec2 vT;\n"
         "out vec4 o;\n"
         "vec3 S(vec2 p) { return texture(u_tex, clamp(p, 0.5 * u_rcp, u_max)).rgb; }\n"
+        "vec3 displayColor(vec3 c) { return pow(clamp(c * u_brightness, 0.0, 1.0), vec3(1.0 / u_gamma)); }\n"
         "float L(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }\n"
         "float LA(vec2 p) { return L(S(p)); }\n"
         "/* Both side bands black from top to bottom: a 4:3 screen the title\n"
@@ -6091,6 +6113,7 @@ static int fxaa_init(void)
         "    vec4 R = (u_fill != 0 && filled) ? u_crop : u_full;\n"
         "    vec2 uv = vec2(mix(R.x, R.y, vT.x), mix(R.z, R.w, vT.y)), r = u_rcp;\n"
         "    vec3 cM = S(uv);\n"
+        "    if (u_aa == 0) { o = vec4(displayColor(cM), 1.0); return; }\n"
         "    float m = L(cM);\n"
         "    float n = LA(uv + vec2(0.0, -r.y)), s = LA(uv + vec2(0.0, r.y));\n"
         "    float e = LA(uv + vec2(r.x, 0.0)), w = LA(uv + vec2(-r.x, 0.0));\n"
@@ -6108,7 +6131,7 @@ static int fxaa_init(void)
         "            vec3 wt = -amp * u_sharp;         /* the negative lobe */\n"
         "            cM = clamp((cM + wt * (cn + cs + ce + cw)) / (1.0 + 4.0 * wt), 0.0, 1.0);\n"
         "        }\n"
-        "        o = vec4(cM, 1.0); return;\n"
+        "        o = vec4(displayColor(cM), 1.0); return;\n"
         "    }\n"
         "    float nw = LA(uv + vec2(-r.x, -r.y)), ne = LA(uv + vec2(r.x, -r.y));\n"
         "    float sw = LA(uv + vec2(-r.x, r.y)), se = LA(uv + vec2(r.x, r.y));\n"
@@ -6129,8 +6152,9 @@ static int fxaa_init(void)
         "    vec2 pn = p0 - dir, pp = p0 + dir;\n"
         "    float en = LA(pn) - mid, ep = LA(pp) - mid;\n"
         "    bool dn = abs(en) >= grad, dp = abs(ep) >= grad;\n"
-        "    const float Q[11] = float[](1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);\n"
-        "    for (int i = 0; i < 11 && !(dn && dp); i++) {\n"
+        "    const float Q[16] = float[](1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0,8.0,8.0,8.0,8.0,8.0);\n"
+        "    int searchSteps=u_aa==2?5:u_aa==3?16:11;\n"
+        "    for (int i = 0; i < searchSteps && !(dn && dp); i++) {\n"
         "        if (!dn) { pn -= dir * Q[i]; en = LA(pn) - mid; dn = abs(en) >= grad; }\n"
         "        if (!dp) { pp += dir * Q[i]; ep = LA(pp) - mid; dp = abs(ep) >= grad; }\n"
         "    }\n"
@@ -6147,7 +6171,7 @@ static int fxaa_init(void)
         "    off = max(off, sp * sp * 0.75);\n"
         "    vec2 f = uv;\n"
         "    if (horz) f.y += off * stp; else f.x += off * stp;\n"
-        "    o = vec4(S(f), 1.0);\n"
+        "    o = vec4(displayColor(S(f)), 1.0);\n"
         "}\n" };
     GLuint v, f;
     GLint ok = 0;
@@ -6158,8 +6182,10 @@ static int fxaa_init(void)
         s_fx_on = !(e && *e == '0');
         fprintf(stderr, "  [GL] FXAA %s (RECOMP_GL_FXAA)\n", s_fx_on ? "on" : "off");
     }
+#ifndef _WIN32
     if (!s_fx_on)
         return 0;
+#endif
     v = compile(GL_VERTEX_SHADER, vs, 1);
     f = compile(GL_FRAGMENT_SHADER, fs, 1);
     if (!v || !f) {
@@ -6186,6 +6212,9 @@ static int fxaa_init(void)
     s_fx_band = glGetUniformLocation(s_fx_prog, "u_band");
     s_fx_fill = glGetUniformLocation(s_fx_prog, "u_fill");
     s_fx_max = glGetUniformLocation(s_fx_prog, "u_max");
+    s_fx_gamma=glGetUniformLocation(s_fx_prog,"u_gamma");
+    s_fx_brightness=glGetUniformLocation(s_fx_prog,"u_brightness");
+    s_fx_aa=glGetUniformLocation(s_fx_prog,"u_aa");
     s_fx_sharp = glGetUniformLocation(s_fx_prog, "u_sharp");
     {
         /* RECOMP_GL_SHARPEN: 0..1 (default 0.5, 0 = off), AMD CAS's
@@ -6565,6 +6594,26 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
         glUniform2fv(s_fx_band, 1, band);
     }
     glUniform2fv(s_fx_max, 1, mx);
+    #ifdef _WIN32
+    {extern float windows_port_sharpen_get(void);float k=windows_port_sharpen_get();s_fx_sharpness=k>0?-1.0f/(8.0f-3.0f*k):0;}
+#endif
+    float gamma=1.0f,brightness=1.0f;
+#ifdef _WIN32
+    {extern float windows_port_gamma_get(void),windows_port_brightness_get(void);gamma=windows_port_gamma_get();brightness=windows_port_brightness_get();}
+#endif
+    glUniform1f(s_fx_gamma,gamma);glUniform1f(s_fx_brightness,brightness);
+    int aa_mode=s_fx_on;
+#ifdef _WIN32
+    {
+        extern int windows_port_fxaa_get(void),windows_media_gameplay_get(void);
+        static int previous_mode=-1;
+        /* Final-image FXAA softens native menu text and loading artwork.
+         * Keep it confined to the 3D driving state. */
+        aa_mode=windows_media_gameplay_get()?windows_port_fxaa_get():0;
+        if(aa_mode!=previous_mode){fprintf(stderr,"  [GL] active presentation FXAA mode %d\n",aa_mode);previous_mode=aa_mode;}
+    }
+#endif
+    glUniform1i(s_fx_aa,aa_mode);
     glUniform1f(s_fx_sharp, -s_fx_sharpness);   /* 1 / mix(8, 5, k); 0 = off */
     {
         int steady = fill && fill_steady_init();
@@ -6643,6 +6692,8 @@ static void gl_blit(const Nv2aBlit *b)
     dst->vw_frame = s_frame;
     ft_note(dst->va, 'b');
 }
+
+#include "port_overlay.h"
 
 static void gl_flip(void)
 {
@@ -6891,6 +6942,27 @@ swap:
     }
     gl_step_done("present");
     pf_start();
+#ifdef _WIN32
+    {
+        extern int windows_port_vsync_get(void);
+        static int previous_interval=99;
+        /* Let SDL/NVIDIA finish the initial cross-thread window handoff
+         * before requesting a blocking swap interval. */
+        int interval=s_frame<120?0:windows_port_vsync_get();
+        if(interval!=previous_interval) {
+            int applied=interval;
+            if(SDL_GL_SetSwapInterval(interval)!=0) {
+                applied=interval<0?1:0;
+                SDL_GL_SetSwapInterval(applied);
+            }
+            fprintf(stderr,"  [GL] VSync requested %d, applied %d\n",interval,applied);
+            previous_interval=interval;
+        }
+    }
+#endif
+#ifdef _WIN32
+    port_overlay_draw();
+#endif
     SDL_GL_SwapWindow(s_win);
     gq_frame_end();
     s_mg_fb_draw = s_mg_fb_read = 0xFFFFFFFFu;   /* whatever the swap did */

@@ -1265,10 +1265,11 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
             static uint32_t last_put;
             DWORD now_ms = GetTickCount();
             uint32_t put = *(volatile uint32_t *)((char *)regs + NV2A_USER_DMA_PUT);
-            if (put != last_put || (now_ms - last_put_ms) > 2000) {
+            uint32_t current_get=*(volatile uint32_t *)((char *)regs+NV2A_USER_DMA_GET);
+            if (put != last_put || current_get!=put || (now_ms - last_put_ms) > 2000) {
                 /* Survey the segment the title just submitted, once. */
                 {
-                    extern void nv2a_pb_scan(uint32_t);
+                    extern uint32_t nv2a_pb_scan(uint32_t);
                     extern void nv2a_pb_scan_report(void);
                     static DWORD last_report;
 
@@ -1297,7 +1298,8 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
                      * (depth function, and so on) sent before it. */
                     if (get_written == 0xFFFFFFFFu || get_now != get_written)
                         nv2a_pb_resync(get_now);
-                    if (put != last_put) {
+                    uint32_t consumed=get_now;
+                    if (put != last_put || get_now!=put) {
                         /* Executor load over the last second (see
                          * nv2a_exec_busy_percent): the share of wall time
                          * spent executing pushbuffer commands. Near 100%
@@ -1307,7 +1309,7 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
                         LARGE_INTEGER a, b;
                         if (!f.QuadPart) { QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t_last); }
                         QueryPerformanceCounter(&a);
-                        nv2a_pb_scan(put);
+                        consumed=nv2a_pb_scan(put);
                         QueryPerformanceCounter(&b);
                         busy += b.QuadPart - a.QuadPart;
                         if (b.QuadPart - t_last.QuadPart > f.QuadPart) {
@@ -1316,9 +1318,10 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
                             t_last = b;
                         }
                     }
-                    /* Consumed: now the space before PUT may be reused. */
-                    *(volatile uint32_t *)((char *)regs + NV2A_USER_DMA_GET) = put;
-                    get_written = put;
+                    /* Publish only the position actually executed, including
+                     * a bounded/incomplete pass or a live PUT advance. */
+                    *(volatile uint32_t *)((char *)regs + NV2A_USER_DMA_GET) = consumed;
+                    get_written = consumed;
                     /* Periodic, because what the title submits at init is not
                      * what it submits once it is drawing a menu, and the
                      * question the survey answers is about the latter. */
@@ -1326,13 +1329,6 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
                         last_report = now_ms;
                         nv2a_pb_scan_report();
                     }
-                }
-                /* Consumed, now that it has actually been executed. */
-                {
-                    volatile uint32_t *get =
-                        (volatile uint32_t *)((char *)regs
-                                              + NV2A_USER_DMA_GET);
-                    *get = put;
                 }
                 last_put = put; last_put_ms = now_ms;
                 /* GET as well as PUT. A title that stops submitting has either

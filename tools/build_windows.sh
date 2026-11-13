@@ -94,6 +94,11 @@ rm -rf "$DIST"; mkdir -p "$DIST"
 cp "$BUILD/$MC3_APP.exe" "$DIST/"
 "$PY" "$MC3_REPO/tools/windows/copy_dlls.py" "$DIST/$MC3_APP.exe" "${DLL_DIRS[@]}" "$DIST"
 
+# Prefer the tested native SDL2 runtime: sdl2-compat failed to enumerate the Xbox BLE controller on this PC.
+if [ -f "$MC3_WORK/deps/sdl2-native/SDL2.dll" ]; then
+    cp "$MC3_WORK/deps/sdl2-native/SDL2.dll" "$DIST/SDL2.dll"
+fi
+
 # Settings, later wins: mcdub3_defaults.txt (this build's SCALE / SETTINGS,
 # rewritten every build), then mcdub3_env.txt (the player's: kept across
 # builds, made once from the documented template, every option commented).
@@ -133,9 +138,10 @@ printf '%s\r\n' \
   | sed -e "s/mcdub3-nx/$MC3_SD_DIR/g" -e "s/mcdub3\([._]\)/$MC3_APP\1/g" > "$DIST/run_$MC3_APP.bat"   # the Remix: mcdub3remix
 # On Windows: a desktop shortcut to the exe (its own icon), made or
 # refreshed by every build -- the exe needs no launcher (src/windows_host.c).
-if [ "$MC3_HOST" = windows ]; then
+if [ "$MC3_HOST" = windows ] && [ "${MC3_NO_DESKTOP_SHORTCUT:-0}" != 1 ]; then
     EXE_W="$(cygpath -w "$DIST/$MC3_APP.exe")"; DIST_W="$(cygpath -w "$DIST")"
     powershell.exe -NoProfile -Command "\$s = (New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop') + '\\$MC3_SHORT_NAME.lnk'); \$s.TargetPath = '$EXE_W'; \$s.WorkingDirectory = '$DIST_W'; \$s.IconLocation = '$EXE_W'; \$s.Save()" \
         && echo "desktop shortcut: $MC3_SHORT_NAME -> $EXE_W" || echo "(no desktop shortcut)"
 fi
+cp "$MC3_REPO/tools/windows/now_playing.ps1" "$DIST/now_playing.ps1"
 echo "built $DIST/$MC3_APP.exe   (double-click it, the desktop shortcut, or make run)"

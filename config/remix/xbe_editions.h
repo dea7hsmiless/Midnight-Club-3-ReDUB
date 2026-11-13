@@ -19,4 +19,4 @@
  * variant number in edition_variants.json (main.c sets
  * g_recomp_xbe_variant; any other edition is 0). */
 #define MC3_XBE_VARIANTS(V) \
-    V("usa", 1)
+    V("eur", 1)

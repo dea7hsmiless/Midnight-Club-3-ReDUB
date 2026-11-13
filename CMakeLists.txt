@@ -95,7 +95,7 @@ if(NINTENDO_SWITCH)
     list(APPEND MC3_SOURCES src/switch_nx.c)
 endif()
 if(WIN32)
-    list(APPEND MC3_SOURCES src/windows_host.c)   # settings, disc, log when double-clicked
+    list(APPEND MC3_SOURCES src/windows_host.c src/windows_settings.c src/windows_media.c)
 endif()
 if(ANDROID)
     list(APPEND MC3_SOURCES src/android_host.c)   # folder, settings, log (ADR 0010)
@@ -111,6 +111,9 @@ else()
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "${MC3_APP}")
 endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE xboxrecomp)
+if(WIN32)
+    target_link_libraries(${PROJECT_NAME} PRIVATE gdi32 ole32 uuid)
+endif()
 target_compile_definitions(${PROJECT_NAME} PRIVATE MC3_APP="${MC3_APP}" MC3_SD_DIR="${MC3_SD_DIR}"
     MC3_GAME_TITLE="${MC3_GAME_TITLE}" MC3_DISC_PREFIX="${MC3_DISC_PREFIX}")
 # Version (config/<game>/app.env) and build ID (CI: the run; locally "local"),

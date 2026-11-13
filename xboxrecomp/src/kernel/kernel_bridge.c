@@ -2149,6 +2149,15 @@ static DWORD kdisp_timeout_ms(uint32_t timeout_va)
  * variable; host handles are polled with a zero-timeout wait. The sleep is
  * capped so a host handle, or a SignalState the title stored itself, is
  * noticed within a few milliseconds even though neither signals the CV. */
+/* A title may register a hardware completion predicate around its own fence
+ * wait. The event is only a notification; verified hardware completion is
+ * authoritative if that notification was lost. Unregistered waits are intact. */
+typedef int (*KernelWaitRecheck)(uint32_t object);
+static RECOMP_TLS KernelWaitRecheck t_wait_recheck;
+KernelWaitRecheck xbox_kernel_wait_recheck_set(KernelWaitRecheck fn)
+{
+    KernelWaitRecheck old=t_wait_recheck;t_wait_recheck=fn;return old;
+}
 static NTSTATUS kdisp_wait(uint32_t count, const uint32_t *vas,
                            const HANDLE *hosts, int wait_all, DWORD ms)
 {
@@ -2158,6 +2167,12 @@ static NTSTATUS kdisp_wait(uint32_t count, const uint32_t *vas,
     kdisp_init();
     EnterCriticalSection(&g_kdisp_cs);
     for (;;) {
+        if(count==1&&!wait_all&&vas[0]&&t_wait_recheck){
+            LeaveCriticalSection(&g_kdisp_cs);
+            int completed=t_wait_recheck(vas[0]);
+            EnterCriticalSection(&g_kdisp_cs);
+            if(completed){LeaveCriticalSection(&g_kdisp_cs);return STATUS_SUCCESS;}
+        }
         if (wait_all) {
             uint32_t ready = 0;
             for (i = 0; i < count; i++) {

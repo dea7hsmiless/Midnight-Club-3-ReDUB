@@ -48,3 +48,17 @@ TODO.md
 /switch/mcdub3remix_env.txt
 # Personal HD texture packs (beside game/; see hd_pack.c): never committed.
 /hd/
+
+# Generated Windows launcher binaries (build from .portable/Launcher.cs).
+/ReDUB Launcher.exe
+/.ReDUB Launcher.next.exe
+/.redub-launcher-build/
+/launcher-settings-test.exe
+
+# Local launcher preferences and temporary policy test.
+/launcher/preferences.ini
+/launcher/preferences.ini.tmp
+/launcher-bypass-test.exe
+/.redub-source-manifest.txt
+/.redub-source-manifest.txt.tmp
+/*.redub-new

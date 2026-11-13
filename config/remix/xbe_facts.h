@@ -3,11 +3,11 @@
 
 #define MC3_XBE_ENTRY_POINT 0x0001299Fu
 #define MC3_XBE_TITLE_ID    0x54540079u
-#define MC3_XBE_TITLE_NAME  "Midnight Club 3: DUB edition"
+#define MC3_XBE_TITLE_NAME  "Midnight Club 3: DUB Edition Remix"
 
 /* The disc this lift fits: checked at boot (src/main.c). */
 #define MC3_XBE_SIZE        5099520u
-#define MC3_XBE_FNV64       0x4438fd3ef9473ce0ull
-#define MC3_XBE_REGION      0x4u
-#define MC3_XBE_VERSION     0x6u
-#define MC3_EDITION         "eur"
+#define MC3_XBE_FNV64       0x193d6b1219ccbd63ull
+#define MC3_XBE_REGION      0x7u
+#define MC3_XBE_VERSION     0x5u
+#define MC3_EDITION         "region7"

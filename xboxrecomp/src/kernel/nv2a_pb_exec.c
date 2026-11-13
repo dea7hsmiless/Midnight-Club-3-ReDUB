@@ -435,6 +435,8 @@ uint8_t *nv2a_pb_reg_dirty(void) { return s_reg_dirty; }
 static float reg_f(uint32_t method) { float f; memcpy(&f, &s_reg[method / 4], 4); return f; }
 
 static uint32_t s_sem_va;
+static uint32_t s_sem_last_release;
+uint32_t nv2a_pb_last_fence_release(void) { return __atomic_load_n(&s_sem_last_release,__ATOMIC_ACQUIRE); }
 static uint32_t s_vtx_epoch;            /* Nv2aRawBatch.vtx_epoch */
 void nv2a_pb_set_semaphore_target(uint32_t guest_va) { s_sem_va = guest_va; }
 
@@ -4304,6 +4306,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
     if (method == 0x1D70 && s_sem_va) {
         uint8_t *mem = (uint8_t *)xbox_GetMemoryOffset();
         *(volatile uint32_t *)(mem + s_sem_va) = param;
+        __atomic_store_n(&s_sem_last_release,param,__ATOMIC_RELEASE);
         return;
     }
     /* The pattern object's SET_MONOCHROME_COLOR0 (0x0310) latches into
