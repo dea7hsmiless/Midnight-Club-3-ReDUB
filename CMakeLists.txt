@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.20)
 #
 # Hosts: Linux (GCC, SDL2 + OpenGL or Vulkan; the day-to-day debug build) and
 # Nintendo Switch homebrew (devkitA64 + libnx, built with switch/build.sh).
-# Layout and workflow: README.md, CLAUDE.md, docs/decisions/.
+# Windows setup and workflow: README.md and BUILDING-WINDOWS.md.
 # ============================================================================
 
 project(mcdub3 C)
@@ -16,7 +16,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
 
 set(XBOXRECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/xboxrecomp" CACHE PATH
-    "xboxrecomp toolkit (vendored; see docs/decisions/0002)")
+    "xboxrecomp toolkit (vendored; see README.md for project credits)")
 
 # Which game: dub (Midnight Club 3: DUB Edition) or remix (DUB Edition
 # Remix). Each has its own config/<game>/ (XBE facts, editions, seeds,

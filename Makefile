@@ -4,7 +4,7 @@
 #   make lift       first lift (or after reinstalling the disc)
 #   make build run  the everyday loop
 #
-# Two games (ADR 0006): GAME=dub (DUB Edition, the default) or GAME=remix
+# Two games: GAME=dub (DUB Edition, the default) or GAME=remix
 # (DUB Edition Remix), e.g. make lift build run GAME=remix. Each has its own
 # config/<game>/, src/games/<game>/, discs (game[-remix][-<edition>]/) and
 # work folder (work-dub/, work-remix/).

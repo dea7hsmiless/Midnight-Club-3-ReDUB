@@ -62,7 +62,7 @@ These settings are available through native **Port Options** with controller nav
 
 The original OpenGL renderer remains available. **Settings → Graphics → Graphics API** selects OpenGL or Vulkan; both renderers share Career/profile data and local Xbox system data. Its **DLSS Super Resolution** control is a familiar On/Off switch, with **Quality**, **Balanced**, and **Performance** modes. Choosing **Play** builds missing Vulkan/DLSS files automatically. All three modes passed controlled GPU evaluations on an RTX 3070. Quality, Balanced, and Performance also passed short user driving checks on that system with jitter disabled. Other GPUs/drivers and longer sessions remain unverified. If DLSS cannot initialize, Vulkan falls back to native rendering. NVIDIA runtime files are downloaded into ignored build data and are not part of the GitHub source package. Fullscreen and resolution settings are shared with Vulkan and persist across launches.
 
-Vulkan now follows OpenGL for small effects-buffer scaling, render-texture padding sampling, and fixed-function texture matrices. User checks found the earlier white border and blurred right-side strip resolved, with particles and race markers animating correctly. No presentation crop is applied. DLSS jitter is temporarily disabled by default: enabling it still causes fine-detail shaking, and that investigation is deferred. See [the follow-up notes](docs/DLSS-JITTER-FOLLOWUP.md). No frame generation or higher simulation rate is included.
+Vulkan now follows OpenGL for small effects-buffer scaling, render-texture padding sampling, and fixed-function texture matrices. User checks found the earlier white border and blurred right-side strip resolved, with particles and race markers animating correctly. No presentation crop is applied. DLSS jitter is disabled by default because it caused fine-detail shaking in local testing. No frame generation or higher simulation rate is included.
 
 | Setting | Behavior |
 | --- | --- |
@@ -149,7 +149,7 @@ Logs: `work-remix/logs`. Build backups: `work-remix/build-backups`. Inspect logs
 
 ## Building and project layout
 
-See [Windows build instructions](BUILDING-WINDOWS.md). Original upstream documentation is preserved in [docs/development/UPSTREAM-README.md](docs/development/UPSTREAM-README.md).
+See [Windows build instructions](BUILDING-WINDOWS.md). ReDUB builds on the [mcdub3-nx project](https://github.com/laureladastra/mcdub3-nx) and the [xboxrecomp toolkit](https://github.com/sp00nznet/xboxrecomp).
 
 - `.portable/Launcher.cs`: launcher source.
 - `.portable/Build-Launcher.ps1`: compile launcher/create shortcuts.
@@ -166,4 +166,4 @@ ReDUB builds on [laureladastra/mcdub3-nx](https://github.com/laureladastra/mcdub
 
 Game names, trademarks, executable code, soundtrack, and original artwork belong to their rights holders. Artwork provenance is documented separately; inclusion does not grant redistribution rights for third-party material. The source-code license does not license game data or texture packs.
 
-The current feature inventory and remaining release issues are tracked in [Requested features](docs/development/REQUESTED-FEATURES.md) and the [renderer settings audit](docs/development/RENDERER-SETTINGS-AUDIT.md). Anti-aliasing offers FXAA Low, standard FXAA, and FXAA High during driving; menus and loading screens bypass it to preserve sharp text, and DLSS does not stack it. MSAA is deferred because it requires multisampled render targets, depth handling, and resolve support rather than a simple presentation toggle; SMAA is not included.
+Anti-aliasing offers FXAA Low, standard FXAA, and FXAA High during driving; menus and loading screens bypass it to preserve sharp text, and DLSS does not stack it. MSAA is not included because it requires multisampled render targets, depth handling, and resolve support; SMAA is not included.

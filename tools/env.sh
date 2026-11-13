@@ -3,7 +3,7 @@
 # Every path is relative to the repo root, found from this file's location, so
 # the scripts work from anywhere (e.g. `bash tools/first_lift.sh` in the root).
 #
-# Two games share the repo (ADR 0006): GAME=dub (Midnight Club 3: DUB
+# Two games share the repo: GAME=dub (Midnight Club 3: DUB
 # Edition, the default) and GAME=remix (DUB Edition Remix). Per game:
 #
 #   config/<game>/         xbe_facts.h, xbe_editions.h, seed_functions.json,

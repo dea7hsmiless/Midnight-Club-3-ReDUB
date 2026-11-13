@@ -17,7 +17,7 @@ Code that differs only in branch conditions (a jcc's opcode, same target)
 can share the lift too, as an edition variant: the lifter emits both
 conditions and the runtime picks one (config/<game>/edition_variants.json,
 MC3_XBE_VARIANTS in xbe_editions.h; the tool prints both). Any other code
-difference needs a lift of its own (docs/decisions/0005).
+difference needs a lift of its own.
 
 Found: the DUB Edition's European disc (2026-10-24), 531 header bytes
 apart, code identical; the Remix's USA disc (2026-10-25), one branch apart
@@ -109,7 +109,7 @@ def main():
         print("code that differs:")
         for line in missing + other:
             print("  " + line)
-        print("\n=> different code: this disc needs a lift of its own (docs/decisions/0005);"
+        print("\n=> different code: this disc needs a lift of its own;"
               " it cannot join the existing one as an edition.")
         return 1
     if jccs:

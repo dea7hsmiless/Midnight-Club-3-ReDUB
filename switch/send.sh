@@ -9,7 +9,7 @@
 # On the Switch: open the homebrew menu and press Y (netloader) first.
 #
 # nxlink is a devkitPro tool, so like the build it runs from the pinned image
-# (switch/devkitpro-image, ADR 0004). --network host because nxlink finds the
+# (switch/devkitpro-image). --network host because nxlink finds the
 # console by UDP broadcast and, with -s, waits for the game to connect back
 # and stream its stdout/stderr: both need the host's own network, not
 # Docker's. That also means the VM must sit on the console's network
