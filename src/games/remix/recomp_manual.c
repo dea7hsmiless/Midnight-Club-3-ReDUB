@@ -2546,14 +2546,9 @@ void sub_000D1010(void)
     }
     sub_000D1010_gen();
 }
-/* sub_0001BDF0 uses this non-Flash HUD for cruising: local player -> HUD
- * owner -> text manager, slot 24. Resolve it anew on every tick. */
-extern void sub_000B4980(void);
-extern void sub_000B6330(void);
-extern void sub_000B3550(void);
-/* The original soundtrack also posts slot-24 announcements even when its
- * volume is zero. PC Music owns the title while driving, including fallback
- * tracks; keep the original notifications in menus and with PC Music off. */
+/* The soundtrack posts generic slot-24 announcements even when muted. Skip
+ * only those while PC Music is active in gameplay; normal game notifications
+ * and all original announcements remain available elsewhere. */
 extern void sub_0001BDF0_gen(void);
 void sub_0001BDF0(void)
 {
@@ -2562,25 +2557,6 @@ void sub_0001BDF0(void)
         return;
     }
     sub_0001BDF0_gen();
-}
-static uint32_t port_media_slot(uint32_t *manager,uint32_t *buffer)
-{
-    uint32_t pool=MEM32(0x558814u);
-    if(!port_ram(pool,12))return 0;
-    uint32_t player=MEM32(pool+8);
-    if(!port_ram(player,0x5C))return 0;
-    uint32_t owner=MEM32(player+0x58);
-    if(!port_ram(owner,0x54))return 0;
-    uint32_t m=MEM32(owner+0x50);
-    if(!port_ram(m,0x300)||!MEM8(m+0x84))return 0;
-    uint32_t slot=MEM32(m+0xC+24*4);
-    if(!port_ram(slot,0x8C)||MEM32(slot)!=0x44F6D0u)return 0;
-    uint32_t b=MEM32(slot+0x84),queue=MEM32(slot+0x10);
-    /* This title slot is constructed with a 100-wchar allocation. Validate
-     * the allocator's recorded 200-byte size before touching the text. */
-    if(queue>=32||!port_ram(m,0x8C+(queue+1)*0xAC)||
-       !port_ram(b,200)||!port_ram(b-16,16)||MEM32(b-12)!=200)return 0;
-    *manager=m;*buffer=b;return slot;
 }
 /* The native font covers printable ASCII. Decompose accented Latin letters
  * and omit unsupported glyphs; retain the Unicode overlay when no meaningful
@@ -2602,31 +2578,6 @@ static int port_media_native_text(const wchar_t *source,wchar_t *dest,size_t cap
         if(first)memmove(dest,dest+first,(n-first+1)*sizeof *dest);
     }
     return meaningful;
-}
-static int port_media_cruising_title(const wchar_t *song,int visible)
-{
-    static uint32_t previous_slot;static wchar_t previous[100];
-    uint32_t manager=0,buffer=0,slot=port_media_slot(&manager,&buffer);
-    size_t n=wcslen(song);int supported=visible&&windows_port_music_hud_get()&&n>0&&n<90;
-    for(size_t i=0;i<n;i++)if(song[i]<32||song[i]>126)supported=0;
-    if(!slot||!supported){
-        if(slot&&slot==previous_slot){
-            MEM16(buffer)=0;
-            port_push(24);port_push(0);g_ecx=manager;sub_000B4980();
-            /* Queued text is copied by B39F0/B6330. Clearing the source
-             * buffer alone cannot remove an already-running announcement. */
-            port_push(0);g_ecx=slot;sub_000B3550();
-        }
-        previous_slot=0;previous[0]=0;return 0;
-    }
-    if(slot!=previous_slot||wcscmp(previous,song)){
-        for(size_t i=0;i<=n;i++)MEM16(buffer+2*i)=(uint16_t)song[i];
-        port_push(24);port_push(0);g_ecx=manager;sub_000B4980();
-        port_push(0);port_push(0);port_push(24);port_push(0);g_ecx=manager;sub_000B6330();
-        previous_slot=slot;wcscpy(previous,song);
-        fprintf(stderr,"[MEDIA] song banner sent to cruising radio HUD (slot 24)\n");
-    }
-    return 1;
 }
 static void port_media_frame(void)
 {
@@ -2670,9 +2621,7 @@ static void port_media_frame(void)
     wchar_t text[512]={0};int visible=windows_media_banner_get(text,512),native=0;
     const wchar_t *track=!wcsncmp(text,L"NOW PLAYING: ",13)?text+13:text;
     wchar_t native_song[512]={0};int have_native=port_media_native_text(track,native_song,512);
-    int cruising=port_media_cruising_title(native_song,gameplay&&visible&&have_native);
-    native=cruising;
-    if(gameplay&&visible&&hud_ready&&!cruising){
+    if(gameplay&&visible&&hud_ready){
         const wchar_t *song=native_song;
         char utf8[150];int bytes=WideCharToMultiByte(CP_UTF8,0,song,-1,utf8,sizeof utf8,NULL,NULL);
         int supported=have_native&&bytes>0&&windows_port_music_hud_get();
@@ -2689,7 +2638,7 @@ static void port_media_frame(void)
             native=1;
         }
     }
-    if(shown&&(!native||!visible||cruising)){
+    if(shown&&(!native||!visible)){
         if(hud_ready&&movie==previous_movie){
             MEM8(hud+0x198D)=0;
             port_push(hud+0x198D);port_push(0x459D3Cu);port_push(0);g_ecx=movie;sub_001395E0();
