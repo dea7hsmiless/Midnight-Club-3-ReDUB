@@ -1525,6 +1525,14 @@ static uint64_t tex_full_hash(const GlTex *t)
 }
 
 static int s_hd_off;                         /* the driver refused compressed uploads */
+static GLuint hd_upload(const HdTex *h, uint32_t *bytes);
+
+static int hd_title_logo(uint64_t key)
+{
+    return key == UINT64_C(0x22762f0e2f14cca4)
+        || key == UINT64_C(0x851e07656bc1c45f)
+        || key == UINT64_C(0x7680ba077867b3e3);
+}
 
 static void tex_hd(GlTex *t)
 {
@@ -1545,10 +1553,37 @@ static void tex_hd(GlTex *t)
             hd_pack_dump(key, s_decode, (int)t->w, (int)t->h);
     }
     if (!s_hd_off && hd_pack_has(key)) {
-        /* Decoded, mipmapped and compressed on hd_pack's worker; the
-         * original is drawn until hd_drain uploads the result. */
+        /* The title logo appears briefly during its transition. Load only
+         * these three known logo replacements before the first draw so the
+         * original doesn't flash for a frame while the worker catches up. */
         t->hd_key = key;
         t->hd_pending = 1;
+        if (hd_title_logo(key)) {
+            HdTex *h = hd_pack_load_sync(key);
+            if (h) {
+                uint32_t bytes;
+                int levels = h->levels;
+                GLuint id = hd_upload(h, &bytes);
+                hd_pack_tex_free(h);
+                if (id) {
+                    if (t->hd)
+                        glDeleteTextures(1, &t->hd);
+                    t->hd = id;
+                    t->hd_ui = 0;
+                    t->hd_hash = t->hash;
+                    t->hd_mips = levels > 1;
+                    t->hd_pending = 0;
+                    tex_account(t, bytes);
+                    s_new_obj = 1;
+                    return;
+                }
+                fprintf(stderr, "  [GL] HD pack: title-logo upload refused; using original\n");
+                t->hd_pending = 0;
+                s_hd_off = 1;
+                return;
+            }
+        }
+        /* Other replacements remain decoded and compressed on the worker. */
         hd_pack_request(key);
     }
 }

@@ -24,6 +24,7 @@ typedef struct HdTex {
     struct HdTex  *next;
 } HdTex;
 void   hd_pack_request(uint64_t key);
+HdTex *hd_pack_load_sync(uint64_t key);       /* renderer-thread preload for title logos */
 HdTex *hd_pack_poll(void);                  /* NULL when none is ready */
 void   hd_pack_tex_free(HdTex *t);
 

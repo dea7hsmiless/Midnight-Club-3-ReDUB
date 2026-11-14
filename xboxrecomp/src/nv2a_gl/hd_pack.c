@@ -209,14 +209,22 @@ static unsigned char *mip_down(const unsigned char *src, int w, int h, int *nw, 
     if (!d)
         return NULL;
     for (y = 0; y < h2; y++)
-        for (x = 0; x < w2; x++)
-            for (c = 0; c < 4; c++) {
+        for (x = 0; x < w2; x++) {
                 int x0 = x * 2 < w ? x * 2 : w - 1, x1 = x * 2 + 1 < w ? x * 2 + 1 : w - 1;
                 int y0 = y * 2 < h ? y * 2 : h - 1, y1 = y * 2 + 1 < h ? y * 2 + 1 : h - 1;
-                int sum = src[((size_t)y0 * w + x0) * 4 + c] + src[((size_t)y0 * w + x1) * 4 + c]
-                        + src[((size_t)y1 * w + x0) * 4 + c] + src[((size_t)y1 * w + x1) * 4 + c];
-                d[((size_t)y * w2 + x) * 4 + c] = (unsigned char)((sum + 2) / 4);
-            }
+                const unsigned char *p[4] = {
+                    src + ((size_t)y0 * w + x0) * 4, src + ((size_t)y0 * w + x1) * 4,
+                    src + ((size_t)y1 * w + x0) * 4, src + ((size_t)y1 * w + x1) * 4
+                };
+                int asum = p[0][3] + p[1][3] + p[2][3] + p[3][3];
+                size_t di = ((size_t)y * w2 + x) * 4;
+                d[di + 3] = (unsigned char)((asum + 2) / 4);
+                for (c = 0; c < 3; c++) {
+                    int premul = p[0][c] * p[0][3] + p[1][c] * p[1][3]
+                               + p[2][c] * p[2][3] + p[3][c] * p[3][3];
+                    d[di + c] = asum ? (unsigned char)((premul + asum / 2) / asum) : 0;
+                }
+        }
     *nw = w2;
     *nh = h2;
     return d;
@@ -294,6 +302,15 @@ static HdTex *load_compressed(uint64_t key)
         return NULL;
     }
     return t;
+}
+
+/* The title animation draws its logo only briefly. If it uses the ordinary
+ * background request, one frame of the original logo can show before the
+ * worker finishes. The caller uses this only for the three known title-logo
+ * hashes, on the renderer thread, to avoid that one-frame flash. */
+HdTex *hd_pack_load_sync(uint64_t key)
+{
+    return load_compressed(key);
 }
 
 static void *worker_main(void *arg)

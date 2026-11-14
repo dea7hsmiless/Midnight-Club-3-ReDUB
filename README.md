@@ -89,7 +89,7 @@ Presets enable standard FXAA and preserve HUD quality, gamma, and brightness. Re
 
 ## HD texture packs
 
-The renderer's native replacement loader uses Xbox texture hashes and PNG files at `hd/textures/<16-digit-hash>.png`. No replacement pack is included. Replacement decoding runs on a background worker; large packs can still increase memory and loading costs. Shader caching already exists in the renderer.
+The renderer's native replacement loader uses Xbox texture hashes and PNG files at `hd/textures/<16-digit-hash>.png`. This source includes a small optional ReDUB title/menu logo set at the three matching hashes. It uses the custom ReDUB logo artwork supplied by the maintainer; no original game textures or disc data are included. The loader finds `hd/` beside the player's `game-remix/` folder automatically. Other replacement packs are not included. Large packs can increase memory and loading costs.
 
 
 ## Controllers

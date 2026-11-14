@@ -13,4 +13,4 @@ ReDUB's current OpenGL texture replacement loader looks for PNGs named by a 16-d
 3. Preserve selected replacements as PNG and create a mapping to the corresponding Xbox hash filenames.
 4. Test transparency, mipmaps, and in-game use; keep the pack outside the source repository unless redistribution rights are clear.
 
-This is a manual asset-matching task, not an automatic hash conversion. A partial pack could be useful for shared art such as logos or some vehicles, but compatibility and visual correctness must be confirmed per texture. The pack itself is not redistributed here.
+This is a manual asset-matching task, not an automatic hash conversion. A partial pack could be useful for shared art such as logos or some vehicles, but compatibility and visual correctness must be confirmed per texture. The PSP pack itself is not redistributed. A separate, small ReDUB logo replacement set is included under `hd/textures`; it contains the maintainer-supplied custom logo art only, not PSP, Xbox, or other original game textures.
