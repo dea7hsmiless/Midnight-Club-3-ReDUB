@@ -123,26 +123,43 @@ void windows_port_setting_change(int id)
     if(!hwnd||!PostMessageA(hwnd,WM_APP+0x331,(WPARAM)id,0))
         fprintf(stderr,"[PORT] could not queue setting %d (Windows error %lu)\n",id,GetLastError());
 }
+/* Match the game's mixed-case Options labels. Keep entries compact so
+ * the native Xbox list does not truncate long descriptions. */
 void windows_port_setting_label(int id,char *out,size_t size)
 {
     int n=windows_port_vsync_get();
-    if(id==0) snprintf(out,size,"FULLSCREEN: %s",fullscreen?"ON":"OFF");
-    if(id==1) snprintf(out,size,"VSYNC: %s",n<0?"ADAPTIVE":n?"ON":"OFF");
-    if(id==2) snprintf(out,size,"RENDER SCALE: %sX (RESTART)",values[scale_index]);
-    if(id==3){const char *names[]={"OFF","FXAA","FXAA LOW","FXAA HIGH"};snprintf(out,size,"ANTI-ALIASING: %s",names[fxaa>=0&&fxaa<=3?fxaa:1]);}
-    if(id==4) snprintf(out,size,"FILTERING: %dX (RESTART)",aniso);
-    if(id==5){const char *names[]={"CUSTOM","PERFORMANCE","BALANCED","QUALITY"};snprintf(out,size,"PRESET: %s (RESTART)",names[preset]);}
-    if(id==6) snprintf(out,size,"SHARPENING: %d%%",sharp*25);
-    if(id==7) snprintf(out,size,"FPS OVERLAY: %s",overlay?"ON":"OFF");
-    if(id==8) snprintf(out,size,"RESTORE GRAPHICS DEFAULTS");
-    if(id==9) snprintf(out,size,"PC MUSIC (DRIVING): %s",pc_music?"ON":"OFF");
-    if(id==10){int n=windows_media_volume_get();if(n<0)snprintf(out,size,"PC MUSIC VOLUME: AUTO");else snprintf(out,size,"PC MUSIC VOLUME: %d%%",n);}
-    if(id==11)snprintf(out,size,"SONG DISPLAY: %s",music_hud?"RADIO + FALLBACK":"OVERLAY");
-    if(id==12)snprintf(out,size,"HUD TEXTURES: %sX (RESTART)",hud_values[hud_index]);
-    if(id==13)snprintf(out,size,"GAMMA: %.1f",windows_port_gamma_get());
-    if(id==14)snprintf(out,size,"BRIGHTNESS: %d%%",80+brightness_index*5);
-    if(id==15)snprintf(out,size,"CONTROLLER VIBRATION: %d%% (RESTART)",atomic_load(&rumble_strength));
-
+    if(!out||!size)return;
+    out[0]=0;
+    switch(id){
+    case 0: snprintf(out,size,"Fullscreen: %s",fullscreen?"On":"Off");break;
+    case 1: snprintf(out,size,"VSync: %s",n<0?"Adaptive":n?"On":"Off");break;
+    case 2: snprintf(out,size,"Render Scale: %sx (Restart)",values[scale_index]);break;
+    case 3: {
+        const char *names[]={"Off","FXAA","FXAA Low","FXAA High"};
+        snprintf(out,size,"Anti-Aliasing: %s",names[fxaa>=0&&fxaa<=3?fxaa:1]);break;
+    }
+    case 4: snprintf(out,size,"Texture Filtering: %dx (Restart)",aniso);break;
+    case 5: {
+        const char *names[]={"Custom","Performance","Balanced","Quality"};
+        snprintf(out,size,"Graphics Preset: %s (Restart)",names[preset>=0&&preset<=3?preset:0]);break;
+    }
+    case 6: snprintf(out,size,"Sharpening: %d%%",sharp*25);break;
+    case 7: snprintf(out,size,"FPS Overlay: %s",overlay?"On":"Off");break;
+    case 8: snprintf(out,size,"Restore Graphics Defaults");break;
+    case 9: snprintf(out,size,"PC Music: %s",pc_music?"On":"Off");break;
+    case 10: {
+        int volume=windows_media_volume_get();
+        if(volume<0)snprintf(out,size,"PC Music Volume: Auto");
+        else snprintf(out,size,"PC Music Volume: %d%%",volume);
+        break;
+    }
+    case 11: snprintf(out,size,"Song Display: %s",music_hud?"Radio + Fallback":"Overlay");break;
+    case 12: snprintf(out,size,"HUD Textures: %sx (Restart)",hud_values[hud_index]);break;
+    case 13: snprintf(out,size,"Gamma: %.1f",windows_port_gamma_get());break;
+    case 14: snprintf(out,size,"Brightness: %d%%",80+brightness_index*5);break;
+    case 15: snprintf(out,size,"Controller Vibration: %d%% (Restart)",atomic_load(&rumble_strength));break;
+    default: break;
+    }
 }
 static LRESULT CALLBACK settings_proc(HWND h,UINT msg,WPARAM w,LPARAM l)
 {
