@@ -1,6 +1,6 @@
 # ReDUB on Linux
 
-ReDUB builds from the same game and Port Options source on Windows and Linux. Linux OpenGL and native Vulkan support the native Xbox Port Options menu, graphics presets, render scale, FXAA, filtering, sharpening, FPS overlay, gamma, brightness, HUD texture scale, fullscreen/VSync, resolution, controller vibration, and the notification cleanup. Both use the Linux settings backend and final presentation pass. Graphics controls use the same `mcdub3remix_env.txt` keys as Windows; controls labeled `(RESTART)` take effect after a restart. DLSS is not available on Linux; its host integration is currently Windows-only.
+ReDUB builds from the same game and Port Options source on Windows and Linux. The Linux WIP package uses OpenGL as its supported renderer and includes the native Xbox Port Options menu, graphics presets, render scale, FXAA, filtering, sharpening, FPS overlay, gamma, brightness, HUD texture scale, fullscreen/VSync, resolution, controller vibration, notification cleanup, and the ReDUB HD logo pack. Graphics controls use the same `mcdub3remix_env.txt` keys as Windows; controls labeled `(RESTART)` take effect after a restart. DLSS and the experimental Vulkan path are not included in the Linux WIP package.
 
 Linux PC Music uses the session D-Bus and the player's MPRIS interface for track metadata, previous/next, pausing in known game menus and resuming on return to driving. The supported player must publish MPRIS; volume control is best-effort because some players do not expose a writable `Volume` property. External music stays in the desktop audio mix while the game silences its radio. No audio is captured, copied, or recorded.
 
@@ -19,7 +19,7 @@ Install prerequisites:
 GAME=remix bash tools/setup_linux.sh
 ```
 
-For the optional Vulkan build dependencies, add `--vulkan`.
+The optional Vulkan build remains available for developers with `VULKAN=1 make build`, but it is not the supported Linux WIP release path yet.
 
 ## Build and run
 
@@ -42,4 +42,4 @@ OpenGL and Vulkan build as separate Linux renderer choices. Vulkan uses native V
 
 ## WIP binary packages
 
-The GitHub WIP release includes separate `OpenGL` and `Vulkan` x86_64 archives. Extract one archive, place the legally owned Xbox Remix files in `game/` (or set `MC3_GAME_DIR`), and run `tools/run_linux.sh`. The package contains the native executable, launcher script, documentation, and optional ReDUB HD artwork only; it does not contain game code, assets, music, or saves. Install the normal SDL2/OpenGL or Vulkan, FFmpeg, and D-Bus runtime packages supplied by your distribution.
+The GitHub WIP release includes an `OpenGL` x86_64 archive. Extract it, place the legally owned Xbox Remix files in `game/` (or set `MC3_GAME_DIR`), and run `tools/run_linux.sh`. The package contains the native executable, launcher script, documentation, and ReDUB HD artwork only; it does not contain game code, assets, music, or saves. Install the normal SDL2/OpenGL, FFmpeg, and D-Bus runtime packages supplied by your distribution.

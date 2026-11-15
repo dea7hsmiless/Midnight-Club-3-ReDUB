@@ -58,7 +58,7 @@ Optional artwork lives in `launcher/art`: `hero.jpg` or `hero.png`, `logo.png`, 
 
 These settings are available through native **Port Options** with controller navigation. Render queue is currently launcher-only.
 
-The same Port Options menu and graphics settings backend are built for Windows and Linux. Linux OpenGL and native Vulkan support the shared display, FXAA, sharpening, gamma/brightness, FPS overlay, controller vibration, PC Music controls, and final presentation overlays. Linux uses MPRIS over the desktop D-Bus for track metadata, previous/next, menu pause/resume, and player volume when supported. The external player continues through the normal desktop audio mix; the game radio is muted while driving. DLSS is currently Windows-only. Linux build and WSLg test setup are documented in [BUILDING-LINUX.md](BUILDING-LINUX.md).
+The same Port Options menu and graphics settings backend are built for Windows and Linux. The Linux WIP release currently ships the OpenGL renderer, with shared display, FXAA, sharpening, gamma/brightness, FPS overlay, controller vibration, PC Music controls, final presentation overlays, and the ReDUB HD logo pack. Linux uses MPRIS over the desktop D-Bus for track metadata, previous/next, menu pause/resume, and player volume when supported. The external player continues through the normal desktop audio mix; the game radio is muted while driving. DLSS and the experimental Vulkan path remain Windows-side work and are not part of the Linux WIP package. Linux build and WSLg test setup are documented in [BUILDING-LINUX.md](BUILDING-LINUX.md).
 
 ### Experimental Vulkan and DLSS
 
