@@ -1,7 +1,7 @@
 <p align="center"><img src="launcher/art/hero.jpg" alt="Midnight Club 3 cars in a city at night" width="1200"></p>
 <p align="center"><img src="launcher/art/logo.png" alt="Midnight Club 3 ReDUB Edition" width="560"></p>
 
-<p align="center"><strong>A Windows community edition built through static recompilation.</strong><br>
+<p align="center"><strong>A Windows-focused community edition built through static recompilation.</strong><br>
 Original Xbox code translated to native C, with OpenGL and Vulkan renderers, DLSS Super Resolution, and a portable launcher.</p>
 
 <p align="center"><a href="https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/tree/main">Source</a> · <a href="https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases">Releases</a> · <a href="BUILDING-WINDOWS.md">Build from source</a></p>
