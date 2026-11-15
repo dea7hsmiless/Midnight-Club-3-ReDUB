@@ -13,9 +13,12 @@ try {
     }elseif(Test-Path -LiteralPath (Join-Path $repo 'launcher-source-manifest.json')){
         $paths=@((Get-Content -LiteralPath (Join-Path $repo 'launcher-source-manifest.json') -Raw | ConvertFrom-Json).files | ForEach-Object {$_.path})
     }else{throw 'No Git/source-bundle inventory found. Use the complete ReDUB source package.'}
+    $requiredTextures=@('hd/textures/22762f0e2f14cca4.png','hd/textures/7680ba077867b3e3.png','hd/textures/851e07656bc1c45f.png')
+    foreach($texture in $requiredTextures){if(!(Test-Path -LiteralPath (Join-Path $repo $texture))){throw "Missing required ReDUB logo texture: $texture"}}
+    $paths=@($paths + $requiredTextures) | Sort-Object -Unique
     $selected=@();$total=0
     foreach($path in $paths){
-        if($path -match '^(\.git/|source/|game(?:-[^/]*)?/|work(?:-[^/]*)?/|build[^/]*/|keys/|hd/|bugs/|drafts/)' -or $path -eq 'PORT-WORK-STATUS.md'){continue}
+        if($path -match '^(\.git/|source/|game(?:-[^/]*)?/|work(?:-[^/]*)?/|build[^/]*/|keys/|hd/(?!textures/(?:22762f0e2f14cca4|7680ba077867b3e3|851e07656bc1c45f)\.png$)|bugs/|drafts/)' -or $path -eq 'PORT-WORK-STATUS.md'){continue}
         if($path -match '(?i)\.(exe|dll|lib|obj|o|a|pdb|dmp|iso|xiso|xbe|bik|xwb|xsb|dat|wav|mp3|mp4|7z|zip|nsp|xci|nro|elf|key|keys|pem|lnk)$'){continue}
         if($path -match '(^|/)(preferences\.ini|\.env|prod\.keys)$'){continue}
         if($path -match '[\r\n]' -or [IO.Path]::IsPathRooted($path) -or $path -match '(^|/)\.\.(/|$)'){throw 'Invalid source inventory path.'}

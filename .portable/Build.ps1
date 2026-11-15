@@ -118,16 +118,18 @@ try {
         if ($file.Name -in @('mcdub3remix_env.txt','mcdub3remix_defaults.txt') -and (Test-Path -LiteralPath $target)) { continue }
         Copy-Item -LiteralPath $file.FullName -Destination $target -Force
     }
+    $logoSource = Join-Path $repo 'hd\textures'
+    $logoDest = Join-Path $dist 'hd\textures'
+    if (Test-Path -LiteralPath $logoSource) {
+        New-Item -ItemType Directory -Path $logoDest -Force | Out-Null
+        foreach ($name in @('22762f0e2f14cca4.png','7680ba077867b3e3.png','851e07656bc1c45f.png')) {
+            $logo = Join-Path $logoSource $name
+            if (Test-Path -LiteralPath $logo) { Copy-Item -LiteralPath $logo -Destination (Join-Path $logoDest $name) -Force }
+        }
+    }
     Copy-Item -LiteralPath $newExe -Destination ($installedExe + '.new') -Force
     Move-Item -LiteralPath ($installedExe + '.new') -Destination $installedExe -Force
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcuts = @((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Midnight Club 3 Remix.lnk'))
-    $libraryShortcuts = Join-Path (Split-Path -Parent $repo) 'shortcuts'
-    if (Test-Path -LiteralPath $libraryShortcuts) { $shortcuts += Join-Path $libraryShortcuts 'Midnight Club 3 Remix.lnk' }
-    foreach ($path in $shortcuts) {
-        $link = $shell.CreateShortcut($path); $link.TargetPath = $installedExe
-        $link.WorkingDirectory = $dist; $link.IconLocation = "$installedExe,0"; $link.Save()
-    }
+
     if (Test-Path -LiteralPath (Join-Path $repo 'ReDUB Launcher.exe')) {
         & (Join-Path $PSScriptRoot 'Build-Launcher.ps1') -ShortcutsOnly
     }

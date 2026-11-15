@@ -233,7 +233,8 @@ public sealed class Launcher : Form {
         string here=AppDomain.CurrentDomain.BaseDirectory;
         // A standalone launcher belongs to the folder the user put it in.
         // Never silently redirect builds or settings to a previous installation.
-        if(!IsSourceRoot(here))ExtractEmbeddedSource(here);
+        // Always update managed files when the embedded bundle changes; keep user edits.
+        ExtractEmbeddedSource(here);
         return here;
     }
     [STAThread] public static void Main(string[] args){string root;
