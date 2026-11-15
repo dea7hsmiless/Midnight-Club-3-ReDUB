@@ -23,6 +23,7 @@ static const char *hud_values[]={"1","2","3","5"};
 static atomic_int hud_index=1,gamma_index=2,brightness_index=4;
 float windows_port_gamma_get(void){return 0.8f+atomic_load(&gamma_index)*0.1f;}
 float windows_port_brightness_get(void){return 0.8f+atomic_load(&brightness_index)*0.05f;}
+static atomic_int rumble_strength=100;
 static atomic_int pc_music;
 static atomic_int music_hud=1;
 int windows_port_music_hud_get(void){return atomic_load(&music_hud);}
@@ -111,6 +112,7 @@ static void change_on_main(void *p)
     else if(id==12){int n=(hud_index+1)%4;if(save_setting("RECOMP_GL_UI_SCALE",hud_values[n]))hud_index=n;return;}
     else if(id==13){int n=(gamma_index+1)%7;char v[16];snprintf(v,sizeof v,"%.1f",0.8+n*0.1);if(save_setting("MC3_GAMMA",v))gamma_index=n;return;}
     else if(id==14){int n=(brightness_index+1)%9;char v[16];snprintf(v,sizeof v,"%.2f",0.8+n*0.05);if(save_setting("MC3_BRIGHTNESS",v))brightness_index=n;return;}
+    else if(id==15){const int strengths[]={0,50,75,100,125,150};int old=atomic_load(&rumble_strength),next=0;for(int i=0;i<6;i++)if(strengths[i]==old){next=(i+1)%6;break;}char v[16];snprintf(v,sizeof v,"%d",strengths[next]);if(save_setting("MC3_RUMBLE_STRENGTH",v))atomic_store(&rumble_strength,strengths[next]);return;}
     if(id>=1&&id<=6){preset=0;save_setting("MC3_GRAPHICS_PRESET","0");}
 }
 
@@ -139,6 +141,7 @@ void windows_port_setting_label(int id,char *out,size_t size)
     if(id==12)snprintf(out,size,"HUD TEXTURES: %sX (RESTART)",hud_values[hud_index]);
     if(id==13)snprintf(out,size,"GAMMA: %.1f",windows_port_gamma_get());
     if(id==14)snprintf(out,size,"BRIGHTNESS: %d%%",80+brightness_index*5);
+    if(id==15)snprintf(out,size,"CONTROLLER VIBRATION: %d%% (RESTART)",atomic_load(&rumble_strength));
 
 }
 static LRESULT CALLBACK settings_proc(HWND h,UINT msg,WPARAM w,LPARAM l)
@@ -168,6 +171,7 @@ void windows_port_settings_attach(SDL_Window *win)
     v=getenv("RECOMP_GL_SHARPEN");sharp=v?(int)(atof(v)*4+0.5):2;if(sharp<0)sharp=0;if(sharp>4)sharp=4;
     v=getenv("MC3_FPS_OVERLAY");overlay=v&&atoi(v)!=0;
     v=getenv("MC3_GRAPHICS_PRESET");preset=v?atoi(v):0;if(preset<0||preset>3)preset=0;
+    v=getenv("MC3_RUMBLE_STRENGTH");{int n=v?atoi(v):100;if(n<0)n=0;if(n>200)n=200;atomic_store(&rumble_strength,n);}
     v=getenv("MC3_PC_MUSIC");pc_music=v&&atoi(v)!=0;windows_media_set(pc_music);
     v=getenv("MC3_PC_MUSIC_RESTORE_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)music_restore=n;}
     v=getenv("MC3_PC_MUSIC_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)windows_media_volume_set(n);}
