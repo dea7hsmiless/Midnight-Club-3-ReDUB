@@ -153,7 +153,37 @@ public sealed class Launcher : Form {
     }
     string SettingsPath(){string selected=Path.Combine(RendererDist(root),"mcdub3remix_env.txt");if(File.Exists(selected))return selected;return PathAt("work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt");}
     public string ReadSetting(string key,string fallback){if(!File.Exists(SettingsPath()))return fallback;foreach(var raw in File.ReadAllLines(SettingsPath())){string line=raw.Trim();if(line.StartsWith(key+"=",StringComparison.Ordinal))return line.Substring(key.Length+1).Trim();}return fallback;}
-    public void SavePreference(string key,string value){string path=SettingsPath();if(!File.Exists(path))throw new IOException("Install the game before saving settings.");var edits=new Dictionary<string,string>();edits[key]=value;if(key=="MC3_GRAPHICS_PRESET"&&value!="0"){int n=int.Parse(value);edits["RECOMP_GL_SCALE"]=n==1?"1.5":n==3?"3":"2";edits["RECOMP_GL_FXAA"]="1";edits["RECOMP_GL_ANISO"]=n==1?"4":"16";edits["RECOMP_GL_SHARPEN"]=n==1?"0.25":"0.5";edits["RECOMP_GL_VSYNC"]=n==3?"1":"0";}else if(new[]{"RECOMP_GL_SCALE","RECOMP_GL_FXAA","RECOMP_GL_ANISO","RECOMP_GL_SHARPEN","RECOMP_GL_VSYNC"}.Contains(key))edits["MC3_GRAPHICS_PRESET"]="0";var lines=File.ReadAllLines(path).Where(line=>!edits.Keys.Any(k=>line.TrimStart().StartsWith(k+"=",StringComparison.Ordinal))).ToList();foreach(var e in edits)lines.Add(e.Key+"="+e.Value);string backup=path+".launcher-backup";if(!File.Exists(backup))File.Copy(path,backup);string tmp=path+".launcher-tmp";File.WriteAllLines(tmp,lines,new UTF8Encoding(false));File.Replace(tmp,path,null);Append("Saved "+key+". Applies next launch.");}
+    // Both renderers must see launcher changes, even when their distribution
+    // directories contain independent settings files. Never overwrite unrelated
+    // renderer-specific settings or a file that has not been installed yet.
+    public void SavePreference(string key,string value){
+        string selected=SettingsPath();
+        if(!File.Exists(selected))throw new IOException("Install the game before saving settings.");
+        var edits=new Dictionary<string,string>();edits[key]=value;
+        if(key=="MC3_GRAPHICS_PRESET"&&value!="0"){
+            int n=int.Parse(value);
+            edits["RECOMP_GL_SCALE"]=n==1?"1.5":n==3?"3":"2";
+            edits["RECOMP_GL_FXAA"]="1";
+            edits["RECOMP_GL_ANISO"]=n==1?"4":"16";
+            edits["RECOMP_GL_SHARPEN"]=n==1?"0.25":"0.5";
+            edits["RECOMP_GL_VSYNC"]=n==3?"1":"0";
+        }else if(new[]{"RECOMP_GL_SCALE","RECOMP_GL_FXAA","RECOMP_GL_ANISO","RECOMP_GL_SHARPEN","RECOMP_GL_VSYNC"}.Contains(key))
+            edits["MC3_GRAPHICS_PRESET"]="0";
+        var paths=new[]{selected,
+            PathAt("work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt"),
+            PathAt("work-remix/build-windows-vulkan-experimental/dist/mcdub3remix_env.txt")};
+        foreach(string path in paths.Distinct(StringComparer.OrdinalIgnoreCase)){
+            if(!File.Exists(path))continue;
+            var lines=File.ReadAllLines(path).Where(line=>!edits.Keys.Any(k=>line.TrimStart().StartsWith(k+"=",StringComparison.Ordinal))).ToList();
+            foreach(var e in edits)lines.Add(e.Key+"="+e.Value);
+            string backup=path+".launcher-backup";
+            if(!File.Exists(backup))File.Copy(path,backup);
+            string tmp=path+".launcher-tmp";
+            File.WriteAllLines(tmp,lines,new UTF8Encoding(false));
+            File.Replace(tmp,path,null);
+        }
+        Append("Saved "+key+" for installed renderers. Applies next launch.");
+    }
     void ShowSupport(){var p=Standard("Support","Support & activity","Local build and setup output. Your game and saves are never uploaded.");ButtonAt(p,"Open log folder",36,140,190,()=>Open("work-remix/logs"));ButtonAt(p,"Check setup",240,140,190,()=>Run(".portable/Build.ps1","-Mode","Doctor"));ButtonAt(p,"Read guide",444,140,190,()=>Open("README.md"));log.SetBounds(36,205,Math.Max(600,content.Width-72),Math.Max(280,content.Height-245));log.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;p.Controls.Add(log);}
     void ShowAbout(){var p=Standard("About","Midnight Club 3: ReDUB","A Windows-focused community edition of the original Xbox DUB Edition Remix.");var copy=LabelAt("Built on mcdub3-nx and xboxrecomp.\n\nNative Port Options, independent HUD quality, PC Music integration,\nand targeted controller, menu and GPU stability fixes.\n\nOriginal 30 FPS simulation\n\nNo game data is included. Use your own supported Xbox Remix disc.\nNot affiliated with Rockstar Games, Take-Two or Microsoft.\n\nLauncher design reference: SafeHouse by FridiNaTor1 and contributors.\nReDUB uses its own implementation and branding.",11,false);copy.SetBounds(38,150,790,330);p.Controls.Add(copy);ButtonAt(p,"Features & credits",36,510,230,()=>Open("README.md"));}
     string PathAt(string p){return Path.Combine(root,p.Replace('/',Path.DirectorySeparatorChar));}
