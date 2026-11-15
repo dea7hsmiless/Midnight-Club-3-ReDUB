@@ -2743,7 +2743,7 @@ static void port_title(int enter)
     if(!port_context_valid())return;
     uint32_t title=MEM32(port_self+0xC)+0x60;
     if(!port_ram(title,120))return;
-    if(enter) {if(enter==1)memcpy(port_saved_title,(void *)XBOX_PTR(title),120);memset((void *)XBOX_PTR(title),0,120);memcpy((void *)XBOX_PTR(title),"PORT OPTIONS",12);}
+    if(enter) {if(enter==1)memcpy(port_saved_title,(void *)XBOX_PTR(title),120);memset((void *)XBOX_PTR(title),0,120);memcpy((void *)XBOX_PTR(title),"Port Options",12);}
     else memcpy((void *)XBOX_PTR(title),port_saved_title,120);
     uint32_t movie=MEM32(0x50F15Cu);
     if(port_ram(movie,0xFB0) && (movie=MEM32(movie+0xFAC)) && port_ram(movie,4)) {
@@ -2764,7 +2764,7 @@ static void port_build(void)
     const int order[]={0,5,2,12,3,4,6,13,14,1,7,9,10,11,15,8};
     int settings=MEM32(port_list+0x230)>=17?16:15;
     for(int k=0;k<settings;k++){int i=order[k];port_rows[i]=port_add(0x7F00u+i,NULL);}
-    port_add(0x7F11u,"BACK");port_labels();
+    port_add(0x7F11u,"Back");port_labels();
     port_building=0;
 }
 static void port_enter(void)
@@ -2822,7 +2822,7 @@ void sub_0018D610(void)
     if(!port_context_valid()) {port_invalidate();return;}
     uint32_t page=MEM32(port_list+0x258),count=MEM32(port_list+0x238+page*4),capacity=MEM32(port_list+0x230);
     if(page>2 || count+1>capacity || MEM32(port_list+0x234)<3)return;
-    PortRegs r=port_save();port_add(0x7F10u,"PORT OPTIONS");port_restore(r);
+    PortRegs r=port_save();port_add(0x7F10u,"Port Options");port_restore(r);
 }
 void sub_00163830(void)
 {

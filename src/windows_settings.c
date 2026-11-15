@@ -23,6 +23,7 @@ static const char *hud_values[]={"1","2","3","5"};
 static atomic_int hud_index=1,gamma_index=2,brightness_index=4;
 float windows_port_gamma_get(void){return 0.8f+atomic_load(&gamma_index)*0.1f;}
 float windows_port_brightness_get(void){return 0.8f+atomic_load(&brightness_index)*0.05f;}
+static atomic_int rumble_strength=100;
 static atomic_int pc_music;
 static atomic_int music_hud=1;
 int windows_port_music_hud_get(void){return atomic_load(&music_hud);}
@@ -111,6 +112,7 @@ static void change_on_main(void *p)
     else if(id==12){int n=(hud_index+1)%4;if(save_setting("RECOMP_GL_UI_SCALE",hud_values[n]))hud_index=n;return;}
     else if(id==13){int n=(gamma_index+1)%7;char v[16];snprintf(v,sizeof v,"%.1f",0.8+n*0.1);if(save_setting("MC3_GAMMA",v))gamma_index=n;return;}
     else if(id==14){int n=(brightness_index+1)%9;char v[16];snprintf(v,sizeof v,"%.2f",0.8+n*0.05);if(save_setting("MC3_BRIGHTNESS",v))brightness_index=n;return;}
+    else if(id==15){const int strengths[]={0,50,75,100,125,150};int old=atomic_load(&rumble_strength),next=0;for(int i=0;i<6;i++)if(strengths[i]==old){next=(i+1)%6;break;}char v[16];snprintf(v,sizeof v,"%d",strengths[next]);if(save_setting("MC3_RUMBLE_STRENGTH",v))atomic_store(&rumble_strength,strengths[next]);return;}
     if(id>=1&&id<=6){preset=0;save_setting("MC3_GRAPHICS_PRESET","0");}
 }
 
@@ -121,25 +123,43 @@ void windows_port_setting_change(int id)
     if(!hwnd||!PostMessageA(hwnd,WM_APP+0x331,(WPARAM)id,0))
         fprintf(stderr,"[PORT] could not queue setting %d (Windows error %lu)\n",id,GetLastError());
 }
+/* Match the game's mixed-case Options labels. Keep entries compact so
+ * the native Xbox list does not truncate long descriptions. */
 void windows_port_setting_label(int id,char *out,size_t size)
 {
     int n=windows_port_vsync_get();
-    if(id==0) snprintf(out,size,"FULLSCREEN: %s",fullscreen?"ON":"OFF");
-    if(id==1) snprintf(out,size,"VSYNC: %s",n<0?"ADAPTIVE":n?"ON":"OFF");
-    if(id==2) snprintf(out,size,"RENDER SCALE: %sX (RESTART)",values[scale_index]);
-    if(id==3){const char *names[]={"OFF","FXAA","FXAA LOW","FXAA HIGH"};snprintf(out,size,"ANTI-ALIASING: %s",names[fxaa>=0&&fxaa<=3?fxaa:1]);}
-    if(id==4) snprintf(out,size,"FILTERING: %dX (RESTART)",aniso);
-    if(id==5){const char *names[]={"CUSTOM","PERFORMANCE","BALANCED","QUALITY"};snprintf(out,size,"PRESET: %s (RESTART)",names[preset]);}
-    if(id==6) snprintf(out,size,"SHARPENING: %d%%",sharp*25);
-    if(id==7) snprintf(out,size,"FPS OVERLAY: %s",overlay?"ON":"OFF");
-    if(id==8) snprintf(out,size,"RESTORE GRAPHICS DEFAULTS");
-    if(id==9) snprintf(out,size,"PC MUSIC (DRIVING): %s",pc_music?"ON":"OFF");
-    if(id==10){int n=windows_media_volume_get();if(n<0)snprintf(out,size,"PC MUSIC VOLUME: AUTO");else snprintf(out,size,"PC MUSIC VOLUME: %d%%",n);}
-    if(id==11)snprintf(out,size,"SONG DISPLAY: %s",music_hud?"RADIO + FALLBACK":"OVERLAY");
-    if(id==12)snprintf(out,size,"HUD TEXTURES: %sX (RESTART)",hud_values[hud_index]);
-    if(id==13)snprintf(out,size,"GAMMA: %.1f",windows_port_gamma_get());
-    if(id==14)snprintf(out,size,"BRIGHTNESS: %d%%",80+brightness_index*5);
-
+    if(!out||!size)return;
+    out[0]=0;
+    switch(id){
+    case 0: snprintf(out,size,"Fullscreen: %s",fullscreen?"On":"Off");break;
+    case 1: snprintf(out,size,"VSync: %s",n<0?"Adaptive":n?"On":"Off");break;
+    case 2: snprintf(out,size,"Render Scale: %sx (Restart)",values[scale_index]);break;
+    case 3: {
+        const char *names[]={"Off","FXAA","FXAA Low","FXAA High"};
+        snprintf(out,size,"Anti-Aliasing: %s",names[fxaa>=0&&fxaa<=3?fxaa:1]);break;
+    }
+    case 4: snprintf(out,size,"Texture Filtering: %dx (Restart)",aniso);break;
+    case 5: {
+        const char *names[]={"Custom","Performance","Balanced","Quality"};
+        snprintf(out,size,"Graphics Preset: %s (Restart)",names[preset>=0&&preset<=3?preset:0]);break;
+    }
+    case 6: snprintf(out,size,"Sharpening: %d%%",sharp*25);break;
+    case 7: snprintf(out,size,"FPS Overlay: %s",overlay?"On":"Off");break;
+    case 8: snprintf(out,size,"Restore Graphics Defaults");break;
+    case 9: snprintf(out,size,"PC Music: %s",pc_music?"On":"Off");break;
+    case 10: {
+        int volume=windows_media_volume_get();
+        if(volume<0)snprintf(out,size,"PC Music Volume: Auto");
+        else snprintf(out,size,"PC Music Volume: %d%%",volume);
+        break;
+    }
+    case 11: snprintf(out,size,"Song Display: %s",music_hud?"Radio + Fallback":"Overlay");break;
+    case 12: snprintf(out,size,"HUD Textures: %sx (Restart)",hud_values[hud_index]);break;
+    case 13: snprintf(out,size,"Gamma: %.1f",windows_port_gamma_get());break;
+    case 14: snprintf(out,size,"Brightness: %d%%",80+brightness_index*5);break;
+    case 15: snprintf(out,size,"Controller Vibration: %d%% (Restart)",atomic_load(&rumble_strength));break;
+    default: break;
+    }
 }
 static LRESULT CALLBACK settings_proc(HWND h,UINT msg,WPARAM w,LPARAM l)
 {
@@ -168,6 +188,7 @@ void windows_port_settings_attach(SDL_Window *win)
     v=getenv("RECOMP_GL_SHARPEN");sharp=v?(int)(atof(v)*4+0.5):2;if(sharp<0)sharp=0;if(sharp>4)sharp=4;
     v=getenv("MC3_FPS_OVERLAY");overlay=v&&atoi(v)!=0;
     v=getenv("MC3_GRAPHICS_PRESET");preset=v?atoi(v):0;if(preset<0||preset>3)preset=0;
+    v=getenv("MC3_RUMBLE_STRENGTH");{int n=v?atoi(v):100;if(n<0)n=0;if(n>200)n=200;atomic_store(&rumble_strength,n);}
     v=getenv("MC3_PC_MUSIC");pc_music=v&&atoi(v)!=0;windows_media_set(pc_music);
     v=getenv("MC3_PC_MUSIC_RESTORE_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)music_restore=n;}
     v=getenv("MC3_PC_MUSIC_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)windows_media_volume_set(n);}
