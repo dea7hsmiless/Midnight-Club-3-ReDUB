@@ -13,11 +13,33 @@
 #include "xinput_xbox.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
+
+static atomic_int g_rumble_strength = -1;
+
+int xbox_InputGetRumbleStrength(void)
+{
+    int strength = atomic_load(&g_rumble_strength);
+    if (strength < 0) {
+        const char *v = getenv("MC3_RUMBLE_STRENGTH");
+        strength = v ? atoi(v) : 100;
+        if (strength < 0) strength = 0;
+        if (strength > 200) strength = 200;
+        atomic_store(&g_rumble_strength, strength);
+    }
+    return strength;
+}
+
+void xbox_InputSetRumbleStrength(int percent)
+{
+    if (percent < 0) percent = 0;
+    if (percent > 200) percent = 200;
+    atomic_store(&g_rumble_strength, percent);
+}
 
 static WORD rumble_scale(WORD value)
 {
-    static int strength=-1;
-    if(strength<0){const char *v=getenv("MC3_RUMBLE_STRENGTH");strength=v?atoi(v):100;if(strength<0)strength=0;if(strength>200)strength=200;}
+    int strength = xbox_InputGetRumbleStrength();
     {unsigned scaled=((unsigned)value*(unsigned)strength+50u)/100u;return (WORD)(scaled>65535u?65535u:scaled);}
 }
 

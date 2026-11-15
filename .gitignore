@@ -62,3 +62,6 @@ TODO.md
 /.redub-source-manifest.txt
 /.redub-source-manifest.txt.tmp
 /*.redub-new
+# Local Explorer copies and ad-hoc archives are never source inputs.
+* - Copy*
+tools.zip

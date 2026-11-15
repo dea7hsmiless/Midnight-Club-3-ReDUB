@@ -99,6 +99,10 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState);
  */
 DWORD xbox_InputSetState(DWORD dwPort, const XBOX_VIBRATION *pVibration);
 
+/* Scale both vibration motors from 0 (off) to 200 (twice the game value). */
+void xbox_InputSetRumbleStrength(int percent);
+int  xbox_InputGetRumbleStrength(void);
+
 /**
  * Check if a controller is connected.
  */

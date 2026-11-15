@@ -182,7 +182,6 @@ static int temporal_scene_promote(VkSurf *s,VkDepthBuf **depth)
     vkCmdBlitImage(s_cb,source->image,VK_IMAGE_LAYOUT_GENERAL,high->image,VK_IMAGE_LAYOUT_GENERAL,2,depth_blits,VK_FILTER_NEAREST);
     high->seq++;p->motion_frame=s_frame;p->feedback_valid=0;
     barrier_all();surface_swap_resolution(s);s_temporal_presented_frame=s_frame;s->dirty=1;s->gen++;*depth=high;s_dyn_valid=0;
-    hud_diagnostic(s,"scene");
     return 1;
 }
 static void temporal_scene_evaluate(const Nv2aRawBatch *b,VkSurf *s,VkDepthBuf **depth,int post)
@@ -197,7 +196,6 @@ static void temporal_scene_evaluate(const Nv2aRawBatch *b,VkSurf *s,VkDepthBuf *
        d->pw!=s->pw||d->ph!=s->ph||s_temporal_matches<100)return;
     end_rendering();
     if(!temporal_inputs_init(s))goto fail;
-    hud_diagnostic(s,"input");
     if(!d->sample_view){
         VkImageViewCreateInfo vi={VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         vi.image=d->image;vi.viewType=VK_IMAGE_VIEW_TYPE_2D;vi.format=s_depth_fmt;

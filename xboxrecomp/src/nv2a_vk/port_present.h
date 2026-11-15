@@ -1,6 +1,6 @@
 /* Final display processing shared by native Vulkan and DLSS presentation.
  * Never modifies game render targets or their destination-alpha masks. */
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
 static struct {
     VkPipeline pipeline; VkPipelineLayout layout; VkDescriptorSetLayout set;
     VkImage image; VkImageView view; VkDeviceMemory mem; uint32_t w,h;
@@ -37,6 +37,7 @@ static void port_present_overlay(void)
     if(windows_port_overlay_get())swprintf(text,640,L"FPS: %.1f  FRAME: %.1f MS\n%ls",fps,ms,song);
     else swprintf(text,640,L"\n%ls",song);
     if(s_port_present.overlay.image&&!wcscmp(text,old))return;
+#ifdef _WIN32
     BITMAPINFO bi={0};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=1400;bi.bmiHeader.biHeight=-96;
     bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;bi.bmiHeader.biCompression=BI_RGB;
     void *pixels=NULL;HDC dc=CreateCompatibleDC(NULL);if(!dc)return;
@@ -53,6 +54,50 @@ static void port_present_overlay(void)
     if(!t->image){t->w=1400;t->h=96;make_image(t->w,t->h,VK_FORMAT_B8G8R8A8_UNORM,VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&t->image,&t->view,&t->mem);}
     if(t->image){tex_upload(t,pixels,1400*96*4,0,0);if(newline)*newline=L'\n';wcscpy(old,text);}
     SelectObject(dc,beforefont);DeleteObject(font);SelectObject(dc,before);DeleteObject(bmp);DeleteDC(dc);
+#else
+    static const unsigned char alpha[26][7]={
+        {14,17,17,31,17,17,17},{30,17,17,30,17,17,30},{14,17,16,16,16,17,14},{30,17,17,17,17,17,30},
+        {31,16,16,30,16,16,31},{31,16,16,30,16,16,16},{14,17,16,23,17,17,15},{17,17,17,31,17,17,17},
+        {14,4,4,4,4,4,14},{7,2,2,2,18,18,12},{17,18,20,24,20,18,17},{16,16,16,16,16,16,31},
+        {17,27,21,21,17,17,17},{17,25,25,21,19,19,17},{14,17,17,17,17,17,14},{30,17,17,30,16,16,16},
+        {14,17,17,17,21,18,13},{30,17,17,30,20,18,17},{15,16,16,14,1,1,30},{31,4,4,4,4,4,4},
+        {17,17,17,17,17,17,14},{17,17,17,17,17,10,4},{17,17,17,21,21,21,10},{17,17,10,4,10,17,17},
+        {17,17,10,4,4,4,4},{31,1,2,4,8,16,31}};
+    static const unsigned char digits[10][7]={
+        {14,17,19,21,25,17,14},{4,12,4,4,4,4,14},{14,17,1,2,4,8,31},{30,1,1,14,1,1,30},
+        {2,6,10,18,31,2,2},{31,16,16,30,1,1,30},{14,16,16,30,17,17,14},{31,1,2,4,8,8,8},
+        {14,17,17,14,17,17,14},{14,17,17,15,1,1,14}};
+    static uint32_t pixels[1400*96];
+    memset(pixels,0,sizeof pixels);
+    int show_fps=windows_port_overlay_get();
+    if(show_fps)for(int y=8;y<56;y++)for(int x=8;x<1408;x++)pixels[y*1400+x]=0x10000000u;
+    if(song[0])for(int y=40;y<88;y++)for(int x=8;x<1408;x++)pixels[y*1400+x]=0x10000000u;
+    const wchar_t *lines[2]={text,song};const int ys[2]={17,61};
+    for(int line=0;line<2;line++){
+        if(line==0&&!show_fps)continue;
+        const wchar_t *p=lines[line];int x=12;
+        while(*p&&x<1380){int c=(int)*p++,glyph=0;unsigned char blank[7]={0};const unsigned char *rows=blank;
+            if(c>='a'&&c<='z')c-=32;
+            if(c>='A'&&c<='Z')rows=alpha[c-'A'];
+            else if(c>='0'&&c<='9')rows=digits[c-'0'];
+            else if(c==':'){blank[2]=blank[5]=6;}
+            else if(c=='.'){blank[6]=6;}
+            else if(c=='-'){blank[3]=31;}
+            else if(c=='/'){blank[0]=1;blank[1]=2;blank[2]=2;blank[3]=4;blank[4]=8;blank[5]=8;blank[6]=16;}
+            else if(c=='?'){blank[0]=14;blank[1]=17;blank[2]=1;blank[3]=2;blank[4]=4;blank[6]=4;}
+            else if(c=='%'){blank[0]=17;blank[1]=2;blank[2]=4;blank[3]=8;blank[4]=17;}
+            else if(c!=' '){x+=12;continue;}
+            glyph=c!=' ';
+            if(glyph)for(int y=0;y<7;y++)for(int b=0;b<5;b++)if(rows[y]&(16>>b))
+                for(int sy=0;sy<2;sy++)for(int sx=0;sx<2;sx++)pixels[(ys[line]+y*2+sy)*1400+x+b*2+sx]=0xFFFFFFFFu;
+            x+=12;
+        }
+    }
+    VkTex *t=&s_port_present.overlay;
+    if(!t->image){t->w=1400;t->h=96;make_image(t->w,t->h,VK_FORMAT_B8G8R8A8_UNORM,VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,VK_IMAGE_ASPECT_COLOR_BIT,&t->image,&t->view,&t->mem);}
+    if(t->image)tex_upload(t,(const uint8_t *)pixels,sizeof pixels,0,0);
+    wcscpy(old,text);
+#endif
 }
 static VkImage port_present_process(VkSurf *source)
 {

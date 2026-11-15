@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#include "input/xinput_xbox.h"
 #ifndef MC3_APP
 #define MC3_APP "mcdub3"
 #endif
@@ -27,12 +28,15 @@ static atomic_int pc_music;
 static atomic_int music_hud=1;
 int windows_port_music_hud_get(void){return atomic_load(&music_hud);}
 static atomic_int music_restore=100;
+static atomic_int rumble_strength=100;
+static const int rumble_values[]={0,25,50,75,100,125,150,175,200};
 void windows_port_music_backup(float volume){int n=(int)(volume*100+0.5f);if(n>=0&&n<=100)music_restore=n;}
 float windows_port_music_restore(void){return music_restore/100.0f;}
 extern void windows_media_set(int enabled);
 extern int windows_media_volume_get(void),windows_media_volume_available(void);
 extern void windows_media_volume_set(int);
 int windows_port_pc_music_get(void){return atomic_load(&pc_music);}
+int windows_port_rumble_get(void){return atomic_load(&rumble_strength);}
 float windows_port_sharpen_get(void){return atomic_load(&sharp)*0.25f;}
 int windows_port_fxaa_get(void){return atomic_load(&fxaa);}
 int windows_port_overlay_get(void){return atomic_load(&overlay);}
@@ -111,6 +115,7 @@ static void change_on_main(void *p)
     else if(id==12){int n=(hud_index+1)%4;if(save_setting("RECOMP_GL_UI_SCALE",hud_values[n]))hud_index=n;return;}
     else if(id==13){int n=(gamma_index+1)%7;char v[16];snprintf(v,sizeof v,"%.1f",0.8+n*0.1);if(save_setting("MC3_GAMMA",v))gamma_index=n;return;}
     else if(id==14){int n=(brightness_index+1)%9;char v[16];snprintf(v,sizeof v,"%.2f",0.8+n*0.05);if(save_setting("MC3_BRIGHTNESS",v))brightness_index=n;return;}
+    else if(id==15){int at=4;for(int i=0;i<9;i++)if(rumble_values[i]==rumble_strength){at=i;break;}int n=rumble_values[(at+1)%9];char v[8];snprintf(v,sizeof v,"%d",n);if(save_setting("MC3_RUMBLE_STRENGTH",v)){atomic_store(&rumble_strength,n);xbox_InputSetRumbleStrength(n);}return;}
     if(id>=1&&id<=6){preset=0;save_setting("MC3_GRAPHICS_PRESET","0");}
 }
 
@@ -139,6 +144,7 @@ void windows_port_setting_label(int id,char *out,size_t size)
     if(id==12)snprintf(out,size,"HUD TEXTURES: %sX (RESTART)",hud_values[hud_index]);
     if(id==13)snprintf(out,size,"GAMMA: %.1f",windows_port_gamma_get());
     if(id==14)snprintf(out,size,"BRIGHTNESS: %d%%",80+brightness_index*5);
+    if(id==15)snprintf(out,size,"CONTROLLER VIBRATION: %d%%",rumble_strength);
 
 }
 static LRESULT CALLBACK settings_proc(HWND h,UINT msg,WPARAM w,LPARAM l)
@@ -172,6 +178,7 @@ void windows_port_settings_attach(SDL_Window *win)
     v=getenv("MC3_PC_MUSIC_RESTORE_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)music_restore=n;}
     v=getenv("MC3_PC_MUSIC_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)windows_media_volume_set(n);}
     v=getenv("MC3_PC_MUSIC_HUD");music_hud=!v||atoi(v)!=0;
+    v=getenv("MC3_RUMBLE_STRENGTH");{int n=v?atoi(v):100;if(n<0)n=0;if(n>200)n=200;atomic_store(&rumble_strength,n);xbox_InputSetRumbleStrength(n);}
     previous=(WNDPROC)SetWindowLongPtrA(hwnd,GWLP_WNDPROC,(LONG_PTR)settings_proc);
     SDL_SetWindowTitle(win,MC3_GAME_TITLE);
     v=getenv("MC3_RESOLUTION");

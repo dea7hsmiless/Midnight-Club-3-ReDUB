@@ -123,7 +123,7 @@ static VkExtent2D     s_sc_extent;
 static uint32_t       s_sc_count;
 static VkImage        s_sc_images[8];
 static int            s_headless;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
 static int s_host_attached, s_vsync_requested;
 #endif
 static int s_temporal_on,s_temporal_supported,s_temporal_jitter,s_temporal_present;
@@ -342,6 +342,14 @@ static uint32_t to_stored(uint32_t v, uint32_t p, uint32_t l)
 {
     return (uint32_t)(((uint64_t)v * p + l / 2) / l);
 }
+static uint32_t to_stored_lo(uint32_t v, uint32_t p, uint32_t l)
+{
+    return (uint32_t)((uint64_t)v * p / l);
+}
+static uint32_t to_stored_hi(uint32_t v, uint32_t p, uint32_t l)
+{
+    return (uint32_t)(((uint64_t)v * p + l - 1) / l);
+}
 static VkSurf     s_surf[VK_MAX_SURF];
 static VkDepthBuf s_depth[VK_MAX_DEPTH];
 static VkSurf    *s_last;
@@ -395,10 +403,10 @@ static void set_surface_scissor(const uint32_t *r, const VkSurf *s)
     if (x1 > s->w) x1 = s->w;
     if (y1 > s->h) y1 = s->h;
     if (x1 > x0 && y1 > y0) {
-        sc.offset.x = (int32_t)to_stored(x0, s->pw, s->w);
-        sc.offset.y = (int32_t)to_stored(y0, s->ph, s->h);
-        sc.extent.width = to_stored(x1, s->pw, s->w) - (uint32_t)sc.offset.x;
-        sc.extent.height = to_stored(y1, s->ph, s->h) - (uint32_t)sc.offset.y;
+        sc.offset.x = (int32_t)to_stored_lo(x0, s->pw, s->w);
+        sc.offset.y = (int32_t)to_stored_lo(y0, s->ph, s->h);
+        sc.extent.width = to_stored_hi(x1, s->pw, s->w) - (uint32_t)sc.offset.x;
+        sc.extent.height = to_stored_hi(y1, s->ph, s->h) - (uint32_t)sc.offset.y;
     }
     if (memcmp(&sc, &s_sc_cur, sizeof sc)) {
         vkCmdSetScissor(s_cb, 0, 1, &sc);
@@ -1031,9 +1039,26 @@ static void tex_fill(VkTex *t, uint32_t va, uint32_t layer)
                 uint32_t value=s_decode[(size_t)py*w+px];float weight=wx*wy,a=(value>>24)/255.f;
                 total+=weight;sums[3]+=a*weight;for(int c=0;c<3;c++)sums[c]+=((value>>(c*8))&255)*a*weight;
             }
-            uint32_t value=0;float alpha=total?sums[3]/total:0;if(alpha<0)alpha=0;if(alpha>1)alpha=1;
+            /* Catmull-Rom's negative lobes sharpen colour well but make alpha
+             * masks ring.  Keep colour normalization tied to the Catmull-Rom
+             * sample and derive coverage with non-negative bilinear filtering,
+             * matching the GL path and hiding rectangular HUD boundaries. */
+            float color_alpha=total?sums[3]/total:0;
+            float ax=sx;if(ax<0)ax=0;if(ax>(float)(w-1))ax=(float)(w-1);
+            float ay=sy;if(ay<0)ay=0;if(ay>(float)(h-1))ay=(float)(h-1);
+            int alx=(int)floorf(ax),aly=(int)floorf(ay);
+            int ahx=alx+1<(int)w?alx+1:alx,ahy=aly+1<(int)h?aly+1:aly;
+            float afx=ax-alx,afy=ay-aly;
+            float a00=(s_decode[(size_t)aly*w+alx]>>24)/255.f;
+            float a10=(s_decode[(size_t)aly*w+ahx]>>24)/255.f;
+            float a01=(s_decode[(size_t)ahy*w+alx]>>24)/255.f;
+            float a11=(s_decode[(size_t)ahy*w+ahx]>>24)/255.f;
+            float atop=a00+(a10-a00)*afx,abottom=a01+(a11-a01)*afx;
+            float alpha=atop+(abottom-atop)*afy;
+            if(alpha<0)alpha=0;if(alpha>1)alpha=1;
+            uint32_t value=0;
             value=(uint32_t)(alpha*255+.5f)<<24;
-            for(int c=0;c<3;c++){float v=sums[3]>.00001f?sums[c]/sums[3]:0;if(v<0)v=0;if(v>255)v=255;value|=(uint32_t)(v+.5f)<<(c*8);}
+            for(int c=0;c<3;c++){float v=color_alpha>.00001f?sums[c]/sums[3]:0;if(v<0)v=0;if(v>255)v=255;value|=(uint32_t)(v+.5f)<<(c*8);}
             scaled[(size_t)y*t->upload_w+x]=value;
         }
         tex_upload(t,scaled,(uint32_t)(count*4),0,layer);free(scaled);
@@ -2098,21 +2123,21 @@ static int create_swapchain(void)
         }
     /* Horizon's compositor does not tear in immediate mode. Desktop users
      * explicitly choose whether presentation may tear through VSync. */
-#ifdef _WIN32
     extern int windows_port_vsync_get(void);
     const char *setting=getenv("RECOMP_GL_VSYNC");
+#if defined(_WIN32) || defined(__linux__)
     int interval=s_host_attached?windows_port_vsync_get():(setting?atoi(setting):1);
+#else
+    int interval=setting?atoi(setting):1;
+#endif
     if(interval<0)
         for(i=0;i<nm;i++)if(modes[i]==VK_PRESENT_MODE_FIFO_RELAXED_KHR)mode=modes[i];
     if(interval==0) {
-#endif
     for (i = 0; i < nm; i++)
         if (modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) mode = modes[i];
     for (i = 0; i < nm && mode == VK_PRESENT_MODE_FIFO_KHR; i++)
         if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) mode = modes[i];
-#ifdef _WIN32
     }
-#endif
     s_sc_extent = caps.currentExtent;
     if (s_sc_extent.width == 0xFFFFFFFFu) {
         s_sc_extent.width = 1280;
@@ -2144,7 +2169,7 @@ static int create_swapchain(void)
     }
     s_sc_count = 8;
     vkGetSwapchainImagesKHR(s_dev, s_swapchain, &s_sc_count, s_sc_images);
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
     s_vsync_requested=interval;
 #endif
     fprintf(stderr, "  [VK] swapchain %ux%u, %u images, format %d, present mode %d\n",
@@ -2462,7 +2487,7 @@ static int ready(void)
         return 0;
     clear_image_color(s_dummy_cube_img, 0, 0, 0, 0);
     s_state = 1;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     if (s_win) {
         extern void windows_port_settings_attach(SDL_Window *);
         windows_port_settings_attach(s_win);
@@ -2470,9 +2495,19 @@ static int ready(void)
         /* Attach applies the saved size/fullscreen mode. Resolve that extent
          * before the first scene allocation chooses its DLSS output size. */
         if(!s_headless&&!create_swapchain())LOGE("could not refresh the saved display extent\n");
-        char title[128];const char *modes[]={"Off","Quality","Balanced","Performance"};
+        char title[128];
+#ifdef _WIN32
+        const char *modes[]={"Off","Quality","Balanced","Performance"};
         snprintf(title,sizeof title,"Midnight Club 3: ReDUB - Vulkan%s%s",s_temporal_present?" + DLSS ":"",s_temporal_present?modes[s_dlss_mode]:"");
+#else
+        snprintf(title,sizeof title,"Midnight Club 3: ReDUB - Vulkan");
+#endif
         SDL_SetWindowTitle(s_win,title);
+    }
+#else
+    if (s_win) {
+        if(!s_headless&&!create_swapchain())LOGE("could not refresh the saved display extent\n");
+        SDL_SetWindowTitle(s_win,"Midnight Club 3: ReDUB - Vulkan");
     }
 #endif
     fprintf(stderr, "  [VK] ready%s: BC %s, depth %s, depth clamp %s, UBO align %u\n",
@@ -2911,8 +2946,6 @@ _Static_assert(sizeof(VsBlock)==480,"Vulkan vertex uniform layout must match VsU
 
 #include "temporal_jitter.h"
 #include "temporal_history.h"
-static void hud_diagnostic(VkSurf *,const char *);
-static void border_draw_diagnostic(VkSurf *,const Nv2aRawBatch *,int);
 #include "temporal_inputs.h"
 
 typedef struct {
@@ -3207,7 +3240,6 @@ static void vk_draw_raw(const Nv2aRawBatch *b)
             break;
         }
 
-    if(postprocess)border_draw_diagnostic(s,b,-1);
     memset(&key, 0, sizeof key);
     key.prog = (int)(p - s_prog);
     if (r[0x304 / 4]) {
@@ -3380,9 +3412,6 @@ static void vk_draw_raw(const Nv2aRawBatch *b)
         vkCmdDrawIndexed(s_cb, n, 1, 0, 0, 0);
         s_st_calls++;
     }
-    border_draw_diagnostic(s,b,postprocess);
-    if(s->upscaled&&key.cmask==VK_COLOR_COMPONENT_A_BIT&&b->surface.width<s->w/2)hud_diagnostic(s,"mask");
-    if(s->upscaled&&key.blend&&key.bsrc==0x304&&!postprocess)hud_diagnostic(s,"map");
     if (s_vtrace > 0)
         s_vtrace--;
 }
@@ -3414,11 +3443,11 @@ static void vk_clear(const Nv2aSurface *sf, const Nv2aRenderState *rs,
         if (x1 > s->w) x1 = s->w;
         if (y1 > s->h) y1 = s->h;
         if (x1 > x0 && y1 > y0) {
-            uint32_t px0 = to_stored(x0, s->pw, s->w), py0 = to_stored(y0, s->ph, s->h);
+            uint32_t px0 = to_stored_lo(x0, s->pw, s->w), py0 = to_stored_lo(y0, s->ph, s->h);
             rect.rect.offset.x = (int32_t)px0;
             rect.rect.offset.y = (int32_t)py0;
-            rect.rect.extent.width = to_stored(x1, s->pw, s->w) - px0;
-            rect.rect.extent.height = to_stored(y1, s->ph, s->h) - py0;
+            rect.rect.extent.width = to_stored_hi(x1, s->pw, s->w) - px0;
+            rect.rect.extent.height = to_stored_hi(y1, s->ph, s->h) - py0;
         }
     }
     if (d && rect.rect.extent.width > d->pw - (uint32_t)rect.rect.offset.x)
@@ -3507,43 +3536,12 @@ static void dump_surface(VkSurf *s, const char *path)
     flush_frame_wait();
     if (vkMapMemory(s_dev, mem, 0, bci.size, 0, &ptr) == VK_SUCCESS) {
         dump_bmp(path, (const uint8_t *)ptr, s->pw, s->ph);
-        if(getenv("MC3_HUD_DIAG")){
-            char alpha_path[2304];snprintf(alpha_path,sizeof alpha_path,"%s-alpha.bmp",path);
-            size_t pixels=(size_t)s->pw*s->ph;uint8_t *gray=malloc(pixels*4);
-            if(gray){const uint8_t *source=ptr;for(size_t i=0;i<pixels;i++){gray[i*4]=gray[i*4+1]=gray[i*4+2]=source[i*4+3];gray[i*4+3]=255;}dump_bmp(alpha_path,gray,s->pw,s->ph);free(gray);}
-        }
         vkUnmapMemory(s_dev, mem);
     }
     vkDestroyBuffer(s_dev, buf, NULL);
     vkFreeMemory(s_dev, mem, NULL);
 }
 
-static void border_draw_diagnostic(VkSurf *s,const Nv2aRawBatch *b,int post)
-{
-#ifdef _WIN32
-    static uint32_t frame,ordinal;static int done;
-    const char *prefix=getenv("MC3_BORDER_TRACE");
-    if(done||!prefix||!*prefix||s_temporal_inputs.count<60)return;
-    /* Arm for the next complete frame so lower-resolution effects that run
-     * before scene promotion are included in the same causal trace. */
-    if(!frame){frame=s_frame+1;return;}
-    if(s_frame<frame)return;
-    if(frame!=s_frame){done=1;return;}
-    if(!post||s->w<128||s->h<80)return;
-    char path[2048];snprintf(path,sizeof path,"%s-%02u.bmp",prefix,ordinal++);
-    LOGE("border draw %u frame %u target %08X stored %ux%u blend %X/%X texture %08X\n",ordinal-1,s_frame,s->va,s->pw,s->ph,b->regs[0x344/4],b->regs[0x348/4],b->tex_va[0]);
-    LOGE("border stage %s texture format=%08X address=%08X filter=%08X rect=%08X\n",post<0?"before":"after",b->regs[0x1B04/4],b->regs[0x1B08/4],b->regs[0x1B14/4],b->regs[0x1B1C/4]);
-    for(uint32_t i=0;i<b->vertex_count&&i<8;i++){
-        float v[4];if(b->attr_direct&1)attr_to_float4(b,0,i,v);else memcpy(v,b->attrs+(size_t)i*NV2A_RAW_ATTRS*4,16);
-        LOGE("border vertex %u: %.4f %.4f %.4f %.4f\n",i,v[0],v[1],v[2],v[3]);
-        for(unsigned a=9;a<13;a++){if(b->attr_direct&(1u<<a))attr_to_float4(b,a,i,v);else memcpy(v,b->attrs+((size_t)i*NV2A_RAW_ATTRS+a)*4,16);LOGE("border uv%u vertex%u: %.4f %.4f %.4f %.4f\n",a-9,i,v[0],v[1],v[2],v[3]);}
-    }
-    dump_surface(s,path);
-    if(post<0){VkSurf *texture=surf_find(b->tex_va[0]);if(texture){snprintf(path,sizeof path,"%s-%02u-texture.bmp",prefix,ordinal-1);dump_surface(texture,path);LOGE("border texture storage %ux%u logical %ux%u\n",texture->pw,texture->ph,texture->w,texture->h);}}
-#else
-    (void)s;(void)b;(void)post;
-#endif
-}
 static void dump_temporal_once(VkSurf *s)
 {
 #ifdef _WIN32
@@ -3587,16 +3585,6 @@ static void dump_temporal_once(VkSurf *s)
 #endif
 }
 
-static void hud_diagnostic(VkSurf *surface,const char *phase)
-{
-    static uint32_t frame=UINT32_MAX;static unsigned done;
-    const char *prefix=getenv("MC3_HUD_DIAG");if(!prefix||!*prefix)return;
-    unsigned bit=!strcmp(phase,"scene")?1:!strcmp(phase,"mask")?2:!strcmp(phase,"map")?4:!strcmp(phase,"input")?16:8;
-    if(frame==UINT32_MAX){if(bit!=16||s_frame<300)return;frame=s_frame;}
-    if((s_frame!=frame&&!(bit==8&&s_frame==frame+1))||(done&bit)||(bit==4&&!(done&2)))return;done|=bit;
-    char path[2048];snprintf(path,sizeof path,"%s-%s.bmp",prefix,phase);dump_surface(surface,path);
-    LOGE("HUD diagnostic %s: frame %u, %ux%u, %s\n",phase,s_frame,surface->pw,surface->ph,path);
-}
 #include "port_present.h"
 static void vk_flip(void)
 {
@@ -3691,10 +3679,9 @@ static void vk_flip(void)
     end_rendering();
     s_rt = NULL;
     s_rt_depth = NULL;
-    if(s&&s->upscaled)hud_diagnostic(s,"final");
     temporal_scene_readback();
     dump_temporal_once(s);
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
     if(s_win&&!s_headless&&s_host_attached) {
         extern int windows_port_vsync_get(void);
         if(windows_port_vsync_get()!=s_vsync_requested) {
@@ -3713,8 +3700,10 @@ static void vk_flip(void)
 
     VT("flip %u: surface %08X drew %d, acquiring\n", s_frame, s ? s->va : 0, s_drew_any);
     VkImage display_image=s?s->image:VK_NULL_HANDLE;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
     if(s&&s_drew_any&&!s_headless)display_image=port_present_process(s);
+#endif
+#ifdef _WIN32
     /* Opt-in, one-frame GPU readback of the actual final display pass.
      * This reads renderer images directly and opens no Windows capture session. */
     {
@@ -3847,6 +3836,12 @@ static void vk_flip(void)
                 fprintf(stderr, "  [VK] window closed: quitting\n");
                 exit(0);
             }
+#if defined(__linux__) && !defined(__ANDROID__)
+            if(e.type==SDL_KEYDOWN&&e.key.repeat==0&&e.key.keysym.sym==SDLK_F11){
+                extern void windows_port_setting_change(int);
+                windows_port_setting_change(0);
+            }
+#endif
             xbox_sdl_keyboard_handle(&e);       /* RECOMP_KEYBOARD (input/) */
         }
     }

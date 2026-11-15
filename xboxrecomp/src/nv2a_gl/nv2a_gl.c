@@ -441,6 +441,20 @@ static GLint to_stored(uint32_t v, uint32_t p, uint32_t l)
     return (GLint)(((uint64_t)v * p + l / 2) / l);
 }
 
+/* A logical rectangle covers every stored pixel it touches.  Rounding both
+ * edges to nearest can leave a one-pixel seam when square-pixel correction
+ * gives the surface a fractional horizontal scale (MC3's Linux minimap at
+ * 910x480). */
+static GLint to_stored_lo(uint32_t v, uint32_t p, uint32_t l)
+{
+    return (GLint)((uint64_t)v * p / l);
+}
+
+static GLint to_stored_hi(uint32_t v, uint32_t p, uint32_t l)
+{
+    return (GLint)(((uint64_t)v * p + l - 1) / l);
+}
+
 #define GL_MAX_SURF 32
 static GlSurf  s_surf[GL_MAX_SURF];
 static GlSurf *s_last;                  /* last surface drawn or cleared */
@@ -1714,8 +1728,18 @@ static int ui_prog_init(void)
         "            vec4 c = texelFetch(u_src, clamp(b + ivec2(i, j), ivec2(0), mx), 0);\n"
         "            acc += wx[i] * wy[j] * vec4(c.rgb * c.a, c.a);   /* premultiplied */\n"
         "        }\n"
-        "    float a = clamp(acc.a, 0.0, 1.0);\n"
-        "    o = vec4(a > 0.0 ? clamp(acc.rgb / max(acc.a, 1e-4), 0.0, 1.0) : vec3(0.0), a);\n"
+        "    /* Catmull-Rom has negative lobes: keep its sharp RGB, but derive\n"
+        "       coverage from non-negative bilinear alpha so transparent HUD\n"
+        "       edges cannot ring into faint square/line fringes. */\n"
+        "    vec2 ap=clamp(p,vec2(0.0),u_sz.zw-1.0), af=fract(ap);\n"
+        "    ivec2 l=ivec2(floor(ap)), h=min(l+1,mx);\n"
+        "    float a00=texelFetch(u_src,l,0).a, a10=texelFetch(u_src,ivec2(h.x,l.y),0).a;\n"
+        "    float a01=texelFetch(u_src,ivec2(l.x,h.y),0).a, a11=texelFetch(u_src,h,0).a;\n"
+        "    float a=clamp(mix(mix(a00,a10,af.x),mix(a01,a11,af.x),af.y),0.0,1.0);\n"
+        "    /* Unpremultiply the sharpened colour by the alpha sampled with it.\n"
+        "       Dividing by the separate bilinear coverage brightens thin edge\n"
+        "       pixels and exposes the minimap texture's rectangular boundary. */\n"
+        "    o = vec4(acc.a > 1e-4 ? clamp(acc.rgb / acc.a, 0.0, 1.0) : vec3(0.0), a);\n"
         "}\n" };
     GLuint v, f;
     GLint ok = 0;
@@ -3691,10 +3715,8 @@ static void gl_make_window(void *unused)
         fprintf(stderr, "  [GL] window: %s\n", SDL_GetError());
         return;
     }
-#ifdef _WIN32
     extern void windows_port_settings_attach(SDL_Window *win);
     windows_port_settings_attach(s_win);
-#endif
     s_ctx = SDL_GL_CreateContext(s_win);
     if (!s_ctx && nv2a_gl_es) {
         /* ES 3.1: many phones, ANGLE (the Android emulator on a Mac) */
@@ -3895,10 +3917,10 @@ static void surface_scissor(const uint32_t *r, const GlSurf *s, GLint sc[4])
     if (y1 > s->h) y1 = s->h;
     if (x1 <= x0 || y1 <= y0 || (x0 == 0 && y0 == 0 && x1 == s->w && y1 == s->h))
         return;
-    sc[0] = to_stored(x0, s->pw, s->w);
-    sc[1] = to_stored(y0, s->ph, s->h);
-    sc[2] = to_stored(x1, s->pw, s->w) - sc[0];
-    sc[3] = to_stored(y1, s->ph, s->h) - sc[1];
+    sc[0] = to_stored_lo(x0, s->pw, s->w);
+    sc[1] = to_stored_lo(y0, s->ph, s->h);
+    sc[2] = to_stored_hi(x1, s->pw, s->w) - sc[0];
+    sc[3] = to_stored_hi(y1, s->ph, s->h) - sc[1];
 }
 
 static void apply_state(const uint32_t *r, int has_depth, const GlSurf *s)
@@ -5965,10 +5987,10 @@ static void gl_clear(const Nv2aSurface *sf, const Nv2aRenderState *rs,
         if (x1 > s->w) x1 = s->w;
         if (y1 > s->h) y1 = s->h;
         if (x1 > x0 && y1 > y0 && (x1 - x0 < s->w || y1 - y0 < s->h)) {
-            GLint px0 = to_stored(x0, s->pw, s->w), py0 = to_stored(y0, s->ph, s->h);
+            GLint px0 = to_stored_lo(x0, s->pw, s->w), py0 = to_stored_lo(y0, s->ph, s->h);
             glEnable(GL_SCISSOR_TEST);
-            glScissor(px0, py0, to_stored(x1, s->pw, s->w) - px0,
-                      to_stored(y1, s->ph, s->h) - py0);
+            glScissor(px0, py0, to_stored_hi(x1, s->pw, s->w) - px0,
+                      to_stored_hi(y1, s->ph, s->h) - py0);
         }
     }
     if (flags & 0xF0) {
@@ -6629,16 +6651,11 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
         glUniform2fv(s_fx_band, 1, band);
     }
     glUniform2fv(s_fx_max, 1, mx);
-    #ifdef _WIN32
     {extern float windows_port_sharpen_get(void);float k=windows_port_sharpen_get();s_fx_sharpness=k>0?-1.0f/(8.0f-3.0f*k):0;}
-#endif
     float gamma=1.0f,brightness=1.0f;
-#ifdef _WIN32
     {extern float windows_port_gamma_get(void),windows_port_brightness_get(void);gamma=windows_port_gamma_get();brightness=windows_port_brightness_get();}
-#endif
     glUniform1f(s_fx_gamma,gamma);glUniform1f(s_fx_brightness,brightness);
     int aa_mode=s_fx_on;
-#ifdef _WIN32
     {
         extern int windows_port_fxaa_get(void),windows_media_gameplay_get(void);
         static int previous_mode=-1;
@@ -6647,7 +6664,6 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
         aa_mode=windows_media_gameplay_get()?windows_port_fxaa_get():0;
         if(aa_mode!=previous_mode){fprintf(stderr,"  [GL] active presentation FXAA mode %d\n",aa_mode);previous_mode=aa_mode;}
     }
-#endif
     glUniform1i(s_fx_aa,aa_mode);
     glUniform1f(s_fx_sharp, -s_fx_sharpness);   /* 1 / mix(8, 5, k); 0 = off */
     {
@@ -6977,7 +6993,6 @@ swap:
     }
     gl_step_done("present");
     pf_start();
-#ifdef _WIN32
     {
         extern int windows_port_vsync_get(void);
         static int previous_interval=99;
@@ -6994,10 +7009,7 @@ swap:
             previous_interval=interval;
         }
     }
-#endif
-#ifdef _WIN32
     port_overlay_draw();
-#endif
     SDL_GL_SwapWindow(s_win);
     gq_frame_end();
     s_mg_fb_draw = s_mg_fb_read = 0xFFFFFFFFu;   /* whatever the swap did */
@@ -7021,6 +7033,12 @@ swap:
                 fprintf(stderr, "  [GL] window closed: quitting\n");
                 fflush(stderr);
                 exit(0);
+            }
+            if(e.type==SDL_KEYDOWN && e.key.repeat==0 && e.key.keysym.sym==SDLK_F11) {
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+                extern void windows_port_setting_change(int);
+                windows_port_setting_change(0);
+#endif
             }
 #if (!defined(_WIN32) || defined(XBOXRECOMP_SDL_HOST)) && !defined(__SWITCH__)
             xbox_sdl_keyboard_handle(&e);       /* RECOMP_KEYBOARD (input/) */

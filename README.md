@@ -58,6 +58,8 @@ Optional artwork lives in `launcher/art`: `hero.jpg` or `hero.png`, `logo.png`, 
 
 These settings are available through native **Port Options** with controller navigation. Render queue is currently launcher-only.
 
+The same Port Options menu and graphics settings backend are built for Windows and Linux. Linux OpenGL and native Vulkan support the shared display, FXAA, sharpening, gamma/brightness, FPS overlay, controller vibration, PC Music controls, and final presentation overlays. Linux uses MPRIS over the desktop D-Bus for track metadata, previous/next, menu pause/resume, and player volume when supported. The external player continues through the normal desktop audio mix; the game radio is muted while driving. DLSS is currently Windows-only. Linux build and WSLg test setup are documented in [BUILDING-LINUX.md](BUILDING-LINUX.md).
+
 ### Experimental Vulkan and DLSS
 
 The original OpenGL renderer remains available. **Settings → Graphics → Graphics API** selects OpenGL or Vulkan; both renderers share Career/profile data and local Xbox system data. Its **DLSS Super Resolution** control is a familiar On/Off switch, with **Quality**, **Balanced**, and **Performance** modes. Choosing **Play** builds missing Vulkan/DLSS files automatically. All three modes passed controlled GPU evaluations on an RTX 3070. Quality, Balanced, and Performance also passed short user driving checks on that system with jitter disabled. Other GPUs/drivers and longer sessions remain unverified. If DLSS cannot initialize, Vulkan falls back to native rendering. NVIDIA runtime files are downloaded into ignored build data and are not part of the GitHub source package. Fullscreen and resolution settings are shared with Vulkan and persist across launches.
@@ -96,15 +98,15 @@ The renderer's native replacement loader uses Xbox texture hashes and PNG files 
 
 Xbox controllers use SDL's controller mappings, including Xbox 360 and Xbox One-family devices recognized by the runtime. Windows setup preserves the tested native SDL2 runtime. Connect before launching if detection is inconsistent. Port Options uses normal controller navigation.
 
-With PC Music enabled while driving, **D-pad Left/Right** request previous/next tracks. Holding a direction sends one request. The player must expose Windows media-session skip controls. Menu navigation and normal radio behavior with PC Music off are retained.
+With PC Music enabled while driving, **D-pad Left/Right** request previous/next tracks. Holding a direction sends one request. The player must expose Windows media-session controls or, on Linux, MPRIS controls. Menu navigation and normal radio behavior with PC Music off are retained.
 
 **Settings → Controls** adjusts controller and wheel rumble strength. Raw SDL steering-wheel input is an experimental compatibility path with device/axis selection, inversion, and deadzone controls. It maps wheel steering, pedals, hats, and buttons into the game's Xbox controller input. It has not been tested across a range of physical wheels. Rumble works only when the connected device/runtime exposes it; full wheel force-feedback effects, wheel-specific shifter/clutch mappings, and per-game sensitivity curves are not implemented.
 
 ## PC Music / Now Playing
 
-Start Spotify, YouTube, or another Windows player normally, then enable **PC Music (Driving)**. No Spotify login or account connection is needed.
+Start Spotify, YouTube, or another desktop player normally, then enable **PC Music (Driving)**. No Spotify login or account connection is needed. Windows uses media sessions; Linux uses the player's MPRIS interface over D-Bus. Both leave the player routed through the normal system audio mix and mute the game's radio while driving.
 
-- Audio continues through Windows; ReDUB does **not** capture and replay system audio.
+- Audio continues through the normal desktop mix; ReDUB does **not** capture and replay system audio.
 - Driving silences the game's radio/music category while retaining engine, dialogue, and effects.
 - Menus restore game music. The helper pauses the selected external session once per menu visit and resumes that exact session when driving resumes. It does not start a player that was already manually paused and avoids resuming over another playing app.
 - Failed resume requests retain ownership and retry. Start the desired player once before testing, especially after changing apps.
@@ -146,12 +148,12 @@ Logs: `work-remix/logs`. Build backups: `work-remix/build-backups`. Inspect logs
 
 ## Building and project layout
 
-See [Windows build instructions](BUILDING-WINDOWS.md). ReDUB builds on the [mcdub3-nx project](https://github.com/laureladastra/mcdub3-nx) and the [xboxrecomp toolkit](https://github.com/sp00nznet/xboxrecomp).
+See [Windows build instructions](BUILDING-WINDOWS.md) or the [Linux build guide](BUILDING-LINUX.md). ReDUB builds on the [mcdub3-nx project](https://github.com/laureladastra/mcdub3-nx) and the [xboxrecomp toolkit](https://github.com/sp00nznet/xboxrecomp).
 
 - `.portable/Launcher.cs`: launcher source.
 - `.portable/Build-Launcher.ps1`: compile launcher/create shortcuts.
 - `.portable/Build.ps1`: setup, repair, build, and prerequisite checks.
-- `src/windows_settings.c`: native options dispatch/persistence.
+- `src/windows_settings.c` and `src/linux_settings.c`: shared native options with per-platform persistence and display/input hooks.
 - `src/windows_media.c` and `tools/windows/now_playing.ps1`: optional Windows media integration.
 - `work-remix/build-windows-x86_64/dist`: installed game/settings.
 
