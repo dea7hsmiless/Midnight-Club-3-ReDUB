@@ -5,6 +5,7 @@ $exe=Join-Path $repo 'ReDUB Launcher.exe'
 $candidateDir=Join-Path $repo '.redub-launcher-build'
 $candidate=Join-Path $candidateDir 'ReDUB Launcher.exe'
 $icon=Join-Path $repo 'launcher\art\redub.ico'
+$manifest=Join-Path $PSScriptRoot 'Launcher.manifest'
 if(!(Test-Path -LiteralPath $icon)){& (Join-Path $PSScriptRoot 'Build-Icon.ps1')}
 if(!$ShortcutsOnly){
  & (Join-Path $PSScriptRoot 'Bundle-Launcher-Source.ps1')
@@ -14,7 +15,7 @@ if(!$ShortcutsOnly){
  foreach($name in @('logo.png','hero.jpg','hero.png')){$art=Join-Path $repo "launcher\art\$name";if(Test-Path -LiteralPath $art){$resources+="/resource:$art,ReDUB.Art.$name"}}
  New-Item -ItemType Directory -Path $candidateDir -Force | Out-Null
  if(Test-Path -LiteralPath $candidate){Remove-Item -LiteralPath $candidate -Force}
- & $compiler /nologo /target:winexe /platform:x64 /optimize+ /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll "/win32icon:$icon" @resources "/out:$candidate" (Join-Path $PSScriptRoot 'Launcher.cs')
+ & $compiler /nologo /target:winexe /platform:x64 /optimize+ /debug- /win32manifest:$manifest /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll "/win32icon:$icon" @resources "/out:$candidate" (Join-Path $PSScriptRoot 'Launcher.cs')
  if($LASTEXITCODE -ne 0){throw 'Launcher compilation failed.'}
  try {Move-Item -LiteralPath $candidate -Destination $exe -Force}
  catch {throw "Launcher compiled successfully but Windows has the current launcher locked. Close it and rerun Build-Launcher.ps1; the new build is preserved at $candidate."}

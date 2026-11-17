@@ -8,4 +8,4 @@ The launcher also includes **Check setup**, **Rebuild game code**, **Create shor
 
 Move the complete project together. Location-specific caches avoid stale CMake paths; recreate shortcuts after a move.
 
-Rebuild the launcher itself with `.portable/Build-Launcher.ps1`. This uses the Windows .NET Framework compiler and does not need Python, Node, or a separate launcher runtime download. See [README.md](README.md) for included features and limitations.
+Rebuild the launcher itself with `.portable/Build-Launcher.ps1`. This uses the Windows .NET Framework compiler and does not need Python, Node, or a separate launcher runtime download. The release build uses a standard `asInvoker` Windows application manifest and deterministic compiler settings; it does not request administrator access or install a background updater. See [README.md](README.md) for included features and limitations.
