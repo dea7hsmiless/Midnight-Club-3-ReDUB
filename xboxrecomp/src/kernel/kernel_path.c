@@ -42,6 +42,13 @@ typedef struct {
 } path_rule;
 
 static const path_rule s_rules[] = {
+#if defined(__linux__) && !defined(__ANDROID__)
+    /* Xbox title metadata belongs in the user save profile. Disc data may
+     * be read-only (AppImage users often keep it on a separate volume). */
+    { "\\Device\\Harddisk0\\Partition1\\TDATA", 1, "\\TitleData", "/TitleData" },
+    { "\\Device\\Harddisk0\\Partition1\\UDATA", 1, "\\UserData", "/UserData" },
+    { "\\Device\\Harddisk0\\Partition1\\CACHE", 1, "\\Cache", "/Cache" },
+#endif
     { "\\Device\\CdRom0\\",                   0, NULL,         NULL          },
     { "\\Device\\Harddisk0\\Partition1\\",    0, NULL,         NULL          },
     /* The rest of the disk. Partition 0 is the whole raw device, 2 holds

@@ -41,6 +41,11 @@ int windows_port_vsync_get(void){return atomic_load(&s_vsync);}
 
 static void settings_path(char out[PATH_MAX])
 {
+    const char *configured = getenv("MC3_SETTINGS_FILE");
+    if (configured && configured[0]) {
+        snprintf(out, PATH_MAX, "%s", configured);
+        return;
+    }
     char *base=SDL_GetBasePath();
     if(base){snprintf(out,PATH_MAX,"%s%s_env.txt",base,MC3_APP);SDL_free(base);}
     else snprintf(out,PATH_MAX,"%s_env.txt",MC3_APP);
