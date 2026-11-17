@@ -32,6 +32,19 @@ Use only game files you are legally authorized to use. Where permitted, these ma
 
 An existing installation is detected automatically and can play without rebuilding. The launcher does not download games or pull source updates from GitHub.
 
+## Linux AppImage
+
+Download **ReDUB-0.2.2-x86_64.AppImage** from [Releases](https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases/latest). Mark it executable, then select your extracted Xbox Remix game folder once:
+
+```sh
+chmod +x ReDUB-0.2.2-x86_64.AppImage
+./ReDUB-0.2.2-x86_64.AppImage --game-dir "/path/to/extracted/game"
+```
+
+The folder is remembered for later launches. Requires x86_64 Linux, glibc 2.39+ (Ubuntu 24.04 / Debian 13 tested), X11/XWayland, and OpenGL 3.3. The package bundles SDL2, D-Bus, Bink-only FFmpeg, and the ReDUB logo artwork. Saves and Port Options live in user directories; original game files may be read-only. If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB-0.2.2-x86_64.AppImage`.
+
+Shared menu, synchronization, pushbuffer, and movie fixes match the Windows release source; the entry/page title uses **Port Options** capitalization. Linux PC Music uses MPRIS, with transliterated song text. Native Wayland, Vulkan/DLSS, and experimental 60/120 FPS are excluded. Native desktop sound and MPRIS output remain unverified in our WSLg environment. See [Linux setup and build instructions](BUILDING-LINUX.md).
+
 ## Launcher
 
 The sidebar layout is inspired by [SafeHouse](https://github.com/FridiNaTor1/SafeHouse/tree/main/launcher/ui), with ReDUB's own code and branding.
@@ -58,7 +71,7 @@ Optional artwork lives in `launcher/art`: `hero.jpg` or `hero.png`, `logo.png`, 
 
 These settings are available through native **Port Options** with controller navigation. Render queue is currently launcher-only.
 
-The same Port Options menu and graphics settings backend are built for Windows and Linux. The Linux WIP release currently ships the OpenGL renderer, with shared display, FXAA, sharpening, gamma/brightness, FPS overlay, controller vibration, PC Music controls, final presentation overlays, and the ReDUB HD logo pack. Linux uses MPRIS over the desktop D-Bus for track metadata, previous/next, menu pause/resume, and player volume when supported. The external player continues through the normal desktop audio mix; the game radio is muted while driving. DLSS and the experimental Vulkan path remain Windows-side work and are not part of the Linux WIP package. Linux build and WSLg test setup are documented in [BUILDING-LINUX.md](BUILDING-LINUX.md).
+The same Port Options menu and graphics settings backend are built for Windows and Linux. The Linux AppImage ships the OpenGL renderer, with shared display, FXAA, sharpening, gamma/brightness, FPS overlay, controller vibration, PC Music controls, final presentation overlays, and the ReDUB HD logo pack. Linux uses MPRIS over the desktop D-Bus for track metadata, previous/next, menu pause/resume, and player volume when supported. The external player continues through the normal desktop audio mix; the game radio is muted while driving. DLSS and the experimental Vulkan path remain Windows-side work and are not part of the Linux AppImage. Linux build and WSLg test setup are documented in [BUILDING-LINUX.md](BUILDING-LINUX.md).
 
 ### Experimental Vulkan and DLSS
 

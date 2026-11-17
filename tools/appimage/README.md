@@ -1,0 +1,11 @@
+# Linux AppImage packaging
+
+Run `bash tools/build_appimage.sh` from a Git checkout after generating Remix code with your own extracted game files. Docker is required. Set MC3_GEN_DIR for another generated-code folder and REDUB_APPIMAGE_WORK_DIR for another output/build-cache folder.
+
+The wrapper mounts source and generated code read-only into a pinned Ubuntu 24.04 container. The container builds shared LGPL FFmpeg 6.1.4 with Bink decoders only, compiles ReDUB, stages a recursive ELF dependency closure, includes license notices and the three tracked ReDUB logo textures, validates desktop/AppStream metadata, tests launcher behavior, and builds a Type 2 AppImage. The source commit is embedded in the application and manifest. Matching Ubuntu library sources are downloaded separately for distribution with the build/source kit.
+
+`AppRun` handles game-folder configuration, XDG user files, missing-data messages, and X11/XWayland selection. `package.py` preserves host glibc and graphics-driver ownership. Native Wayland is unsupported in this release. Runtime and appimagetool downloads are SHA-256 pinned; mutable upstream URLs cannot silently change a rebuild. Keep the cached downloads for future rebuilds.
+
+`test-launcher.sh` exercises paths with spaces/#, CRLF pointer files, override precedence, saved folder selection, settings/log locations, and bundled-logo fallback using a harmless executable stub. `smoke-clean.sh` checks the real AppImage in a clean Ubuntu/Debian container with a read-only `/game` mount and TEST_DISTRO report label. Its Xvfb run is startup coverage, not gameplay acceptance. No game data or generated game C is committed.
+
+The base image and upstream tarballs/tools are pinned. Distro package versions and archive hashes are recorded in manifests, but apt repositories are not time-frozen, so future rebuilds are not guaranteed to be byte-identical.

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=ReDUB
+GenericName=Xbox game recompilation
+Comment=Play Midnight Club 3 Remix using your own extracted game files
+Exec=AppRun
+Icon=redub
+Terminal=false
+Categories=Game;Simulation;
+Keywords=racing;Xbox;Remix;
+StartupWMClass=mcdub3remix

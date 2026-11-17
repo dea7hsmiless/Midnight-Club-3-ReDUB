@@ -1,3 +1,6 @@
 # Windows scripts keep Windows line endings in every checkout.
 *.bat text eol=crlf
 *.sh text eol=lf
+
+# AppImage entry point is a POSIX shell script without a suffix.
+tools/appimage/AppRun text eol=lf

@@ -1,0 +1,22 @@
+name: AppImage packaging checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  packaging:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell and Python syntax
+        run: |
+          bash -n tools/build_appimage.sh
+          for script in tools/appimage/*.sh tools/appimage/AppRun; do bash -n "$script"; done
+          python3 -m py_compile tools/appimage/*.py
+      - name: Launcher behavior
+        run: |
+          sudo mkdir -p /work
+          sudo ln -s "$GITHUB_WORKSPACE/tools/appimage" /work/packaging
+          bash tools/appimage/test-launcher.sh

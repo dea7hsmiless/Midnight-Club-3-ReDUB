@@ -1,0 +1,97 @@
+#!/bin/sh
+set -eu
+APPDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export APPDIR
+export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+version=0.2.2
+config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/redub
+data_dir=${XDG_DATA_HOME:-$HOME/.local/share}/redub
+cache_dir=${XDG_CACHE_HOME:-$HOME/.cache}/redub
+state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/redub
+package_dir=${APPIMAGE:+$(dirname -- "$APPIMAGE")}
+package_dir=${package_dir:-$APPDIR}
+fail() {
+    printf '%s\n' "$1" >&2
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ -x "$APPDIR/usr/bin/redub-message" ]; then
+        "$APPDIR/usr/bin/redub-message" "$1" || :
+    fi
+    exit 2
+}
+read_location() {
+    pointer=$1
+    [ -r "$pointer" ] || return 0
+    while IFS= read -r candidate || [ -n "$candidate" ]; do
+        candidate=$(printf '%s' "$candidate" | sed 's/\r$//;s/^[[:space:]]*//;s/[[:space:]]*$//')
+        case "$candidate" in ''|\#*) continue ;; esac
+        case "$candidate" in \"*\") candidate=${candidate#\"}; candidate=${candidate%\"} ;; esac
+        case "$candidate" in \'*\') candidate=${candidate#\'}; candidate=${candidate%\'} ;; esac
+        case "$candidate" in /*) ;; *) candidate=$(dirname -- "$pointer")/$candidate ;; esac
+        if [ -f "$candidate/default.xbe" ]; then MC3_GAME_DIR=$candidate; return 0; fi
+    done < "$pointer"
+}
+case "${1:-}" in
+    --help|-h)
+        cat <<'HELP'
+ReDUB for Linux (Remix)
+Usage: ReDUB.AppImage [--game-dir /path/to/extracted-game]
+       ReDUB.AppImage --diagnose | --version | --help
+
+Provide your own extracted, legally owned Xbox Remix game files.
+Game lookup: --game-dir, MC3_GAME_DIR, saved configuration, then
+redub.game-location.txt beside the AppImage. Relative pointer paths
+are resolved beside the pointer file. --game-dir remembers the folder.
+Saves: $XDG_DATA_HOME/redub/saves (default ~/.local/share/redub/saves).
+Settings: $XDG_CONFIG_HOME/redub/mcdub3remix_env.txt.
+Logs: $XDG_STATE_HOME/redub/latest.log. Caches: $XDG_CACHE_HOME/redub.
+MC3_SAVE_DIR, MC3_SETTINGS_FILE and RECOMP_GL_HD_DIR override defaults.
+Requires x86_64 Linux, glibc >= 2.39 and a working OpenGL 3.3 driver, and X11/XWayland.
+FUSE-free: APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB.AppImage
+HELP
+        exit 0 ;;
+    --version) printf 'ReDUB %s\n' "$version"; exit 0 ;;
+    --diagnose)
+        printf 'ReDUB %s\nAppDir: %s\n' "$version" "$APPDIR"
+        getconf GNU_LIBC_VERSION
+        printf 'Display: %s / %s\n' "${DISPLAY:-unset}" "${WAYLAND_DISPLAY:-unset}"
+        ldd "$APPDIR/usr/bin/mcdub3remix"
+        exit 0 ;;
+    --game-dir)
+        [ "$#" -ge 2 ] || fail '--game-dir requires a folder containing default.xbe.'
+        [ -f "$2/default.xbe" ] || fail 'The chosen folder does not contain default.xbe.'
+        MC3_GAME_DIR=$(CDPATH= cd -- "$2" && pwd)
+        mkdir -p "$config_dir"
+        (umask 077; printf '%s\n' "$MC3_GAME_DIR" > "$config_dir/game-location.txt.tmp")
+        mv -f -- "$config_dir/game-location.txt.tmp" "$config_dir/game-location.txt"
+        shift 2 ;;
+    '') ;;
+    *) fail 'Unknown option. Run with --help for setup instructions.' ;;
+esac
+if [ -z "${MC3_GAME_DIR:-}" ]; then read_location "$config_dir/game-location.txt"; fi
+if [ -z "${MC3_GAME_DIR:-}" ]; then read_location "$package_dir/redub.game-location.txt"; fi
+if [ -z "${MC3_GAME_DIR:-}" ] && [ -f "$package_dir/game-remix/default.xbe" ]; then MC3_GAME_DIR=$package_dir/game-remix; fi
+[ -n "${MC3_GAME_DIR:-}" ] && [ -f "$MC3_GAME_DIR/default.xbe" ] || fail 'ReDUB needs your extracted Xbox Remix game files. Run this AppImage with --game-dir followed by the folder containing default.xbe, or put that folder path in redub.game-location.txt beside the AppImage. No game files are included.'
+MC3_GAME_DIR=$(CDPATH= cd -- "$MC3_GAME_DIR" && pwd)
+export MC3_GAME_DIR
+# Native Wayland is not supported by this release; use X11 or XWayland.
+case "${SDL_VIDEODRIVER:-x11}" in
+    x11) export SDL_VIDEODRIVER=x11 ;;
+    *) fail "This release supports X11/XWayland. Unset SDL_VIDEODRIVER or set it to x11." ;;
+esac
+export MC3_SAVE_DIR=${MC3_SAVE_DIR:-$data_dir/saves}
+export MC3_SETTINGS_FILE=${MC3_SETTINGS_FILE:-$config_dir/mcdub3remix_env.txt}
+if [ -z "${RECOMP_GL_HD_DIR:-}" ]; then
+    if [ -d "$package_dir/hd" ]; then RECOMP_GL_HD_DIR=$package_dir/hd;
+    elif [ -d "$data_dir/hd" ]; then RECOMP_GL_HD_DIR=$data_dir/hd;
+    else RECOMP_GL_HD_DIR=$APPDIR/hd; fi
+fi
+export RECOMP_GL_HD_DIR
+mkdir -p "$MC3_SAVE_DIR" "$(dirname -- "$MC3_SETTINGS_FILE")" "$cache_dir" "$state_dir"
+[ ! -f "$state_dir/latest.log" ] || mv -f -- "$state_dir/latest.log" "$state_dir/previous.log"
+cd "$cache_dir"
+printf 'ReDUB %s\nStarted: %s\nGame: %s\n' "$version" "$(date -u +%FT%TZ)" "$MC3_GAME_DIR" > "$state_dir/latest.log"
+set +e
+"$APPDIR/usr/bin/mcdub3remix" "$@" >> "$state_dir/latest.log" 2>&1
+status=$?
+set -e
+[ "$status" -eq 0 ] || fail "ReDUB exited with status $status. Details: $state_dir/latest.log"
+exit "$status"

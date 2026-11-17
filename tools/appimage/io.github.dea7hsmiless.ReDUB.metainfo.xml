@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.dea7hsmiless.ReDUB</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT AND LGPL-2.1-or-later</project_license>
+  <name>ReDUB</name>
+  <summary>Play Midnight Club 3 Remix through static recompilation</summary>
+  <description><p>ReDUB is a native recompilation of the Xbox version of Midnight Club 3: DUB Edition Remix. Supply your own legally obtained, extracted game files. No game data is included.</p><p>This Linux build supports gamepads, configurable graphics, and MPRIS media controls.</p></description>
+  <launchable type="desktop-id">io.github.dea7hsmiless.ReDUB.desktop</launchable>
+  <url type="homepage">https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB</url>
+  <url type="bugtracker">https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/issues</url>
+  <provides><binary>mcdub3remix</binary></provides>
+  <releases><release version="0.2.2" date="2026-11-16" type="stable"><description><p>Linux AppImage release with bundled dependencies and persistent user settings.</p></description></release></releases>
+  <content_rating type="oars-1.1"/>
+</component>

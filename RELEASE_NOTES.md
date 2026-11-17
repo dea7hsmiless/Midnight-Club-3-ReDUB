@@ -1,5 +1,16 @@
 # Release notes
 
+## Linux AppImage 0.2.2 — 2026-11-16
+
+- Replaced the Linux OpenGL WIP archive with a Type 2 x86_64 AppImage bundling SDL2, D-Bus, Bink-only FFmpeg, license notices, and ReDUB logo artwork.
+- Added persistent game-folder selection, XDG saves/settings/caches/logs, FUSE-free fallback, and missing-data diagnostics.
+- Fixed Linux settings persistence in the read-only AppImage and redirected Xbox title metadata into the user save profile, allowing read-only game data.
+- Restored the locally tested `Port Options` entry/page-title capitalization without changing song support.
+- Added source-tracked packaging and launcher checks. Shared Windows fixes were checked against the published launcher source.
+- Ubuntu 24.04 / Debian 13 startup checks passed; the user accepted WSLg display/gameplay and options survived restart. Native audio/MPRIS output remains unverified in WSLg.
+- Requires glibc 2.39+, OpenGL 3.3, and X11/XWayland. Native Wayland, Vulkan/DLSS, and experimental 60/120 FPS are excluded. Windows release assets remain unchanged.
+
+
 ## ReDUB Windows edition — 2026-11-13
 
 This source snapshot introduces the Windows-focused **Midnight Club 3: ReDUB** edition for the original Xbox release of *DUB Edition Remix*. No game data is included.
