@@ -1,15 +1,32 @@
 # Release notes
 
-## Linux AppImage 0.2.2 — 2026-11-16
+## v0.2.3 — 2026-11-17
 
-- Replaced the Linux OpenGL WIP archive with a Type 2 x86_64 AppImage bundling SDL2, D-Bus, Bink-only FFmpeg, license notices, and ReDUB logo artwork.
-- Added persistent game-folder selection, XDG saves/settings/caches/logs, FUSE-free fallback, and missing-data diagnostics.
-- Fixed Linux settings persistence in the read-only AppImage and redirected Xbox title metadata into the user save profile, allowing read-only game data.
-- Restored the locally tested `Port Options` entry/page-title capitalization without changing song support.
-- Added source-tracked packaging and launcher checks. Shared Windows fixes were checked against the published launcher source.
-- Ubuntu 24.04 / Debian 13 startup checks passed; the user accepted WSLg display/gameplay and options survived restart. Native audio/MPRIS output remains unverified in WSLg.
-- Requires glibc 2.39+, OpenGL 3.3, and X11/XWayland. Native Wayland, Vulkan/DLSS, and experimental 60/120 FPS are excluded. Windows release assets remain unchanged.
+**60 FPS becomes an option, and the release stops looking like malware to virus scanners.**
 
+### 60 FPS (optional; 30 FPS stays the default)
+
+- The launcher's **Graphics → Frame rate** row and **Options → Port Options → FRAME RATE** (restart to apply) choose between **30 FPS (Xbox)** and **60 FPS**. 30 FPS remains the default and behaves exactly as published.
+- At 60 FPS the game retires one flip per vblank instead of one per two, the race fixed step halves to 1/60, and pedestrian animation gets a clip-step correction plus pose blending. The two animation helpers can be switched off with the documented environment settings; 30 FPS mode is untouched.
+- 120 FPS is not part of a release build: the pacing code is compiled out and a larger `MC3_FRAME_RATE` is treated as 60.
+
+### Port Options
+
+- New `FRAME RATE` row on the Options page. The page holds 16 rows including `BACK`, so `PC MUSIC VOLUME` gives up its slot (the Audio Options music slider owns that value); `SONG DISPLAY` and `CONTROLLER VIBRATION` stay. The row count now falls back to 15 settings on a 16-row page instead of pushing `BACK` off the list.
+
+### Linux
+
+- `ReDUB-0.2.3-x86_64.AppImage`, built from the same source in a pinned Ubuntu container, with the in-game frame-rate row and the bundled libraries documented alongside it.
+
+### Packaging and trust
+
+- The launcher no longer embeds the setup source in the executable. `launcher-source.zip` ships beside it; the embedded 17 MB archive was the main reason virus scanners read the launcher as a packed dropper.
+- The launcher now carries a real version resource (product, company, description, 0.2.3) instead of an empty one reporting 0.0.0.0, and the game executable takes its icon from the existing artwork.
+
+### Other fixes
+
+- Pose wrapper: guest pointers and frame indices are validated before use, guest registers and stack arguments are restored after the second decode, and non-finite transforms keep the real pose.
+- Semaphore overflow now reports `STATUS_SEMAPHORE_LIMIT_EXCEEDED` with a rate-limited log instead of a bad handle, and the Linux compatibility layer refuses an over-limit release with `ERROR_TOO_MANY_POSTS` instead of silently clamping.
 
 ## ReDUB Windows edition — 2026-11-13
 
