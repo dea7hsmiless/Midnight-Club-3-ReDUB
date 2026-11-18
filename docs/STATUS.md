@@ -21,28 +21,28 @@ double-encoded launcher; the release body had the same bug). Same tag, same file
 
 ## 0.2.4 — committed locally, not tagged or pushed
 
-Branch `release/0.2.4`, commit `e33a7b4`, cut from `f3f34b2`. Nothing is pushed,
+Branch `release/0.2.4`, commit `e56c836`, cut from `f3f34b2`. Nothing is pushed,
 tagged or uploaded. The 0.2.3 tag and assets are untouched.
 
-The artifacts in `Desktop\ReDUB-0.2.4-release` were rebuilt from `e33a7b4`
+The artifacts in `Desktop\ReDUB-0.2.4-release` were rebuilt from `e56c836`
 (non-Windows assets in `%TEMP%\opencode\redub-appimage-work\release-out`,
-AppImage manifest `source_commit` = `e33a7b4`). `SHA256SUMS.txt` matches the
+AppImage manifest `source_commit` = `e56c836`). `SHA256SUMS.txt` matches the
 folder:
 
 | Asset | Size | SHA-256 |
 |---|---|---|
-| `ReDUB-0.2.4-Windows-x86_64.zip` | 73,646,985 | `beae4a22118316ffd9e483a7cc5ea9bf3a8b8f4b39eaf370b3578afc1afb303b` |
-| `ReDUB-0.2.4-x86_64.AppImage` | 22,133,240 | `69a3ffd61d5613825b22568353c4f04400a44a09fdc847e0af1801ba925dd1ef` |
-| `ReDUB-0.2.4-x86_64.tar.gz` | 23,832,249 | `d8d544a15910d71bb0d3bc13d288a27e232d995fe251e4267a9e9ed6cb0b48b9` |
+| `ReDUB-0.2.4-Windows-x86_64.zip` | 73,648,584 | `b1b911c1a355bce18a189b9ff6ab9f22b6077200e4e7bb7fc99323a624a7cc78` |
+| `ReDUB-0.2.4-x86_64.AppImage` | 22,133,240 | `d83379d70d1b52bc2d35ad7cffd73436252309fa67517352fd03c650d878ee44` |
+| `ReDUB-0.2.4-x86_64.tar.gz` | 23,831,708 | `377e12ff8e986868324c9e9e787527108b07a2ef560d731ed23381d5ac3f8da4` |
 | `mcdub3remix-beta-0.2.4-unsigned.ipa` | 16,392,674 | `0b58f94b6049520c14b39c9fd0810c9c52824bf1af0e1e47f441b40a0fe83f0a` |
 
-Launcher: `d371cc823896874311f26be8a25600a2932758fb6ddba7eba7c4330ad8a31e7a`
-(110,592 B, file version 0.2.4.0). Setup source: `e7b05909…` (12,704,806 B).
+Launcher: `bc6b0d046740618785dcd90f0bbfb14158d80a3d42b34cb8dfbfb3e66ee5a1d4`
+(112,640 B, file version 0.2.4.0). Setup source: `f83817f2…` (12,705,590 B).
 Game exe unchanged: `8b682c53…`.
 
 ## 0.2.4 code — on `release/0.2.4`
 
-Branch `release/0.2.4` is cut from `f3f34b2`; commit `e33a7b4` is local and not
+Branch `release/0.2.4` is cut from `f3f34b2`; commit `e56c836` is local and not
 pushed. The 0.2.3 tag and assets are untouched. `config/*/app.env` and the
 launcher say 0.2.4.
 
@@ -88,14 +88,15 @@ launcher say 0.2.4.
 
 **Independent review (2026-11-18)**
 
-- The shipped launcher (`d371cc82…`) was run with `--import` on
-  `Desktop\Midnight Club 3 DUB Edition Remix.iso`: exit 0 in 7.1 s; 905 files /
-  4,777,234,382 B; every file matches `mcdub3-nx\game-remix` by SHA-256. The 8
-  reference-only files are the expected saves, cache files and `default_analysis.json`.
+- The final shipped launcher (`bc6b0d04…`) was run with `--import` on
+  `Desktop\Midnight Club 3 DUB Edition Remix.iso`: exit 0 in about 5 s (7-8 s cold);
+  905 files / 4,777,234,382 B; every file matches `mcdub3-nx\game-remix` by SHA-256.
+  The 8 reference-only files are the expected saves, cache files and
+  `default_analysis.json`.
 - `--check` exits 1 with the missing-runtime message and 0 once the shipped runtime is
   present. `--self-test` passes. Folder import and replacement leave no staging or
   `.old-*` leftovers.
-- Windows zip launcher is `d371cc82…`, version 0.2.4.0; all four asset hashes match
+- Windows zip launcher is `bc6b0d04…`, version 0.2.4.0; all four asset hashes match
   `SHA256SUMS.txt`; AppImage `--version` prints `ReDUB 0.2.4`; the tarball `version`
   is `0.2.4`; the IPA differs from 0.2.3 only in `Info.plist` (0.2.4, same beta id).
 - Fixed during review: `AppRun --game-dir` is remembered in the active portable
@@ -113,10 +114,10 @@ engine harness on an existing install (marker preserved, 2 files, staging remove
 
 - `tools/appimage/` carries `--game-dir`, `--portable`, save/settings/fullscreen/
   resolution/frame-rate flags, a version file, deterministic tarball packaging and
-  launcher tests. The 0.2.4 AppImage and tarball were rebuilt from `e33a7b4` in the
+  launcher tests. The 0.2.4 AppImage and tarball were rebuilt from `e56c836` in the
   pinned Ubuntu container; `LAUNCHER_TESTS_OK` and `SOURCES_OK` passed, `AppRun
   --version` prints `ReDUB 0.2.4`, the tarball `version` is `0.2.4`, and the build
-  manifest `source_commit` is `e33a7b4`.
+  manifest `source_commit` is `e56c836`.
 - The iOS beta IPA was repackaged at 0.2.4 from the existing 0.2.3 binary; no iOS
   source changed in this release.
 
@@ -125,7 +126,7 @@ engine harness on an existing install (marker preserved, 2 files, staging remove
 | Path | State |
 |---|---|
 | `...\work\publish-source` | Git repo (object store); worktree on `release/linux-appimage-0.2.2` at `b10438d` |
-| `%TEMP%\opencode\redub-linux-port` | release worktree, `release/0.2.4` from `f3f34b2`, dirty (0.2.4 work above) |
+| `%TEMP%\opencode\redub-linux-port` | release worktree, `release/0.2.4` from `f3f34b2`; clean at `e56c836` (0.2.4 work above) |
 | `...\Not Done\ReDUB-latest-frame-test` | Windows dev worktree on an older `main`, uncommitted 60 FPS experiments; tests/launchers live here |
 | `D:\...\mcdub3-nx` | iOS tree (not Git) at 0.2.4 config with the unchanged 0.2.3 binary + shared `game-remix/` disc data |
 
@@ -135,7 +136,7 @@ engine harness on an existing install (marker preserved, 2 files, staging remove
    entitlements, release body and `SHA256SUMS.txt` are ready in
    `Desktop\ReDUB-0.2.4-release`. Nothing has been tagged, pushed or uploaded.
 2. **SecureAge false positive** — the 0.2.3 launcher `6e2466f6…` is 1/71 (whitelist
-   engine); the 0.2.4 launcher is a new hash (`d371cc82…`), so the existing report
+   engine); the 0.2.4 launcher is a new hash (`bc6b0d04…`), so the existing report
    does not cover it. Scan the new launcher/zip and submit a fresh FP report at
    secureage.com/contact-us.
 3. **iOS garage artifacts** — unexplained; v32 diagnostics exist. Needs a device
@@ -155,10 +156,10 @@ engine harness on an existing install (marker preserved, 2 files, staging remove
 
 | File | VirusTotal |
 |---|---|
-| Windows zip `4df83c45…` | not scanned |
-| AppImage `2f93a828…` | not scanned (0.2.3 `898d84ee…` was 0/61) |
-| tarball `6b2da30c…` | not scanned |
-| launcher `d371cc82…` | not scanned (0.2.3 `6e2466f6…` was 1/71) |
+| Windows zip `b1b911c1…` | not scanned |
+| AppImage `d83379d7…` | not scanned (0.2.3 `898d84ee…` was 0/61) |
+| tarball `377e12ff…` | not scanned |
+| launcher `bc6b0d04…` | not scanned (0.2.3 `6e2466f6…` was 1/71) |
 | iOS beta IPA `0b58f94b…` | not scanned |
 
 ## Environment
