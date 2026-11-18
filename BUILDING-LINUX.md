@@ -2,18 +2,22 @@
 
 ## Ready-to-run AppImage
 
-The Linux package is **ReDUB 0.2.2**, distributed on the existing Windows/Linux release page. Download `ReDUB-0.2.2-x86_64.AppImage`, make it executable, and run it with `--game-dir "/path/to/extracted/game"`. It remembers the folder. An explicit `MC3_GAME_DIR` overrides saved pointers. A `redub.game-location.txt` beside the AppImage is also supported; relative paths in it are resolved beside that file.
+The Linux package is **ReDUB 0.2.4**, distributed on the existing Windows/Linux release page. Download `ReDUB-0.2.4-x86_64.AppImage`, make it executable, and run it with `--game-dir "/path/to/extracted/game"`. It remembers the folder. An explicit `MC3_GAME_DIR` overrides saved pointers. A `redub.game-location.txt` beside the AppImage is also supported; relative paths in it are resolved beside that file. A plain `ReDUB-0.2.4-x86_64.tar.gz` carries the same AppDir for systems that cannot run an AppImage.
 
 The AppImage requires **x86_64, glibc 2.39+, X11/XWayland, and OpenGL 3.3**. Clean-container startup passed on Ubuntu 24.04 and Debian 13 with read-only game data; WSLg desktop gameplay/display was accepted by the user. It bundles 47 shared libraries, including SDL2, D-Bus, and Bink-only FFmpeg. Graphics drivers, GBM/DRM, and glibc are supplied by the host desktop. It includes only the three tracked ReDUB logo textures, not original game data or a third-party texture pack.
 
 ```sh
-chmod +x ReDUB-0.2.2-x86_64.AppImage
-./ReDUB-0.2.2-x86_64.AppImage --game-dir "/path/to/extracted/game"
+chmod +x ReDUB-0.2.4-x86_64.AppImage
+./ReDUB-0.2.4-x86_64.AppImage --game-dir "/path/to/extracted/game"
 # FUSE-free fallback:
-APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB-0.2.2-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB-0.2.4-x86_64.AppImage
+# Keep config/data/cache/state beside the package instead of XDG:
+./ReDUB-0.2.4-x86_64.AppImage --portable "./ReDUB-data"
 # Library and display diagnostics:
-./ReDUB-0.2.2-x86_64.AppImage --diagnose
+./ReDUB-0.2.4-x86_64.AppImage --diagnose
 ```
+
+`--fullscreen 0|1|2`, `--resolution auto|WxH`, `--scale N`, `--frame-rate 30|60`, `--save-dir`, `--settings` and `--hd` are also accepted. Flag values become the matching game environment settings for that launch; `--` passes the rest through.
 
 | User files | Default location |
 | --- | --- |
@@ -25,7 +29,7 @@ APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB-0.2.2-x86_64.AppImage
 
 The corresponding XDG variables are respected. `MC3_SAVE_DIR`, `MC3_SETTINGS_FILE`, and `RECOMP_GL_HD_DIR` override individual locations. Existing Windows saves are not automatically imported. Linux maps Xbox Partition1/TDATA to `saves/TitleData`, UDATA to `saves/UserData`, and CACHE to `saves/Cache`, so the extracted game folder can stay read-only. Optional HD lookup is: explicit override, `hd` beside the AppImage, user-data `redub/hd`, then bundled ReDUB logos.
 
-Native Wayland is unsupported after observed plugin/protocol failures; the launcher selects X11/XWayland. Vulkan/DLSS and the unfinished 60/120 FPS work are excluded. The native Port Options entry/title uses `Port Options`, while setting labels retain the game's existing capitalization. Linux song text is transliterated rather than using Windows' full Unicode fallback. Real desktop audio and MPRIS player behavior remain unverified in the WSLg environment, whose PulseAudio socket was absent; decoded audio tests used dummy output.
+Native Wayland is unsupported after observed plugin/protocol failures; the launcher selects X11/XWayland. Vulkan/DLSS and experimental 120 FPS are excluded; the 60 FPS option is available and 30 FPS remains the default. The native Port Options entry/title uses `Port Options`, while setting labels retain the game's existing capitalization. Linux song text is transliterated rather than using Windows' full Unicode fallback. Real desktop audio and MPRIS player behavior remain unverified in the WSLg environment, whose PulseAudio socket was absent; decoded audio tests used dummy output.
 
 ## Rebuild the AppImage
 

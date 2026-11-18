@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Build','Rebuild','Doctor')][string]$Mode = 'Build',
+    [ValidateSet('Build','Rebuild','Import','Doctor')][string]$Mode = 'Build',
     [string]$Disc,
     [string]$Msys2Root = $env:MSYS2_ROOT,
     [switch]$NoInstall
@@ -12,6 +12,22 @@ if (!$Msys2Root) { $Msys2Root = 'C:\msys64' }
 $bash = Join-Path $Msys2Root 'usr\bin\bash.exe'
 $game = Join-Path $repo 'game-remix'
 
+function Select-DiscPath {
+    Add-Type -AssemblyName System.Windows.Forms
+    $picker = New-Object System.Windows.Forms.OpenFileDialog
+    $picker.Title = 'Choose your Xbox Midnight Club 3 Remix disc ISO'
+    $picker.Filter = 'Xbox disc image (*.iso;*.xiso)|*.iso;*.xiso|All files (*.*)|*.*'
+    try { if ($picker.ShowDialog() -eq 'OK') { return $picker.FileName } } finally { $picker.Dispose() }
+    return $null
+}
+
+function Copy-GameFolder([string]$Source) {
+    if (!(Test-Path -LiteralPath (Join-Path $Source 'default.xbe'))) { throw 'The extracted Xbox game folder must contain default.xbe.' }
+    New-Item -ItemType Directory -Path $game -Force | Out-Null
+    & robocopy.exe $Source $game /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS
+    if ($LASTEXITCODE -ge 8) { throw 'Could not copy the extracted disc files.' }
+}
+
 function Run-Bash([string]$Command) {
     & $bash -lc $Command
     if ($LASTEXITCODE -ne 0) { throw "Build step failed (exit $LASTEXITCODE). See work-remix\logs\easy-build.log." }
@@ -22,7 +38,6 @@ try {
     if ($Mode -eq 'Doctor') {
         $ok = $true
         foreach ($check in @(
-            @('MSYS2 build tools', $bash),
             @('Xbox Remix disc', (Join-Path $game 'default.xbe')),
             @('Installed game', (Join-Path $dist 'mcdub3remix.exe')),
             @('Controller runtime', (Join-Path $dist 'SDL2.dll')),
@@ -32,7 +47,22 @@ try {
             Write-Host (('{0}: {1}' -f $check[0], $(if ($found) { 'OK' } else { 'missing' })))
             if (!$found) { $ok = $false }
         }
+        if (Test-Path -LiteralPath $bash) { Write-Host 'MSYS2 build tools: OK (Advanced - Rebuild from source is available)' }
+        else { Write-Host 'MSYS2 build tools: not installed (only needed for Advanced - Rebuild from source)' }
         if (!$ok) { exit 1 }; exit 0
+    }
+    if ($Mode -eq 'Import') {
+        if ($Disc) {
+            $source = Get-Item -LiteralPath $Disc
+            if ($source.PSIsContainer) { Copy-GameFolder $source.FullName }
+            else { throw 'ISO import is handled by ReDUB Launcher.exe --import <disc.iso>; it needs no compiler.' }
+        }
+        elseif (!(Test-Path -LiteralPath (Join-Path $game 'default.xbe'))) {
+            throw 'No folder selected. Use -Disc <extracted-folder>, or use ReDUB Launcher.exe --import for an ISO.'
+        }
+        if (!(Test-Path -LiteralPath (Join-Path $game 'default.xbe'))) { throw 'The game folder does not contain default.xbe.' }
+        Write-Host "Game files are ready in $game. Nothing was compiled."
+        exit 0
     }
     . (Join-Path $PSScriptRoot 'Build-Path.ps1')
     $buildRoot=Get-ReDUBBuildRoot $repo
@@ -40,21 +70,11 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $work 'logs') -Force | Out-Null
 
     if (!(Test-Path -LiteralPath (Join-Path $game 'default.xbe'))) {
-        if (!$Disc) {
-            Add-Type -AssemblyName System.Windows.Forms
-            $picker = New-Object System.Windows.Forms.OpenFileDialog
-            $picker.Title = 'Choose your Xbox Midnight Club 3 Remix disc ISO'
-            $picker.Filter = 'Xbox disc image (*.iso)|*.iso'
-            try { if ($picker.ShowDialog() -eq 'OK') { $Disc = $picker.FileName } } finally { $picker.Dispose() }
-            if (!$Disc) { throw 'No disc selected. You can also run Build with -Disc followed by the ISO or extracted folder path.' }
-        }
+        if (!$Disc) { $Disc = Select-DiscPath }
+        if (!$Disc) { throw 'No disc selected. You can also run Build with -Disc followed by the ISO or extracted folder path.' }
         $source = Get-Item -LiteralPath $Disc
-        if ($source.PSIsContainer) {
-            if (!(Test-Path -LiteralPath (Join-Path $source.FullName 'default.xbe'))) { throw 'The extracted Xbox game folder must contain default.xbe.' }
-            New-Item -ItemType Directory -Path $game -Force | Out-Null
-            & robocopy.exe $source.FullName $game /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS
-            if ($LASTEXITCODE -ge 8) { throw 'Could not copy the extracted disc files.' }
-        } else { $env:MC3_SOURCE_ISO = $source.FullName }
+        if ($source.PSIsContainer) { Copy-GameFolder $source.FullName }
+        else { $env:MC3_SOURCE_ISO = $source.FullName }
     }
 
     $env:GAME = 'remix'

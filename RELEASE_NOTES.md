@@ -1,6 +1,38 @@
 # Release notes
 
-## v0.2.3 — 2026-11-17
+## v0.2.4 - 2026-11-18
+
+**Setup copies your disc and plays. A normal install never compiles.**
+
+### Add game files (no compiler)
+
+- The launcher's Install page is now **Add game files**. Choose an original Xbox Remix ISO/XISO or an extracted folder; the disc is copied into `game-remix/` beside the launcher.
+- ISOs are read by a new in-house XDVDFS reader in the launcher. It verifies `default.xbe` against the supported region7/EUR/USA Remix editions before keeping the files. No third-party extractor is bundled.
+- Import stages in `game-remix.importing`, checks the disc, then swaps it in. A failed or cancelled import leaves the previous game files, saves and settings alone. Replacing game files asks first.
+- The release zip already contains the game executable and its runtime. Play starts it directly; MSYS2, CMake and internet downloads are not used for normal setup.
+
+### Advanced
+
+- Build/Repair moved to **Settings -> Advanced -> Rebuild from source**, with the MSYS2, about 10 GB and 20+ minute warning. Repair build and prerequisite checks live there too.
+- `Build.ps1 -Mode Import` copies an extracted folder and stops before MSYS2. Doctor no longer treats MSYS2 as required for a shipped install.
+- Launcher command line: `--import <folder-or-iso>`, `--check`, `--play`, `--build` (advanced). Logs go to `work-remix/logs/launcher-cli.log`.
+
+### Linux
+
+- `ReDUB-0.2.4-x86_64.AppImage` and `ReDUB-0.2.4-x86_64.tar.gz` are built from the same source in a pinned Ubuntu container. The tarball is a plain AppDir for systems that cannot run an AppImage.
+- AppRun accepts `--game-dir`, `--portable DIR`, `--save-dir`, `--settings`, `--hd`, `--fullscreen`, `--resolution`, `--scale`, `--frame-rate`, `--diagnose`, `--version`, `--help` and `--` passthrough. XDG paths stay the default; portable mode is opt-in.
+- The package version comes from the repository version rather than a hardcoded AppImage number.
+
+### iOS (beta)
+
+- `mcdub3remix-beta-0.2.4-unsigned.ipa` is the unchanged 0.2.3 beta binary repackaged with the 0.2.4 version and beta bundle id. The iOS source is not yet unified into this repository.
+
+### Packaging
+
+- Windows zip: launcher, setup source and the prebuilt game in `work-remix/build-windows-x86_64/dist/`.
+- Existing 0.2.3 saves, settings and game files remain compatible.
+
+## v0.2.3 - 2026-11-17
 
 **60 FPS becomes an option, and the release stops looking like malware to virus scanners.**
 

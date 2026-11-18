@@ -3,7 +3,7 @@ set -eu
 APPDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 export APPDIR
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-version=0.2.2
+version=$(cat "$APPDIR/version" 2>/dev/null || printf 'unknown')
 config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/redub
 data_dir=${XDG_DATA_HOME:-$HOME/.local/share}/redub
 cache_dir=${XDG_CACHE_HOME:-$HOME/.cache}/redub
@@ -17,6 +17,40 @@ fail() {
     fi
     exit 2
 }
+usage() {
+    cat <<'HELP'
+ReDUB for Linux (Remix)
+
+Usage: ReDUB.AppImage [options]
+
+Game files (required):
+  --game-dir DIR        folder containing default.xbe (remembered beside the AppImage)
+  MC3_GAME_DIR          same, as an environment variable
+
+Where data goes (defaults follow the XDG layout):
+  --portable DIR        keep saves, settings, logs and caches inside DIR
+  REDUB_DATA_DIR=DIR    same, as an environment variable
+  --save-dir DIR        saves only          (MC3_SAVE_DIR)
+  --settings FILE       settings file       (MC3_SETTINGS_FILE)
+  --hd DIR              HD texture pack     (RECOMP_GL_HD_DIR)
+  Saves: $XDG_DATA_HOME/redub/saves   Settings: $XDG_CONFIG_HOME/redub/mcdub3remix_env.txt
+  Logs:  $XDG_STATE_HOME/redub        Caches:   $XDG_CACHE_HOME/redub
+
+Video and frame rate (same values as the launcher and Port Options):
+  --fullscreen 0|1|2    0 windowed, 1 exclusive fullscreen, 2 borderless (restart)
+  --resolution auto|WxH window size or display mode (restart)
+  --scale N             render scale: 1, 1.5, 2, 3, 5 (restart)
+  --frame-rate 30|60    30 is the default; 60 needs a restart
+
+Other:
+  --diagnose            print versions, display and library state
+  --version | --help
+  --                    pass the remaining arguments to the game
+
+Requires x86_64 Linux, glibc >= 2.39, OpenGL 3.3 and X11/XWayland.
+FUSE-free: APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB.AppImage
+HELP
+}
 read_location() {
     pointer=$1
     [ -r "$pointer" ] || return 0
@@ -29,43 +63,84 @@ read_location() {
         if [ -f "$candidate/default.xbe" ]; then MC3_GAME_DIR=$candidate; return 0; fi
     done < "$pointer"
 }
-case "${1:-}" in
-    --help|-h)
-        cat <<'HELP'
-ReDUB for Linux (Remix)
-Usage: ReDUB.AppImage [--game-dir /path/to/extracted-game]
-       ReDUB.AppImage --diagnose | --version | --help
-
-Provide your own extracted, legally owned Xbox Remix game files.
-Game lookup: --game-dir, MC3_GAME_DIR, saved configuration, then
-redub.game-location.txt beside the AppImage. Relative pointer paths
-are resolved beside the pointer file. --game-dir remembers the folder.
-Saves: $XDG_DATA_HOME/redub/saves (default ~/.local/share/redub/saves).
-Settings: $XDG_CONFIG_HOME/redub/mcdub3remix_env.txt.
-Logs: $XDG_STATE_HOME/redub/latest.log. Caches: $XDG_CACHE_HOME/redub.
-MC3_SAVE_DIR, MC3_SETTINGS_FILE and RECOMP_GL_HD_DIR override defaults.
-Requires x86_64 Linux, glibc >= 2.39 and a working OpenGL 3.3 driver, and X11/XWayland.
-FUSE-free: APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB.AppImage
-HELP
-        exit 0 ;;
-    --version) printf 'ReDUB %s\n' "$version"; exit 0 ;;
-    --diagnose)
-        printf 'ReDUB %s\nAppDir: %s\n' "$version" "$APPDIR"
-        getconf GNU_LIBC_VERSION
-        printf 'Display: %s / %s\n' "${DISPLAY:-unset}" "${WAYLAND_DISPLAY:-unset}"
-        ldd "$APPDIR/usr/bin/mcdub3remix"
-        exit 0 ;;
-    --game-dir)
-        [ "$#" -ge 2 ] || fail '--game-dir requires a folder containing default.xbe.'
-        [ -f "$2/default.xbe" ] || fail 'The chosen folder does not contain default.xbe.'
-        MC3_GAME_DIR=$(CDPATH= cd -- "$2" && pwd)
-        mkdir -p "$config_dir"
-        (umask 077; printf '%s\n' "$MC3_GAME_DIR" > "$config_dir/game-location.txt.tmp")
-        mv -f -- "$config_dir/game-location.txt.tmp" "$config_dir/game-location.txt"
-        shift 2 ;;
-    '') ;;
-    *) fail 'Unknown option. Run with --help for setup instructions.' ;;
-esac
+apply_portable() {
+    portable=$(CDPATH= cd -- "$1" 2>/dev/null && pwd) || fail "Portable folder does not exist: $1"
+    config_dir=$portable/config
+    data_dir=$portable/data
+    cache_dir=$portable/cache
+    state_dir=$portable/state
+}
+need_value() {
+    [ "$#" -ge 2 ] || fail "$1 requires a value. Run with --help."
+}
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --help|-h) usage; exit 0 ;;
+        --version) printf 'ReDUB %s\n' "$version"; exit 0 ;;
+        --diagnose)
+            printf 'ReDUB %s\nAppDir: %s\n' "$version" "$APPDIR"
+            getconf GNU_LIBC_VERSION
+            printf 'Display: %s / %s\n' "${DISPLAY:-unset}" "${WAYLAND_DISPLAY:-unset}"
+            ldd "$APPDIR/usr/bin/mcdub3remix"
+            exit 0 ;;
+        --game-dir)
+            need_value "$@"
+            [ -f "$2/default.xbe" ] || fail 'The chosen folder does not contain default.xbe.'
+            MC3_GAME_DIR=$(CDPATH= cd -- "$2" && pwd)
+            requested_game_dir=$MC3_GAME_DIR
+            shift 2 ;;
+        --portable)
+            need_value "$@"
+            mkdir -p "$2"
+            apply_portable "$2"
+            (umask 077; printf '%s\n' "$(CDPATH= cd -- "$2" && pwd)" > "$package_dir/redub.portable.tmp")
+            mv -f -- "$package_dir/redub.portable.tmp" "$package_dir/redub.portable"
+            shift 2 ;;
+        --save-dir) need_value "$@"; MC3_SAVE_DIR=$2; shift 2 ;;
+        --settings) need_value "$@"; MC3_SETTINGS_FILE=$2; shift 2 ;;
+        --hd) need_value "$@"; RECOMP_GL_HD_DIR=$2; shift 2 ;;
+        --fullscreen)
+            need_value "$@"
+            case "$2" in 0|1|2) MC3_FULLSCREEN=$2 ;; *) fail '--fullscreen takes 0, 1 or 2.' ;; esac
+            shift 2 ;;
+        --resolution)
+            need_value "$@"
+            case "$2" in auto|[0-9]*x[0-9]*) MC3_RESOLUTION=$2 ;; *) fail '--resolution takes auto or WIDTHxHEIGHT.' ;; esac
+            shift 2 ;;
+        --scale)
+            need_value "$@"
+            case "$2" in 1|1.5|2|3|5) RECOMP_GL_SCALE=$2 ;; *) fail '--scale takes 1, 1.5, 2, 3 or 5.' ;; esac
+            shift 2 ;;
+        --frame-rate)
+            need_value "$@"
+            case "$2" in 30|60) MC3_FRAME_RATE=$2 ;; *) fail '--frame-rate takes 30 or 60.' ;; esac
+            shift 2 ;;
+        --) shift; break ;;
+        -*) fail "Unknown option: $1. Run with --help." ;;
+        *) break ;;
+    esac
+done
+# Flag values only reach the game through the environment.
+[ -z "${MC3_SAVE_DIR:-}" ] || export MC3_SAVE_DIR
+[ -z "${MC3_SETTINGS_FILE:-}" ] || export MC3_SETTINGS_FILE
+[ -z "${RECOMP_GL_HD_DIR:-}" ] || export RECOMP_GL_HD_DIR
+[ -z "${MC3_FULLSCREEN:-}" ] || export MC3_FULLSCREEN
+[ -z "${MC3_RESOLUTION:-}" ] || export MC3_RESOLUTION
+[ -z "${RECOMP_GL_SCALE:-}" ] || export RECOMP_GL_SCALE
+[ -z "${MC3_FRAME_RATE:-}" ] || export MC3_FRAME_RATE
+# Portable mode can also come from the environment or a pointer beside the package.
+if [ -n "${REDUB_DATA_DIR:-}" ]; then apply_portable "$REDUB_DATA_DIR"; fi
+if [ -z "${REDUB_DATA_DIR:-}" ] && [ -r "$package_dir/redub.portable" ]; then
+    read -r pointer < "$package_dir/redub.portable" || pointer=
+    [ -n "${pointer:-}" ] && [ -d "$pointer" ] && apply_portable "$pointer"
+fi
+# Remember --game-dir only after portable mode chose the active config folder,
+# so flags work in either order (and with REDUB_DATA_DIR).
+if [ -n "${requested_game_dir:-}" ]; then
+    mkdir -p "$config_dir"
+    (umask 077; printf '%s\n' "$requested_game_dir" > "$config_dir/game-location.txt.tmp")
+    mv -f -- "$config_dir/game-location.txt.tmp" "$config_dir/game-location.txt"
+fi
 if [ -z "${MC3_GAME_DIR:-}" ]; then read_location "$config_dir/game-location.txt"; fi
 if [ -z "${MC3_GAME_DIR:-}" ]; then read_location "$package_dir/redub.game-location.txt"; fi
 if [ -z "${MC3_GAME_DIR:-}" ] && [ -f "$package_dir/game-remix/default.xbe" ]; then MC3_GAME_DIR=$package_dir/game-remix; fi

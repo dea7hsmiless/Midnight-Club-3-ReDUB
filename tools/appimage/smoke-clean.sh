@@ -4,7 +4,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends libgbm1 libdrm2 libgl1-mesa-dri libglx-mesa0 libgl1 xvfb xauth x11-utils imagemagick python3 procps > /tmp/apt.log 2>&1
 mkdir -p /tmp/redub-test; cd /tmp/redub-test
-cp /work/release-out/ReDUB-0.2.2-x86_64.AppImage ./ReDUB.AppImage; chmod +x ReDUB.AppImage
+cp "/work/release-out/ReDUB-${REDUB_VERSION:-0.2.4}-x86_64.AppImage" ./ReDUB.AppImage; chmod +x ReDUB.AppImage
 ./ReDUB.AppImage --appimage-extract > /tmp/extract.log
 export APPIMAGE=/tmp/redub-test/ReDUB.AppImage
 export HOME=/tmp/redub-profile

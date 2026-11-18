@@ -45,11 +45,20 @@ launcher's BOM/codepage, and whether the tree is dirty.
 ## Build entry points
 
 ```
+# Normal install (copy-only, no compiler): launcher -> Add game files, or
+ReDUB Launcher.exe --import <folder-or-iso>
+ReDUB Launcher.exe --check
+ReDUB Launcher.exe --play
+ReDUB Launcher.exe --build            # advanced, MSYS2
+
+# Folder import without the launcher UI
+powershell -File .portable\Build.ps1 -Mode Import -Disc <extracted-folder>
+
 # Windows package (MSYS2 CLANG64; set MSYSTEM/CHERE_INVOKING before the login shell)
 GAME=remix MC3_GAME_DIR=/d/Launchbox/Games/Recomps/Apps/mcdub3-nx/game-remix \
   MC3_NO_DESKTOP_SHORTCUT=1 bash tools/build_windows.sh
 
-# Launcher (Windows host, .NET Framework csc)
+# Launcher (Windows host, .NET Framework csc; includes Launcher.cs + Xdvdfs.cs)
 powershell -File .portable\Build-Launcher.ps1
 
 # AppImage (Docker; the script's `git -C` fails inside a linked worktree, see STATUS.md)
@@ -67,5 +76,13 @@ python ios/build_launcher.py && python ios/package_launcher.py --beta
   commit and epoch to Docker explicitly.
 - `7z a` with `-w` does not set the working directory; `Push-Location` first.
 - Building replaces `work-remix/build-windows-x86_64/dist` entirely — repackage the zip after.
+- Import stages in `game-remix.importing`, verifies `default.xbe`, then swaps `game-remix`; a
+  failed or cancelled import must leave the old folder and saves untouched.
+- Normal Play and Add game files must never run `Build.ps1`; a release already ships the
+  prebuilt game. `launcher-source.zip` is for Advanced rebuild only.
+- Linux portable mode is opt-in (`--portable` / `REDUB_DATA_DIR`); XDG stays the default.
+  Do not flip that default without a product decision.
+- Game settings stay in `mcdub3remix_env.txt`; the CLI exposes location and video/frame-rate
+  flags, not one flag per setting.
 - VirusTotal whitelisting is per hash: any rebuild invalidates a pending false-positive
   report.

@@ -24,24 +24,24 @@ Use only game files you are legally authorized to use. Where permitted, these ma
 
 ## Quick start
 
-1. Put the self-contained **ReDUB Launcher.exe** in the writable folder where you want to install and build, such as `D:\Games\ReDUB`. It includes artwork and setup source and restores missing setup files beside itself. A full source checkout also works.
+1. Put the self-contained **ReDUB Launcher.exe** in the writable folder where you want to install, such as `D:\Games\ReDUB`. The full release zip already contains the game executable and its runtime. A full source checkout also works.
 2. Open **ReDUB Launcher.exe**. From source without that executable, open **Launch ReDUB.cmd** to compile the launcher using Windows' .NET Framework compiler.
-3. For a new installation, select your **original Xbox DUB Edition Remix ISO** or complete extracted Xbox folder.
-4. Choose **Build / Repair**. The first build installs missing tools, extracts or copies game data, converts game code, and compiles the Windows executable. Internet access is required for missing dependencies. Later builds reuse conversion and compiler caches.
+3. For a new installation, open **Add game files** and choose your **original Xbox DUB Edition Remix ISO/XISO** or the complete extracted Xbox folder.
+4. Select **Add game files**. Extracted folders are copied and ISOs are unpacked by the built-in reader. Nothing is compiled, and no MSYS2, CMake or internet download is needed.
 5. Choose **Play**. Open **Options → Port Options** for graphics and PC Music settings.
 
-An existing installation is detected automatically and can play without rebuilding. The launcher does not download games or pull source updates from GitHub.
+An existing installation is detected automatically and can play immediately. Replacing game files keeps saves and settings. If the release folder is missing the game executable, use the full ReDUB Windows zip or **Settings → Advanced → Rebuild from source**. The launcher does not download games or pull source updates from GitHub.
 
 ## Linux AppImage
 
-Download **ReDUB-0.2.2-x86_64.AppImage** from [Releases](https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases/latest). Mark it executable, then select your extracted Xbox Remix game folder once:
+Download **ReDUB-0.2.4-x86_64.AppImage** from [Releases](https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases/latest). Mark it executable, then select your extracted Xbox Remix game folder once:
 
 ```sh
-chmod +x ReDUB-0.2.2-x86_64.AppImage
-./ReDUB-0.2.2-x86_64.AppImage --game-dir "/path/to/extracted/game"
+chmod +x ReDUB-0.2.4-x86_64.AppImage
+./ReDUB-0.2.4-x86_64.AppImage --game-dir "/path/to/extracted/game"
 ```
 
-The folder is remembered for later launches. Requires x86_64 Linux, glibc 2.39+ (Ubuntu 24.04 / Debian 13 tested), X11/XWayland, and OpenGL 3.3. The package bundles SDL2, D-Bus, Bink-only FFmpeg, and the ReDUB logo artwork. Saves and Port Options live in user directories; original game files may be read-only. If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB-0.2.2-x86_64.AppImage`.
+A plain `ReDUB-0.2.4-x86_64.tar.gz` carries the same AppDir. `--portable DIR` keeps config, data, cache and state beside the package instead of in XDG directories. The folder is remembered for later launches. Requires x86_64 Linux, glibc 2.39+ (Ubuntu 24.04 / Debian 13 tested), X11/XWayland, and OpenGL 3.3. The package bundles SDL2, D-Bus, Bink-only FFmpeg, and the ReDUB logo artwork. Saves and Port Options live in user directories; original game files may be read-only. If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB-0.2.4-x86_64.AppImage`.
 
 Shared menu, synchronization, pushbuffer, and movie fixes match the Windows release source; the entry/page title uses **Port Options** capitalization. Linux PC Music uses MPRIS, with transliterated song text. Native Wayland, Vulkan/DLSS, and experimental 60/120 FPS are excluded. Native desktop sound and MPRIS output remain unverified in our WSLg environment. See [Linux setup and build instructions](BUILDING-LINUX.md).
 
@@ -51,10 +51,10 @@ The sidebar layout is inspired by [SafeHouse](https://github.com/FridiNaTor1/Saf
 
 | Page | Purpose |
 | --- | --- |
-| Game | Installation status, Play/Install, verification, repair, game folder, desktop/library shortcuts. |
-| Install | Choose Xbox Remix data, build/repair, or perform a full game-code rebuild. |
-| Settings | Display, Graphics, Controls, Music, Diagnostics, and Launcher groups. |
-| Support | Local build output, setup checks, logs, and this guide. |
+| Game | Installation status, Play/Add game files, verification, repair, game folder, desktop/library shortcuts. |
+| Add game files | Choose an Xbox Remix ISO/XISO or extracted folder; copies or unpacks the disc data only. |
+| Settings | Display, Graphics, Controls, Music, Diagnostics, Launcher, and Advanced groups. Advanced rebuilds the game from source. |
+| Support | Local setup output, checks, logs, and this guide. |
 | About | Project identity, features, limitations, and upstream credits. |
 
 Enable **Settings → Launcher → Skip launcher on startup** to start the installed game directly. This is off by default. Hold **Shift** while starting, or use **Open ReDUB Launcher.cmd**, to open the launcher again. Missing required files fall back to setup. The preference is stored separately in `launcher/preferences.ini`.
@@ -63,7 +63,7 @@ Enable **Settings → Launcher → Skip launcher on startup** to start the insta
 
 Close the game before changing launcher game settings. During gameplay, use native Port Options for supported live changes. Launcher saves preserve comments and unrelated settings, write atomically, and retain an initial `.launcher-backup`. Graphics presets preserve HUD quality, gamma, brightness, and music preferences.
 
-Setup output appears on Support. Save and close the game before installing a build. Existing game files, saves, and settings are preserved; there is no destructive reset/delete button. Move the complete installation together to retain installed game data and recreate shortcuts afterward. Moving only the launcher carries artwork and setup source, not game data. It builds in its new folder rather than using an old installation. Paths with spaces use a build-tool junction alias; files stay in the selected folder. Paths are relative and compiler caches are separated by location.
+Setup output appears on Support. Save and close the game before adding or replacing game files, or before an Advanced rebuild. Existing game files, saves, and settings are preserved; there is no destructive reset/delete button. Import is copy-only; the release zip supplies the executable. Move the complete installation together to retain installed game data and recreate shortcuts afterward. Moving only the launcher carries artwork and setup source, not game data. Advanced builds use a build-tool junction alias for paths with spaces; files stay in the selected folder.
 
 Optional artwork lives in `launcher/art`: `hero.jpg` or `hero.png`, `logo.png`, and `redub.ico`. Restart to reload images. Missing or unreadable images use the gradient/text fallback. See the [artwork guide and provenance](launcher/art/ARTWORK.md).
 
@@ -152,8 +152,8 @@ The original **30 FPS simulation target** remains. 60/120 FPS modes, frame gener
 
 - x64 Windows and a GPU/driver supporting the existing OpenGL renderer (OpenGL 3.3 or newer).
 - Complete supported original Xbox Remix data. Modified/unsupported executables may not match converted code.
-- A writable folder, free space for extracted data and build caches, and internet for missing dependencies.
-- Source builds use MSYS2/Clang tools. The launcher uses Windows' .NET Framework compiler, with no separate Node/Python launcher runtime download.
+- A writable folder and free space for the extracted disc (about 4.6 GB).
+- Normal setup is copy-only: no compiler, MSYS2, CMake or internet download. **Advanced → Rebuild from source** uses MSYS2/Clang tools and internet for missing dependencies. The launcher uses Windows' .NET Framework compiler, with no separate Node/Python launcher runtime download.
 
 Start with **Verify setup** or **Support → Check setup**. For performance, try Performance and restart; high HUD scale also increases GPU work. For controllers, check Windows recognition and retain the supplied SDL2 runtime. For music, start the desired player once and check its Windows media controls.
 
@@ -165,7 +165,8 @@ See [Windows build instructions](BUILDING-WINDOWS.md) or the [Linux build guide]
 
 - `.portable/Launcher.cs`: launcher source.
 - `.portable/Build-Launcher.ps1`: compile launcher/create shortcuts.
-- `.portable/Build.ps1`: setup, repair, build, and prerequisite checks.
+- `.portable/Build.ps1`: folder import, advanced build/repair, and prerequisite checks.
+- `.portable/Xdvdfs.cs`: in-house Xbox disc reader used by **Add game files**.
 - `src/windows_settings.c` and `src/linux_settings.c`: shared native options with per-platform persistence and display/input hooks.
 - `src/windows_media.c` and `tools/windows/now_playing.ps1`: optional Windows media integration.
 - `work-remix/build-windows-x86_64/dist`: installed game/settings.
