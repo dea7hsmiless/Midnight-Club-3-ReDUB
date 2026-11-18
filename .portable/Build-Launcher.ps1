@@ -11,7 +11,7 @@ if(!$ShortcutsOnly){
  & (Join-Path $PSScriptRoot 'Bundle-Launcher-Source.ps1')
  $compiler=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
  if(!(Test-Path -LiteralPath $compiler)){throw 'The Windows .NET Framework C# compiler is missing.'}
- $resources=@("/resource:$(Join-Path $repo 'work-remix\launcher-source.zip'),ReDUB.Source.zip")
+ $resources=@()
  foreach($name in @('logo.png','hero.jpg','hero.png')){$art=Join-Path $repo "launcher\art\$name";if(Test-Path -LiteralPath $art){$resources+="/resource:$art,ReDUB.Art.$name"}}
  New-Item -ItemType Directory -Path $candidateDir -Force | Out-Null
  if(Test-Path -LiteralPath $candidate){Remove-Item -LiteralPath $candidate -Force}
@@ -20,6 +20,9 @@ if(!$ShortcutsOnly){
  try {Move-Item -LiteralPath $candidate -Destination $exe -Force}
  catch {throw "Launcher compiled successfully but Windows has the current launcher locked. Close it and rerun Build-Launcher.ps1; the new build is preserved at $candidate."}
  if(Test-Path -LiteralPath $candidateDir){Remove-Item -LiteralPath $candidateDir -Force}
+ # The setup source ships beside the launcher. Embedding a 17 MB archive in a
+ # .NET exe makes security scanners read it as a packed dropper.
+ Copy-Item -LiteralPath (Join-Path $repo 'work-remix\launcher-source.zip') -Destination (Join-Path $repo 'launcher-source.zip') -Force
 }
 if(!(Test-Path -LiteralPath $exe)){throw 'Build the launcher first.'}
 $shell=New-Object -ComObject WScript.Shell

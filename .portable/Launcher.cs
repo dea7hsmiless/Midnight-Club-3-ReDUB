@@ -9,6 +9,13 @@ using System.Text;
 using System.Windows.Forms;
 using System.Reflection;
 using System.IO.Compression;
+[assembly: AssemblyTitle("ReDUB Launcher")]
+[assembly: AssemblyDescription("Midnight Club 3: DUB Edition Remix setup, build and play launcher")]
+[assembly: AssemblyProduct("ReDUB")]
+[assembly: AssemblyCompany("ReDUB")]
+[assembly: AssemblyCopyright("Fan project; Midnight Club 3 is a trademark of its owners")]
+[assembly: AssemblyVersion("0.2.3.0")]
+[assembly: AssemblyFileVersion("0.2.3.0")]
 namespace ReDUB {
 public class RedubButton : Control, IButtonControl {
     public bool Primary, Selected;
@@ -204,12 +211,21 @@ public sealed class Launcher : Form {
     static void StartDirect(string root){var running=Process.GetProcessesByName("mcdub3remix");bool active=running.Length>0;foreach(var p in running)p.Dispose();if(active)return;if(!InstallationReady(root))throw new IOException("The selected renderer is not built. Build it from Settings → Graphics, or choose OpenGL.");Process.Start(LaunchInfo(root));}
     public static bool IsSourceRoot(string path){return Directory.Exists(path)&&File.Exists(Path.Combine(path,@".portable\Build.ps1"))&&File.Exists(Path.Combine(path,"CMakeLists.txt"));}
     static string Sha256(string path){using(var sha=System.Security.Cryptography.SHA256.Create())using(var stream=File.OpenRead(path))return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","").ToLowerInvariant();}
-    public static void ExtractEmbeddedSource(string destination){
+    /* The setup source travels as launcher-source.zip beside the launcher, not
+     * inside the executable. A large embedded archive made every security
+     * scanner treat the launcher as a packed dropper; an embedded copy is only
+     * a fallback for builds that still carry one. */
+    static Stream OpenSourceBundle(){
+        string[] candidates={Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"launcher-source.zip"),Path.Combine(AppDomain.CurrentDomain.BaseDirectory,@"work-remix\launcher-source.zip")};
+        foreach(string path in candidates)if(File.Exists(path))return File.OpenRead(path);
+        return Assembly.GetExecutingAssembly().GetManifestResourceStream("ReDUB.Source.zip");
+    }
+    public static void ExtractSource(string destination){
         string prefix=Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
         string managed=Path.Combine(destination,".redub-source-manifest.txt");var previous=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
         if(File.Exists(managed))foreach(string line in File.ReadAllLines(managed)){int tab=line.IndexOf('\t');if(tab>0)previous[line.Substring(tab+1).Replace('/',Path.DirectorySeparatorChar)]=line.Substring(0,tab);}
-        using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("ReDUB.Source.zip")){
-            if(stream==null)throw new IOException("This launcher has no embedded setup source. Use a complete ReDUB launcher build.");
+        using(var stream=OpenSourceBundle()){
+            if(stream==null)throw new IOException("This folder has no setup source. Put launcher-source.zip next to ReDUB Launcher.exe and start it again.");
             using(var archive=new ZipArchive(stream,ZipArchiveMode.Read)){
                 var current=new List<string>();string manifestText=null;var manifestEntry=archive.GetEntry("launcher-source-manifest.json");
                 if(manifestEntry!=null)using(var reader=new StreamReader(manifestEntry.Open(),Encoding.UTF8))manifestText=reader.ReadToEnd();
@@ -227,14 +243,14 @@ public sealed class Launcher : Form {
                 if(current.Count>0)File.WriteAllLines(managed,current,new UTF8Encoding(false));
             }
         }
-        if(!IsSourceRoot(destination))throw new IOException("Embedded setup source is incomplete.");
+        if(!IsSourceRoot(destination))throw new IOException("The setup source is incomplete.");
     }
     public static string ResolveRoot(){
         string here=AppDomain.CurrentDomain.BaseDirectory;
         // A standalone launcher belongs to the folder the user put it in.
         // Never silently redirect builds or settings to a previous installation.
         // Always update managed files when the embedded bundle changes; keep user edits.
-        ExtractEmbeddedSource(here);
+        ExtractSource(here);
         return here;
     }
     [STAThread] public static void Main(string[] args){string root;
