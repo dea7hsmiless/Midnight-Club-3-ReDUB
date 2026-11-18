@@ -91,9 +91,23 @@ static inline uint64_t muldiv64(uint64_t a, uint32_t b, uint32_t c) {
     /* For our use case (timer math), overflow is unlikely */
     return (uint64_t)(((double)a * b) / c);
 }
-#else
+#elif defined(__SIZEOF_INT128__)
 static inline uint64_t muldiv64(uint64_t a, uint32_t b, uint32_t c) {
     return (uint64_t)(((unsigned __int128)a * b) / c);
+}
+#else
+/* 32-bit targets (armeabi-v7a, x86) have no __int128. Do the 64x32
+ * multiply in halves and use the same timer-math fallback as MSVC when the
+ * product does not fit in 64 bits. */
+static inline uint64_t muldiv64(uint64_t a, uint32_t b, uint32_t c) {
+    uint64_t lo = (uint32_t)a, hi = a >> 32;
+    uint64_t p0 = lo * b, p1 = hi * b;
+    uint64_t mid = (p0 >> 32) + (uint32_t)p1;
+    uint64_t upper = (p1 >> 32) + (mid >> 32);
+    uint64_t lower = (p0 & 0xffffffffu) | (mid << 32);
+    if (upper == 0)
+        return lower / c;
+    return (uint64_t)(((double)a * b) / c);
 }
 #endif
 

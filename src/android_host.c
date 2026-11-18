@@ -238,6 +238,16 @@ void android_boot(void)
             setenv("MC3_GAME_DIR", l, 1);
         if ((l = getenv("MC3_LAUNCHER_TOUCH_PAD")) != NULL && *l)
             setenv("RECOMP_TOUCH_PAD", l, 1);  /* auto, 1 always, 0 never */
+        if ((l = getenv("MC3_LAUNCHER_TOUCH_STEER")) != NULL && *l)
+            setenv("RECOMP_TOUCH_STEER", l, 1);
+        if ((l = getenv("MC3_LAUNCHER_TOUCH_SENS")) != NULL && *l)
+            setenv("RECOMP_TOUCH_STEER_SENS", l, 1);
+        if ((l = getenv("MC3_LAUNCHER_TOUCH_DEADZONE")) != NULL && *l)
+            setenv("RECOMP_TOUCH_DEADZONE", l, 1);
+        if ((l = getenv("MC3_LAUNCHER_TOUCH_HAPTICS")) != NULL && *l)
+            setenv("RECOMP_TOUCH_HAPTICS", l, 1);
+        if ((l = getenv("MC3_LAUNCHER_TOUCH_INVERT")) != NULL && *l)
+            setenv("RECOMP_TOUCH_TILT_INVERT", l, 1);
     }
     for (;;) {
         const char *g = getenv("MC3_GAME_DIR");

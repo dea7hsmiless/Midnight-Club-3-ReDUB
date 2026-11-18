@@ -8,9 +8,12 @@ plugins {
 def repo = rootProject.projectDir.parentFile
 def game = project.hasProperty('MC3_GAME') ? project.MC3_GAME : 'dub'
 def edition = project.hasProperty('MC3_EDITION') ? project.MC3_EDITION : (game == 'remix' ? 'eur' : 'usa')
-// Release packages are arm64 only. -PMC3_ABI=x86_64 makes a local emulator
-// test build; it is never the default.
-def abi = project.hasProperty('MC3_ABI') ? project.MC3_ABI : 'arm64-v8a'
+// Release packages are arm64 by default. -PMC3_ABI=x86_64 makes a local
+// emulator test build; -PMC3_ABI=universal bundles the three current ABIs.
+def abiArg = project.hasProperty('MC3_ABI') ? project.MC3_ABI : 'arm64-v8a'
+def abis = abiArg == 'universal'
+           ? ['arm64-v8a', 'armeabi-v7a', 'x86_64']
+           : abiArg.split(',')
 def appEnv = new File(repo, "config/${game}/app.env").text
 def envVar = { String name, String dflt ->
     def m = (appEnv =~ /(?m)^${name}="?([^"\n]*)"?/)
@@ -100,7 +103,7 @@ android {
         versionName versionLabel
         resValue 'string', 'app_name', label
         resValue 'string', 'sd_dir', "${app}-nx"     // the Switch build's folder (MC3_SD_DIR)
-        ndk { abiFilters abi }
+        ndk { abiFilters.addAll(abis) }
         externalNativeBuild {
             cmake {
                 arguments "-DMC3_REPO=${repo}", "-DMC3_SDL_DIR=${sdl}",
@@ -148,7 +151,8 @@ android {
     // debug builds -debug.apk
     applicationVariants.all { variant ->
         variant.outputs.all {
-            def abiTag = abi == 'arm64-v8a' ? '' : "-${abi}"
+            def abiTag = abis.size() > 1 ? '-universal'
+                         : abis[0] == 'arm64-v8a' ? '' : "-${abis[0]}"
             outputFileName = "${app}-${versionLabel}${abiTag}${variant.buildType.name == 'release' ? '' : '-debug'}.apk"
         }
     }

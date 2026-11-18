@@ -42,15 +42,15 @@ public class MainActivity extends SDLActivity {
             if (pad != null)
                 Os.setenv("MC3_LAUNCHER_TOUCH_PAD", pad, true);
             if (steer != null)
-                Os.setenv("RECOMP_TOUCH_STEER", steer, true);
+                Os.setenv("MC3_LAUNCHER_TOUCH_STEER", steer, true);
             if (sens != null)
-                Os.setenv("RECOMP_TOUCH_STEER_SENS", sens, true);
+                Os.setenv("MC3_LAUNCHER_TOUCH_SENS", sens, true);
             if (deadzone != null)
-                Os.setenv("RECOMP_TOUCH_DEADZONE", deadzone, true);
+                Os.setenv("MC3_LAUNCHER_TOUCH_DEADZONE", deadzone, true);
             if (haptics != null)
-                Os.setenv("RECOMP_TOUCH_HAPTICS", haptics, true);
+                Os.setenv("MC3_LAUNCHER_TOUCH_HAPTICS", haptics, true);
             if (invert != null)
-                Os.setenv("RECOMP_TOUCH_TILT_INVERT", invert, true);
+                Os.setenv("MC3_LAUNCHER_TOUCH_INVERT", invert, true);
         } catch (Exception e) {
             /* the native search and defaults then */
         }

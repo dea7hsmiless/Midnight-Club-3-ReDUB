@@ -3241,7 +3241,9 @@ static void port_build(void)
     const int order[]={0,5,2,12,3,4,6,13,14,1,16,7,9,11,15,8,10};
     int capacity=MEM32(port_list+0x230);
     int settings=capacity>=18?17:capacity>=17?16:15;
-    for(int k=0;k<settings;k++){int i=order[k];port_rows[i]=port_add(0x7F00u+i,NULL);}
+    /* FRAME RATE is id 16: 0x7F10 already opens Port Options, so it needs its
+     * own event instead of the 0x7F00+id range. */
+    for(int k=0;k<settings;k++){int i=order[k];port_rows[i]=port_add(i==16?0x7F12u:0x7F00u+(uint32_t)i,NULL);}
     port_add(0x7F11u,"BACK");port_labels();
     port_building=0;
 }
@@ -3308,6 +3310,11 @@ void sub_00163830(void)
     if(port_open&&!port_context_valid())port_invalidate();
     if(event==0x7F10) {port_enter();g_eax=0;g_esp+=8;return;}
     if(event==0x7F11) {port_parent();g_eax=0;g_esp+=8;return;}
+    if(port_open && event==0x7F12) {
+        if(port_accept_down){g_eax=0;g_esp+=8;return;}
+        port_accept_down=1;
+        windows_port_setting_change(16);g_eax=0;g_esp+=8;return;
+    }
     if(port_open && event>=0x7F00 && event<0x7F10) {
         if(port_accept_down){g_eax=0;g_esp+=8;return;}
         port_accept_down=1;
