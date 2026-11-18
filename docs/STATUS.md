@@ -21,31 +21,30 @@ double-encoded launcher; the release body had the same bug). Same tag, same file
 
 ## 0.2.4 — committed locally, not tagged or pushed
 
-Branch `release/0.2.4`, cut from `f3f34b2`. The code and docs are committed locally;
-nothing is pushed, tagged or uploaded. The 0.2.3 tag and assets are untouched.
+Branch `release/0.2.4`, commit `e33a7b4`, cut from `f3f34b2`. Nothing is pushed,
+tagged or uploaded. The 0.2.3 tag and assets are untouched.
 
-Candidate artifacts are in `Desktop\ReDUB-0.2.4-release` (build staging:
-`%TEMP%\opencode\redub-0.2.4-package`). They were built from the dirty worktree
-before the final commit, so rebuild the Windows zip, AppImage and tarball from the
-committed tree before publishing (the AppImage manifest embeds the source commit).
-The table below is the candidate set, not the publish set.
+The artifacts in `Desktop\ReDUB-0.2.4-release` were rebuilt from `e33a7b4`
+(non-Windows assets in `%TEMP%\opencode\redub-appimage-work\release-out`,
+AppImage manifest `source_commit` = `e33a7b4`). `SHA256SUMS.txt` matches the
+folder:
 
 | Asset | Size | SHA-256 |
 |---|---|---|
-| `ReDUB-0.2.4-Windows-x86_64.zip` | 76,299,756 | `4df83c4579e0485c945c02cfdd03d21fb857fe4e9ea17dc81ec1854a2ddf7b3f` |
-| `ReDUB-0.2.4-x86_64.AppImage` | 22,133,240 | `2f93a828d98738bb973f2253958703c0c2c8eb73bfae11a2256b052de8195257` |
-| `ReDUB-0.2.4-x86_64.tar.gz` | 23,831,771 | `6b2da30c9ed8717538d99023d7f35dd927cbeb47a8711622cc3402957a17cd2d` |
+| `ReDUB-0.2.4-Windows-x86_64.zip` | 73,646,985 | `beae4a22118316ffd9e483a7cc5ea9bf3a8b8f4b39eaf370b3578afc1afb303b` |
+| `ReDUB-0.2.4-x86_64.AppImage` | 22,133,240 | `69a3ffd61d5613825b22568353c4f04400a44a09fdc847e0af1801ba925dd1ef` |
+| `ReDUB-0.2.4-x86_64.tar.gz` | 23,832,249 | `d8d544a15910d71bb0d3bc13d288a27e232d995fe251e4267a9e9ed6cb0b48b9` |
 | `mcdub3remix-beta-0.2.4-unsigned.ipa` | 16,392,674 | `0b58f94b6049520c14b39c9fd0810c9c52824bf1af0e1e47f441b40a0fe83f0a` |
 
 Launcher: `d371cc823896874311f26be8a25600a2932758fb6ddba7eba7c4330ad8a31e7a`
-(110,592 B, file version 0.2.4.0). Setup source: `1566c909…` (12,703,011 B).
+(110,592 B, file version 0.2.4.0). Setup source: `e7b05909…` (12,704,806 B).
 Game exe unchanged: `8b682c53…`.
 
 ## 0.2.4 code — on `release/0.2.4`
 
-Branch `release/0.2.4` is cut from `f3f34b2`; it is committed locally and not pushed.
-The 0.2.3 tag and assets are untouched. `config/*/app.env` and the launcher say
-0.2.4.
+Branch `release/0.2.4` is cut from `f3f34b2`; commit `e33a7b4` is local and not
+pushed. The 0.2.3 tag and assets are untouched. `config/*/app.env` and the
+launcher say 0.2.4.
 
 **Import without compiling**
 
@@ -109,9 +108,10 @@ while it runs; the reader supports cancellation but the UI does not expose it ye
 
 - `tools/appimage/` carries `--game-dir`, `--portable`, save/settings/fullscreen/
   resolution/frame-rate flags, a version file, deterministic tarball packaging and
-  launcher tests. The 0.2.4 AppImage and tarball were rebuilt in the pinned Ubuntu
-  container; `AppRun --version` prints `ReDUB 0.2.4` and the tarball `version` is
-  `0.2.4`. Launcher tests and metadata validation passed.
+  launcher tests. The 0.2.4 AppImage and tarball were rebuilt from `e33a7b4` in the
+  pinned Ubuntu container; `LAUNCHER_TESTS_OK` and `SOURCES_OK` passed, `AppRun
+  --version` prints `ReDUB 0.2.4`, the tarball `version` is `0.2.4`, and the build
+  manifest `source_commit` is `e33a7b4`.
 - The iOS beta IPA was repackaged at 0.2.4 from the existing 0.2.3 binary; no iOS
   source changed in this release.
 
