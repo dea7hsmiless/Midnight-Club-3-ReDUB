@@ -42,7 +42,8 @@ import java.util.List;
 public class LauncherActivity extends Activity {
     private static final int PICK_FOLDER = 1;
     private static final String PREFS = "launcher", FOLDERS = "folders", LAST = "last",
-                                TOUCH_PAD = "touchPad";
+                                TOUCH_PAD = "touchPad", TOUCH_STEER = "touchSteer",
+                                TOUCH_SENS = "touchSteerSens";
 
     private SharedPreferences prefs;
     private LinearLayout root;
@@ -202,8 +203,42 @@ public class LauncherActivity extends Activity {
         g.setOnCheckedChangeListener((grp, id) ->
             prefs.edit().putString(TOUCH_PAD, opts[id - 2000][0]).apply());
         root.addView(g);
+        choiceSetting("Steering", TOUCH_STEER, "stick", 2100, new String[][] {
+            { "stick", "Stick" },
+            { "tilt", "Tilt (accelerometer)" },
+            { "both", "Stick + tilt" },
+        });
+        choiceSetting("Steering response", TOUCH_SENS, "1", 2200, new String[][] {
+            { "1", "Normal" },
+            { "1.35", "Quick" },
+            { "1.7", "Sharp" },
+        });
+        root.addView(text("Tilt uses the phone's accelerometer. Hold the phone level "
+            + "when the race starts to set its centre; steering response boosts small "
+            + "inputs without changing full lock.", 13, false, Color.GRAY));
         root.addView(text(pads.isEmpty() ? "Controllers connected now: none"
             : "Controllers connected now: " + String.join(", ", pads), 13, false, Color.GRAY));
+    }
+
+    /* A labelled radio group over SharedPreferences, for the touch settings. */
+    private void choiceSetting(String title, String key, String dflt, int baseId,
+                               String[][] opts) {
+        String current = prefs.getString(key, dflt);
+        root.addView(text(title, 15, true, Color.LTGRAY));
+        RadioGroup g = new RadioGroup(this);
+        for (int i = 0; i < opts.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(baseId + i);
+            rb.setText(opts[i][1]);
+            rb.setTextColor(Color.WHITE);
+            rb.setPadding(dp(8), dp(4), 0, dp(4));
+            g.addView(rb);
+            if (opts[i][0].equals(current))
+                g.check(rb.getId());
+        }
+        g.setOnCheckedChangeListener((grp, id) ->
+            prefs.edit().putString(key, opts[id - baseId][0]).apply());
+        root.addView(g);
     }
 
     private static List<String> controllers() {
@@ -363,6 +398,8 @@ public class LauncherActivity extends Activity {
         Intent i = new Intent(this, MainActivity.class);
         i.putExtra(MainActivity.EXTRA_GAME_DIR, f);
         i.putExtra(MainActivity.EXTRA_TOUCH_PAD, prefs.getString(TOUCH_PAD, "auto"));
+        i.putExtra(MainActivity.EXTRA_TOUCH_STEER, prefs.getString(TOUCH_STEER, "stick"));
+        i.putExtra(MainActivity.EXTRA_TOUCH_SENS, prefs.getString(TOUCH_SENS, "1"));
         startActivity(i);
         finish();
     }

@@ -17,6 +17,9 @@ public class MainActivity extends SDLActivity {
     public static final String EXTRA_GAME_DIR = "gameDir";
     /* The on-screen gamepad: "auto", "1" always, "0" never (touch_pad.c). */
     public static final String EXTRA_TOUCH_PAD = "touchPad";
+    /* Steering: "stick", "tilt" or "both"; response multiplier 0.5..2. */
+    public static final String EXTRA_TOUCH_STEER = "touchSteer";
+    public static final String EXTRA_TOUCH_SENS = "touchSteerSens";
 
     @Override
     protected void onCreate(Bundle state) {
@@ -24,11 +27,17 @@ public class MainActivity extends SDLActivity {
          * settings file and the search. */
         String dir = getIntent() != null ? getIntent().getStringExtra(EXTRA_GAME_DIR) : null;
         String pad = getIntent() != null ? getIntent().getStringExtra(EXTRA_TOUCH_PAD) : null;
+        String steer = getIntent() != null ? getIntent().getStringExtra(EXTRA_TOUCH_STEER) : null;
+        String sens = getIntent() != null ? getIntent().getStringExtra(EXTRA_TOUCH_SENS) : null;
         try {
             if (dir != null)
                 Os.setenv("MC3_LAUNCHER_GAME_DIR", dir, true);
             if (pad != null)
                 Os.setenv("MC3_LAUNCHER_TOUCH_PAD", pad, true);
+            if (steer != null)
+                Os.setenv("RECOMP_TOUCH_STEER", steer, true);
+            if (sens != null)
+                Os.setenv("RECOMP_TOUCH_STEER_SENS", sens, true);
         } catch (Exception e) {
             /* the native search and defaults then */
         }

@@ -43,6 +43,9 @@
 #include "xinput_xbox.h"
 
 extern int (*xbox_keyboard_driving)(void);      /* sdl_keyboard.c */
+#if defined(__IPHONEOS__)
+extern void ios_haptic_tick(int strong);        /* src/ios_launcher.m */
+#endif
 
 enum { C_NONE = -1, C_STICK, C_DPAD, C_A, C_B, C_X, C_Y, C_WHITE, C_BLACK,
        C_BACK, C_START, C_COUNT };
@@ -72,9 +75,26 @@ static float s_alpha = 0.55f, s_scale = 1.0f;
 static int s_keyboard_last, s_controller, s_touched;
 static int s_dirty = 1;
 
+/* Steering: the stick (default), the accelerometer, or both.
+ * RECOMP_TOUCH_STEER=stick|tilt|both, RECOMP_TOUCH_STEER_SENS=0.5..2. */
+enum { STEER_STICK, STEER_TILT, STEER_BOTH, STEER_COUNT };
+static int s_steer_mode = STEER_STICK;
+static float s_steer_sens = 1.0f;
+static float s_deadzone = 0.05f;
+static float s_tilt, s_tilt_zero;
+static SDL_Sensor *s_accel;
+static int s_accel_tried;
+static SDL_DisplayOrientation s_tilt_orient = SDL_ORIENTATION_UNKNOWN;
+static int s_haptics = 1;
+static int s_band_rt, s_band_lt;
+static SDL_Haptic *s_haptic;
+static int s_haptic_tried;
+
 /* Pad state, read by the USB thread: written whole under this lock. */
 static SDL_SpinLock s_lock;
 static struct { WORD buttons; BYTE analog[8]; SHORT lx, ly; } s_pad;
+
+static void tilt_open(void);
 
 static void settings(void)
 {
@@ -97,6 +117,23 @@ static void settings(void)
         float k = (float)atof(e);
         s_scale = k < 0.6f ? 0.6f : k > 1.6f ? 1.6f : k;
     }
+    if ((e = getenv("RECOMP_TOUCH_STEER")) != NULL && *e) {
+        if (!strncmp(e, "tilt", 4))       s_steer_mode = STEER_TILT;
+        else if (!strncmp(e, "both", 4))  s_steer_mode = STEER_BOTH;
+        else                              s_steer_mode = STEER_STICK;
+    }
+    if ((e = getenv("RECOMP_TOUCH_STEER_SENS")) != NULL) {
+        float k = (float)atof(e);
+        s_steer_sens = k < 0.5f ? 0.5f : k > 2.0f ? 2.0f : k;
+    }
+    if ((e = getenv("RECOMP_TOUCH_DEADZONE")) != NULL) {
+        float d = (float)atof(e);                   /* percent, 0..20 */
+        s_deadzone = (d < 0.0f ? 0.0f : d > 20.0f ? 20.0f : d) / 100.0f;
+    }
+    if ((e = getenv("RECOMP_TOUCH_HAPTICS")) != NULL)
+        s_haptics = e[0] != '0' && e[0] != '\0';
+    if (s_steer_mode != STEER_STICK)
+        tilt_open();
 }
 
 static void set_ctl(int i, float cx, float cy, float w, float h, int round, const char *label)
@@ -197,12 +234,125 @@ static int hit(float x, float y)
     return best;
 }
 
+/* The accelerometer is SDL's sensor API: CoreMotion on iOS, SensorManager
+ * on Android. No sensor (or a failed open) leaves the stick in charge. */
+static void tilt_open(void)
+{
+    int i, n;
+    if (s_accel_tried || s_steer_mode == STEER_STICK)
+        return;
+    s_accel_tried = 1;
+    if (!SDL_WasInit(SDL_INIT_SENSOR) && SDL_InitSubSystem(SDL_INIT_SENSOR) != 0) {
+        fprintf(stderr, "  [INPUT] tilt steering: sensor init failed (%s)\n", SDL_GetError());
+        s_steer_mode = STEER_STICK;
+        return;
+    }
+    n = SDL_NumSensors();
+    for (i = 0; i < n; i++) {
+        if (SDL_SensorGetDeviceType(i) != SDL_SENSOR_ACCEL)
+            continue;
+        if ((s_accel = SDL_SensorOpen(i)) != NULL) {
+            fprintf(stderr, "  [INPUT] tilt steering: %s\n", SDL_SensorGetDeviceName(i));
+            return;
+        }
+    }
+    fprintf(stderr, "  [INPUT] tilt steering: no accelerometer, using the stick\n");
+    s_steer_mode = STEER_STICK;
+}
+
+/* Gravity along the device's short axis, in g. In landscape that is the
+ * left/right tilt. The first reading is the neutral point; rotating the
+ * device 180 degrees takes a new one. */
+static float tilt_read(void)
+{
+    float d[3], v;
+    static int zero_set;
+    SDL_DisplayOrientation o;
+    if (!s_accel || SDL_SensorGetData(s_accel, d, 3) != 0)
+        return s_tilt;
+    o = SDL_GetDisplayOrientation(0);
+    if (o != s_tilt_orient) {
+        s_tilt_orient = o;
+        zero_set = 0;
+    }
+    v = d[0] / 9.80665f;
+    if (!zero_set) {
+        s_tilt_zero = v;
+        zero_set = 1;
+    }
+    v -= s_tilt_zero;
+    if (o == SDL_ORIENTATION_LANDSCAPE_FLIPPED)
+        v = -v;
+    if (v > 0.0f) {
+        v = v <= 0.04f ? 0.0f : (v - 0.04f) / 0.30f;
+        if (v > 1.0f) v = 1.0f;
+    } else {
+        v = -v <= 0.04f ? 0.0f : -(((-v) - 0.04f) / 0.30f);
+        if (v < -1.0f) v = -1.0f;
+    }
+    s_tilt = s_tilt * 0.82f + v * 0.18f;
+    return s_tilt;
+}
+
+/* A little gain at small travel, full lock unchanged. */
+static float steer_curve(float v)
+{
+    float a;
+    if (v > 1.0f) v = 1.0f;
+    if (v < -1.0f) v = -1.0f;
+    if (s_steer_sens == 1.0f || v == 0.0f)
+        return v;
+    a = powf(fabsf(v), 1.0f / s_steer_sens);
+    return v < 0.0f ? -a : a;
+}
+
+/* Called from the input poll, so tilt keeps steering while the finger is
+ * still (touch events alone would leave it frozen). */
+static void tilt_update(void)
+{
+    float lx, t;
+    if (s_steer_mode == STEER_STICK || !s_accel)
+        return;
+    t = tilt_read();
+    lx = s_down[C_STICK] ? s_stick_x : 0.0f;
+    if (s_steer_mode == STEER_TILT)
+        lx = t;
+    else
+        lx += t;
+    lx = steer_curve(lx);
+    SDL_AtomicLock(&s_lock);
+    s_pad.lx = (SHORT)(lx * 32767.0f);
+    SDL_AtomicUnlock(&s_lock);
+}
+
+static void pad_haptic(int strong)
+{
+#if defined(__IPHONEOS__)
+    ios_haptic_tick(strong);
+#else
+    if (!s_haptic_tried) {
+        s_haptic_tried = 1;
+        if (!SDL_WasInit(SDL_INIT_HAPTIC) && SDL_InitSubSystem(SDL_INIT_HAPTIC) != 0)
+            return;
+        if (SDL_NumHaptics() > 0) {
+            s_haptic = SDL_HapticOpen(0);
+            if (s_haptic && SDL_HapticRumbleInit(s_haptic) != 0) {
+                SDL_HapticClose(s_haptic);
+                s_haptic = NULL;
+            }
+        }
+    }
+    if (s_haptic)
+        SDL_HapticRumblePlay(s_haptic, strong ? 0.65f : 0.30f, 45);
+#endif
+}
+
 static void publish(void)
 {
     WORD b = 0;
     BYTE an[8];
     int i;
-    float lx = s_stick_x, ly = s_stick_y;
+    float lx = 0.0f, ly = 0.0f;
     memset(an, 0, sizeof an);
     for (i = 0; i < C_COUNT; i++)
         s_down[i] = 0;
@@ -227,13 +377,42 @@ static void publish(void)
     if (s_dirs & D_DOWN) b |= XBOX_GAMEPAD_DPAD_DOWN;
     if (s_dirs & D_LEFT) b |= XBOX_GAMEPAD_DPAD_LEFT;
     if (s_dirs & D_RIGHT) b |= XBOX_GAMEPAD_DPAD_RIGHT;
-    if (!s_down[C_STICK])
-        lx = ly = 0;
+    if (s_down[C_STICK]) {
+        lx = s_stick_x;
+        ly = s_stick_y;
+    }
+    if (s_steer_mode != STEER_STICK) {
+        float t = tilt_read();
+        if (s_steer_mode == STEER_TILT)
+            lx = t;
+        else
+            lx += t;
+    }
+    lx = steer_curve(lx);
     /* up / down: gas / brake, as far as pushed (a little dead zone) */
     if (ly < -0.15f)
         an[XBOX_BUTTON_RTRIGGER] = (BYTE)(ly <= -0.85f ? 255 : (-ly - 0.15f) / 0.7f * 255.0f);
     if (ly > 0.15f)
         an[XBOX_BUTTON_LTRIGGER] = (BYTE)(ly >= 0.85f ? 255 : (ly - 0.15f) / 0.7f * 255.0f);
+    /* A click when either pedal engages and a firmer one at full travel.
+     * The hold bands stop thumb jitter around full from retriggering. */
+    {
+        int rtv = an[XBOX_BUTTON_RTRIGGER], ltv = an[XBOX_BUTTON_LTRIGGER];
+        int rb = !rtv ? 0 : (rtv >= 250 ? 2 : 1);
+        int lb = !ltv ? 0 : (ltv >= 250 ? 2 : 1);
+        int strong, strong_l;
+        if (s_band_rt == 2 && rtv >= 230) rb = 2;
+        if (s_band_lt == 2 && ltv >= 230) lb = 2;
+        strong = rb == 2 && s_band_rt < 2;
+        strong_l = lb == 2 && s_band_lt < 2;
+        if (s_shown && s_haptics) {
+            if (rb != s_band_rt) { pad_haptic(strong); s_band_rt = rb; }
+            if (lb != s_band_lt) { pad_haptic(strong_l); s_band_lt = lb; }
+        } else {
+            s_band_rt = rb;
+            s_band_lt = lb;
+        }
+    }
     SDL_AtomicLock(&s_lock);
     s_pad.buttons = b;
     memcpy(s_pad.analog, an, sizeof an);
@@ -251,6 +430,17 @@ static void stick_to(float x, float y)
     if (len > 1.0f) {
         dx /= len;
         dy /= len;
+        len = 1.0f;
+    }
+    if (len <= s_deadzone) {
+        /* Inside the dead zone the stick is at rest: no twitch from a thumb
+         * resting near the centre. Outside it, rescale so full lock is
+         * still reached at the ring's edge. */
+        dx = dy = 0.0f;
+    } else if (s_deadzone > 0.0f) {
+        float k = (len - s_deadzone) / (1.0f - s_deadzone);
+        dx = dx / len * k;
+        dy = dy / len * k;
     }
     s_stick_x = dx;
     s_stick_y = dy;
@@ -368,6 +558,7 @@ void xbox_touchpad_state(XBOX_INPUT_STATE *st)
     int i, v;
     if (!s_shown)
         return;
+    tilt_update();
     SDL_AtomicLock(&s_lock);
     st->Gamepad.wButtons |= s_pad.buttons;
     for (i = 0; i < 8; i++)
