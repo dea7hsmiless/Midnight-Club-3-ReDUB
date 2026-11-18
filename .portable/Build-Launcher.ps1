@@ -12,7 +12,9 @@ if(!$ShortcutsOnly){
  $compiler=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
  if(!(Test-Path -LiteralPath $compiler)){throw 'The Windows .NET Framework C# compiler is missing.'}
  $resources=@()
- foreach($name in @('logo.png','hero.jpg','hero.png')){$art=Join-Path $repo "launcher\art\$name";if(Test-Path -LiteralPath $art){$resources+="/resource:$art,ReDUB.Art.$name"}}
+ # No image resources in the executable: the launcher reads launcher\art\ from
+ # disk (the setup source provides it), and ~1.1 MB of embedded JPEG/PNG made
+ # the binary look packed to ML scanners for no benefit.
  New-Item -ItemType Directory -Path $candidateDir -Force | Out-Null
  if(Test-Path -LiteralPath $candidate){Remove-Item -LiteralPath $candidate -Force}
  & $compiler /nologo /target:winexe /platform:x64 /optimize+ /debug- /win32manifest:$manifest /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll "/win32icon:$icon" @resources "/out:$candidate" (Join-Path $PSScriptRoot 'Launcher.cs')
