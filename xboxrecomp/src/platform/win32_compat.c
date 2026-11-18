@@ -763,11 +763,18 @@ HANDLE CreateSemaphoreW(LPSECURITY_ATTRIBUTES sa, LONG initial, LONG maximum, LP
 BOOL ReleaseSemaphore(HANDLE h, LONG releaseCount, PLONG previousCount)
 {
     w32_object *o = obj_from(h);
-    if (!o || o->kind != K_SEM) return FALSE;
+    if (!o || o->kind != K_SEM) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
     pthread_mutex_lock(&o->lock);
+    /* Like Windows (and the console): a release that would pass MaximumCount
+     * is refused, the count does not move, and the caller gets
+     * ERROR_TOO_MANY_POSTS -- not a silent clamp. */
+    if (o->sem_max && o->sem_count + releaseCount > o->sem_max) {
+        pthread_mutex_unlock(&o->lock);
+        SetLastError(ERROR_TOO_MANY_POSTS);
+        return FALSE;
+    }
     if (previousCount) *previousCount = (LONG)o->sem_count;
     o->sem_count += releaseCount;
-    if (o->sem_max && o->sem_count > o->sem_max) o->sem_count = o->sem_max;
     pthread_cond_broadcast(&o->cond);
     pthread_mutex_unlock(&o->lock);
     return TRUE;

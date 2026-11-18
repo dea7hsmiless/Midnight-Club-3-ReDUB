@@ -5455,13 +5455,48 @@ static void bridge_NtCreateSemaphore(void)
 
 /* ── NtReleaseSemaphore (ordinal 222, 3 args)
  * Handle token in, LONG by value, optional 4-byte PLONG out. */
+/* Opt-in: name the caller and a few guest frames behind a failed release.
+ * The release comes from a shared wrapper (sub_0001717C), so the immediate
+ * return address alone does not say which subsystem over-released. */
+static void semaphore_failure_trace(uint32_t guest_handle, uint32_t release_count,
+                                    uint32_t status)
+{
+    static int trace = -1;
+    static unsigned reported;
+    uint32_t caller, ebp;
+    unsigned depth;
+    if (trace < 0) {
+        const char *e = getenv("MC3_SEMAPHORE_FAILURE_TRACE");
+        trace = e && e[0] == '1';
+    }
+    if (!trace || reported >= 32)
+        return;
+    reported++;
+    caller = BRIDGE_MEM32(g_esp - 4);
+    xbox_log(XBOX_LOG_ERROR, XBOX_LOG_SYNC,
+        "[SEMTRACE] caller=%08X guest_handle=%08X release=%u status=%08X",
+        caller, guest_handle, release_count, status);
+    ebp = (uint32_t)g_ebp;
+    for (depth = 0; depth < 4 && ebp >= 0x80000000u && ebp <= 0x83FFFFF8u; depth++) {
+        uint32_t next = BRIDGE_MEM32(ebp), ret = BRIDGE_MEM32(ebp + 4);
+        xbox_log(XBOX_LOG_ERROR, XBOX_LOG_SYNC,
+            "[SEMTRACE]   frame %u ebp=%08X ret=%08X", depth, ebp, ret);
+        if (next <= ebp)
+            break;
+        ebp = next;
+    }
+}
+
 static void bridge_NtReleaseSemaphore(void)
 {
     uint32_t count_va = STACK_ARG(2);
+    uint32_t guest_handle = STACK_ARG(0), release_count = STACK_ARG(1);
 
     g_eax = (uint32_t)xbox_NtReleaseSemaphore(
-        bridge_resolve_handle(STACK_ARG(0)), (LONG)STACK_ARG(1),
+        bridge_resolve_handle(guest_handle), (LONG)release_count,
         count_va ? (PLONG)XBOX_TO_NATIVE(count_va) : NULL);
+    if (g_eax)
+        semaphore_failure_trace(guest_handle, release_count, g_eax);
 }
 
 /* ── KeAlertThread (ordinal 93, 2 args)

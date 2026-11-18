@@ -134,6 +134,13 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE MC3_APP="${MC3_APP}" MC3_SD_D
 # printed at boot so a log names exactly what ran.
 set(MC3_VERSION "dev" CACHE STRING "Release version (config/<game>/app.env APP_VERSION)")
 set(MC3_BUILD_ID "local" CACHE STRING "Build identifier (CI run, commit)")
+# 120 Hz is an experimental side branch: release packages allow 30 and 60 only
+# and clamp a larger MC3_FRAME_RATE to 60. The frame-rate work tree turns this
+# on to keep testing 120.
+option(MC3_ALLOW_120 "Allow the experimental 120 Hz mode" OFF)
+if(MC3_ALLOW_120)
+    add_compile_definitions(MC3_ALLOW_120=1)
+endif()
 set_property(SOURCE src/main.c APPEND PROPERTY COMPILE_DEFINITIONS
     MC3_VERSION="${MC3_VERSION}" MC3_BUILD_ID="${MC3_BUILD_ID}")
 # The edition this package is for (make switch EDITION=eur ->
@@ -147,7 +154,8 @@ endif()
 # Windows: the icon (MC3_WIN_ICON, made by tools/windows/win_icon.py) and
 # the version Explorer shows, as a resource in mcdub3.exe -- the desktop
 # shortcut takes its icon from there. Skipped without a resource compiler.
-if(WIN32)
+option(MC3_SKIP_WIN_RESOURCE "Skip the Windows icon/version resource" OFF)
+if(WIN32 AND NOT MC3_SKIP_WIN_RESOURCE)
     include(CheckLanguage)
     check_language(RC)
     if(CMAKE_RC_COMPILER)

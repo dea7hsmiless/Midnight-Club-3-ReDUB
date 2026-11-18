@@ -95,8 +95,15 @@ cp "$BUILD/$MC3_APP.exe" "$DIST/"
 "$PY" "$MC3_REPO/tools/windows/copy_dlls.py" "$DIST/$MC3_APP.exe" "${DLL_DIRS[@]}" "$DIST"
 
 # Prefer the tested native SDL2 runtime: sdl2-compat failed to enumerate the Xbox BLE controller on this PC.
+# It matters for correctness too: MSYS2's SDL2.dll is the sdl2-compat shim and loads
+# SDL3.dll at run time (not through its import table, so copy_dlls.py cannot see
+# it). Without this file the dist starts with "Failed loading SDL3 library."
 if [ -f "$MC3_WORK/deps/sdl2-native/SDL2.dll" ]; then
     cp "$MC3_WORK/deps/sdl2-native/SDL2.dll" "$DIST/SDL2.dll"
+else
+    echo "warning: no $MC3_WORK/deps/sdl2-native/SDL2.dll; the copied SDL2.dll may be the" >&2
+    echo "         sdl2-compat shim, which needs SDL3.dll at run time. Put the tested" >&2
+    echo "         native SDL2.dll there before shipping a release." >&2
 fi
 
 # Settings, later wins: mcdub3_defaults.txt (this build's SCALE / SETTINGS,
@@ -105,7 +112,7 @@ fi
 {
     echo "# Defaults of this build (make build SCALE=... UI_SCALE=... SETTINGS=...)."
     echo "# Rewritten by every build: change settings in ${MC3_APP}_env.txt instead."
-    echo "RECOMP_GL_SCALE=${SCALE:-5}"        # 5 by default, as the Mac app
+    echo "RECOMP_GL_SCALE=${SCALE:-2}"        # 2 by default: the published Windows release value (5 is the Mac app default and is much heavier)
     echo "RECOMP_GL_UI_SCALE=${UI_SCALE:-5}"  # 5 by default; SETTINGS below can override
     [ -n "${EDITION:-}" ] && echo "EDITION=$EDITION"   # the disc in game-<edition>\ (windows_host.c)
     for kv in ${SETTINGS:-}; do echo "$kv"; done

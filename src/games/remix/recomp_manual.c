@@ -1055,17 +1055,96 @@ void sub_0041B7C0(void)
  * the queue is sane and retirement can pace the flips. MC3_FLIP_PACE=0
  * falls back to one flip per vblank. */
 extern void nv2a_pb_flip_retired(unsigned n);
+extern void nv2a_pb_flip_retired_one_if_empty(void);
+volatile long g_mc3_flip_callbacks;
+
+/* The title's frame rate for this run. 30 is the shipped cadence; a user asks
+ * for 60 by putting MC3_FRAME_RATE=60 in mcdub3remix_env.txt (the older
+ * MC3_FRAME_RATE_TEST_FPS name still works). Resolved once: the flip and
+ * simulation wrappers below ask on every frame. */
+static int mc3_frame_rate_mode(void)
+{
+    static int mode = -1;
+    if (mode < 0) {
+        const char *e = getenv("MC3_FRAME_RATE");
+        if (!e || !e[0]) e = getenv("MC3_FRAME_RATE_TEST_FPS");
+        mode = e && e[0] ? atoi(e) : 30;
+#ifdef MC3_ALLOW_120
+        /* Experimental frame-rate build: 30, 60 or 120. */
+        if (mode != 30 && mode != 60 && mode != 120) mode = 30;
+#else
+        /* Release builds: exactly two cadences, the Xbox's 30 and the
+         * optional 60. Nothing else exists in this binary. */
+        mode = mode >= 60 ? 60 : 30;
+#endif
+    }
+    return mode;
+}
+
+/* A pedestrian switch that defaults on in 60 Hz mode and off in 30 Hz mode:
+ * 60 fps needs the corrected animation cadence and pose blending, while 30
+ * must keep the published path untouched. =0 turns it off for A/B tests. */static int mc3_pedestrian_switch(const char *name)
+{
+    const char *e;
+    if (mc3_frame_rate_mode() < 60)
+        return 0;
+    e = getenv(name);
+    return !(e && e[0] == '0');
+}
+
 extern void sub_0041B170_gen(void);
 void sub_0041B170(void)
 {
     static int on = -1;
+    static uint32_t last_retire_vblank;
+    static unsigned retires_this_vblank;
     if (on < 0) {
         const char *e = getenv("MC3_FLIP_PACE");
         on = !(e && e[0] == '0');
     }
+    int frame_rate_mode = mc3_frame_rate_mode();
     sub_0041B170_gen();
-    if (on)
-        nv2a_pb_flip_retired(g_eax);
+    if (frame_rate_mode < 60) {
+        if (on) nv2a_pb_flip_retired(g_eax);
+        return;
+    }
+    if (on) {
+        int gameplay = 0;
+#if defined(_WIN32) || defined(__linux__)
+        extern int windows_media_gameplay_get(void);
+        gameplay = windows_media_gameplay_get();
+#endif
+        {
+            uint32_t vblank = (uint32_t)g_mc3_d3d_vblanks;
+            /* D3D checks retirement several times per vblank. In the 60 Hz
+             * mode gameplay consumes one frame per vblank; the 120 Hz mode
+             * consumes two. Menus and pause keep the title's original
+             * interval-two cadence (30) in both, so the menu does not turn
+             * into a 120 Hz pinball table.
+             *
+             * Supplying the bounded fallback in every state also prevents a
+             * gameplay -> pause transition from stranding D3D's queue. */
+#ifdef MC3_ALLOW_120
+            unsigned per_vblank = gameplay ? (frame_rate_mode >= 120 ? 2u : 1u) : 0u;
+#else
+            unsigned per_vblank = gameplay ? 1u : 0u;
+#endif
+            unsigned want = per_vblank;
+            if (!gameplay && !(vblank & 1u))
+                want = 1;                          /* menus: one per two vblanks */
+            if (vblank != last_retire_vblank) {
+                last_retire_vblank = vblank;
+                retires_this_vblank = 0;
+            }
+            if (retires_this_vblank < want) {
+                retires_this_vblank++;
+                if (g_eax)
+                    nv2a_pb_flip_retired(g_eax);
+                else
+                    nv2a_pb_flip_retired_one_if_empty();
+            }
+        }
+    }
 }
 
 /* ── D3D's pushbuffer callback, logged (MC3_FLIP_TRACE=1) ──
@@ -1081,11 +1160,28 @@ extern void sub_0041B550_gen(void);
 void sub_0041B550(void)
 {
     static int on = -1;
+    static int trace_on = -1;
     static long n;
+    static FILE *frame_trace;
+    static long frame_trace_count;
     uint32_t dev = g_ecx, param = MEM32(g_esp + 4), t_before = 0, vb = 0;
+#ifdef RECOMP_FRAME_RATE_TEST
+    g_mc3_flip_callbacks++;      /* frame-test metrics only; absent in release */
+#endif
     if (on < 0) {
         const char *e = getenv("MC3_FLIP_TRACE");
         on = e && e[0] == '1';
+    }
+    if (trace_on < 0) {
+        const char *e = getenv("MC3_FRAME_RATE_TRACE");
+        trace_on = e && e[0];
+    }
+    if (trace_on && !frame_trace)
+        frame_trace = fopen("frame-flip-trace.log", "w");
+    if (frame_trace && frame_trace_count < 240) {
+        fprintf(frame_trace, "n=%ld param=%08X cmd=%u interval=%u dev=%08X\n",
+                ++frame_trace_count, param, param & 0x1F, (param >> 5) & 7, dev);
+        fflush(frame_trace);
     }
     if (on && dev) { t_before = MEM32(dev + 0x1C8); vb = MEM32(dev + 0x1C0); }
     sub_0041B550_gen();
@@ -2311,6 +2407,326 @@ static void realtime_step(float real)
     MEMF(0x004B2D50u) = 1.0f / cl;
 }
 
+/* Local 60 Hz investigation: the pedestrian/creature manager has two
+ * frame-driven entry points.  Count them before changing their cadence so a
+ * rendering call is never mistaken for simulation.  This is opt-in and is
+ * intentionally absent from release launchers. */
+static int pedestrian_call_trace_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("MC3_PEDESTRIAN_CALL_TRACE");
+        on = e && e[0] == '1';
+    }
+    return on;
+}
+
+static void pedestrian_call_note(unsigned slot, uint32_t object)
+{
+    static FILE *f;
+    static uint64_t began;
+    static unsigned calls[4];
+    static uint32_t objects[4];
+    static float update_arg;
+    static float creature_arg;
+    struct timespec ts;
+    uint64_t now;
+    if (!pedestrian_call_trace_on()) return;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    now = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    if (!f) {
+        f = fopen("pedestrian-call-trace.log", "w");
+        began = now;
+    }
+    if (slot < 4) {
+        calls[slot]++;
+        objects[slot] = object;
+        if (slot == 2) update_arg = MEMF(g_esp + 4);
+        if (slot == 3) creature_arg = MEMF(g_esp + 4);
+    }
+    if (f && now - began >= 1000000000ull) {
+        fprintf(f, "real=%.3f creature_update=%u object=%08X arg=%.6f sub_00222900=%u object=%08X arg=%.6f sub_00222920=%u object=%08X sub_00222F00=%u object=%08X gameplay=%d\n",
+                (double)(now - began) / 1e9, calls[3], objects[3], creature_arg,
+                calls[2], objects[2],
+                update_arg,
+                calls[0], objects[0], calls[1], objects[1],
+                atomic_load(&port_gameplay_active));
+        fflush(f);
+        calls[0] = calls[1] = calls[2] = calls[3] = 0;
+        began = now;
+    }
+}
+
+/* Creature simulation, separate from the visibility/pose virtual above. */
+extern void sub_002257B0_gen(void);
+void sub_002257B0(void)
+{
+    /* 30 FPS follows the original simulation body without diagnostics,
+     * animation-field reads, cadence state, or timestep adjustment. */
+    if (mc3_frame_rate_mode() < 60) {
+        sub_002257B0_gen();
+        return;
+    }
+    /* Optional A/B: retain the original creature cadence instead of the
+     * corrected 60 Hz one. Off unless asked for. */
+    static int cadence_test = -1;
+    if (cadence_test < 0) {
+        const char *e = getenv("MC3_PEDESTRIAN_30HZ_TEST");
+        cadence_test = mc3_frame_rate_mode() == 60 && e && e[0] == '1';
+    }
+    if (cadence_test) {
+        static struct { uint32_t object; double pending; } clocks[256];
+        unsigned slot = (g_ecx >> 2) & 255u, probe;
+        float dt = MEMF(g_esp + 4);
+        for (probe = 0; probe < 256; probe++, slot = (slot + 1) & 255u)
+            if (!clocks[slot].object || clocks[slot].object == g_ecx) break;
+        if (probe < 256 && dt > 0 && dt < 0.1f) {
+            clocks[slot].object = g_ecx;
+            clocks[slot].pending += dt;
+            if (clocks[slot].pending + 1e-7 < 1.0 / 30.0) {
+                g_esp += 24; /* original callee returns with ret 20 */
+                return;
+            }
+            MEMF(g_esp + 4) = (float)clocks[slot].pending;
+            clocks[slot].pending = 0;
+        }
+    }
+    /* Compare measured travel per simulated second at 30/60/120 Hz.
+     * Preserve guest registers: the generated callee changes ECX/ESP. */
+    const uint32_t trace_object = g_ecx;
+    const float trace_dt = MEMF(g_esp + 4);
+    float trace_x = 0, trace_y = 0, trace_z = 0;
+    const int trace_motion = pedestrian_call_trace_on();
+    if (trace_motion) {
+        trace_x = MEMF(trace_object + 0x108);
+        trace_y = MEMF(trace_object + 0x10C);
+        trace_z = MEMF(trace_object + 0x110);
+    }
+    extern int windows_media_gameplay_get(void);
+    if (pedestrian_call_trace_on()) {
+        static FILE *f;
+        static uint64_t began;
+        static uint32_t sample;
+        static unsigned total, sample_calls;
+        static float sum_dt;
+        struct timespec ts;
+        uint64_t now;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        now = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+        if (!f) { f = fopen("pedestrian-simulation-trace.log", "w"); began = now; }
+        if (!sample) sample = g_ecx;
+        total++;
+        if (sample == g_ecx) { sample_calls++; sum_dt += MEMF(g_esp + 4); }
+        if (f && now - began >= 1000000000ull) {
+            fprintf(f, "real=%.3f total=%u sample=%08X calls=%u sum_dt=%.6f args=%.6f,%.6f,%.6f,%08X gameplay=%d\n",
+                    (double)(now - began) / 1e9, total, sample, sample_calls, sum_dt,
+                    MEMF(g_esp + 4), MEMF(g_esp + 8), MEMF(g_esp + 12), MEM32(g_esp + 16),
+                    windows_media_gameplay_get());
+            fflush(f);
+            total = sample_calls = 0; sum_dt = 0; sample = g_ecx; began = now;
+        }
+    }
+    /* Narrow alternative to cadence gating: the clip sampler at 22B150
+     * consumes a per-update increment at animation +0x10. */
+    uint32_t trace_anim = 0;
+    float saved_increment = 0, scaled_increment = 0;
+    float clip_cursor_before = 0;
+    {
+        static int clip_step_test = -1;   /* runs per creature: resolve once */
+        if (clip_step_test < 0)
+            clip_step_test = mc3_pedestrian_switch("MC3_PEDESTRIAN_CLIP_STEP_TEST");
+        if (clip_step_test &&
+            trace_dt > 0 && trace_dt < 0.033f) {
+            trace_anim = MEM32(trace_object + 0xD8);
+            if (trace_anim >= 0x80000000u && trace_anim < 0x84000000u) {
+                saved_increment = MEMF(trace_anim + 0x10);
+                clip_cursor_before = MEMF(trace_anim + 0xC);
+                scaled_increment = saved_increment * (trace_dt * 30.0f);
+                MEMF(trace_anim + 0x10) = scaled_increment;
+            } else trace_anim = 0;
+        }
+    }
+    sub_002257B0_gen();
+    if (trace_anim && trace_motion) {
+        static FILE *clip_log;
+        static uint32_t clip_sample;
+        static unsigned clip_frames;
+        if (!clip_log) clip_log = fopen("pedestrian-clip-trace.log", "w");
+        if (!clip_sample) clip_sample = trace_object;
+        if (clip_log && trace_object == clip_sample && clip_frames < 600) {
+            fprintf(clip_log, "frame=%u object=%08X anim=%08X next=%08X dt=%.8f cursor=%.8f->%.8f step=%.8f scaled=%.8f after=%.8f\n",
+                    clip_frames++, trace_object, trace_anim,
+                    MEM32(trace_object + 0xD8), trace_dt, clip_cursor_before,
+                    MEMF(trace_anim + 0xC), saved_increment, scaled_increment,
+                    MEMF(trace_anim + 0x10));
+            fflush(clip_log);
+        }
+    }
+    if (trace_anim && MEM32(trace_object + 0xD8) == trace_anim &&
+        MEMF(trace_anim + 0x10) == scaled_increment)
+        MEMF(trace_anim + 0x10) = saved_increment;
+    if (trace_motion) {
+        static FILE *motion;
+        static uint32_t object;
+        static unsigned calls;
+        static double elapsed, distance;
+        if (!motion) motion = fopen("pedestrian-motion-trace.log", "w");
+        if (!object) object = trace_object;
+        if (object == trace_object && trace_dt > 0 && trace_dt < 0.2f) {
+            double dx = MEMF(trace_object + 0x108) - trace_x;
+            double dy = MEMF(trace_object + 0x10C) - trace_y;
+            double dz = MEMF(trace_object + 0x110) - trace_z;
+            distance += sqrt(dx*dx + dy*dy + dz*dz);
+            elapsed += trace_dt;
+            calls++;
+            if (motion && elapsed >= 1.0) {
+                fprintf(motion, "object=%08X calls=%u dt_sum=%.6f travel=%.6f speed=%.6f state=%u motion=%.6f,%.6f,%.6f\n",
+                        object, calls, elapsed, distance, distance/elapsed,
+                        MEM32(object + 0x168), MEMF(object + 0x114),
+                        MEMF(object + 0x118), MEMF(object + 0x11C));
+                fflush(motion);
+                elapsed = distance = 0; calls = 0; object = 0;
+            }
+        }
+    }
+}
+
+/* Every guest pointer this file dereferences on behalf of the title has to be
+ * inside the 64 MB guest window before it is read, otherwise a bad object
+ * field becomes a host crash instead of the title's own fault. */
+static int mc3_guest_ptr_ok(uint32_t p, uint32_t bytes)
+{
+    return p >= 0x80000000u && p <= 0x84000000u && bytes <= 0x04000000u &&
+           p <= 0x84000000u - bytes;
+}
+
+/* Local render-only pose experiment. Decode adjacent integer poses, blend
+ * their local transforms, then orthonormalize rotation rows to avoid scale
+ * collapse from linear matrix blending. The legacy mode uses one decode.
+ *
+ * Loop boundary: the sampler (sub_0022B150) clamps its cursor to frames-1
+ * when the clip loops (byte +0x0D of the sampler's clip record) and to a
+ * stop value when it does not, so this decoder never sees a fractional
+ * cursor past the last frame. The frame+1 >= frames fallback below therefore
+ * only triggers when the cursor sits exactly on the final frame, where there
+ * is no next pose to blend. */
+extern void sub_00373150_gen(void);
+static int pose_blend_enabled(void)
+{
+    static int on = -1;
+    if (on < 0)
+        on = mc3_pedestrian_switch("MC3_PEDESTRIAN_POSE_TEST");
+    return on;
+}
+void sub_00373150(void)
+{
+    /* Preserve the original decoder for 30 Hz and every other caller.
+     * Test the call site before reading pedestrian-specific object fields. */
+    if (!pose_blend_enabled() || MEM32(g_esp) != 0x0022419Cu) {
+        sub_00373150_gen(); return;
+    }
+    uint32_t entry_sp = g_esp, clip = g_ecx;
+    uint32_t dest = MEM32(entry_sp + 4), frame = MEM32(entry_sp + 8);
+    uint32_t anim = MEM32(g_esi + 0xC4);
+    if (!mc3_guest_ptr_ok(anim, 0x10) || !mc3_guest_ptr_ok(dest, 12) ||
+        !mc3_guest_ptr_ok(clip, 0x24)) {
+        sub_00373150_gen(); return;
+    }
+    uint32_t bone_ptr = MEM32(dest + 4);         /* -> uint16 bone count */
+    uint32_t output = MEM32(dest + 8);
+    unsigned bones, frames = MEM16(clip);
+    float fraction;
+    float first[128][12];
+    unsigned i, j;
+    uint32_t saved_arg_frame, r_eax, r_ebx, r_ecx, r_edx, r_esi, r_edi, r_ebp;
+
+    if (!mc3_guest_ptr_ok(bone_ptr, 2) || !mc3_guest_ptr_ok(output, 60))
+        { sub_00373150_gen(); return; }
+    bones = MEM16(bone_ptr);
+    fraction = MEMF(anim + 0xC) - (float)frame;
+    /* Bound the frame index before it is used in pointer arithmetic: a
+     * non-finite or out-of-range cursor must fall back, not wrap. */
+    if (bones == 0 || bones > 128 || frames < 2 || frame > frames - 2 ||
+        !(fraction > 0.001f && fraction < 1.0f) ||
+        !mc3_guest_ptr_ok(output, bones * 60u)) {
+        sub_00373150_gen(); return;
+    }
+    /* sub_00373150_gen indexes frame i as base + i*8, base taken from
+     * clip + 8; validate the second pose's entry before the extra decode. */
+    if (!mc3_guest_ptr_ok(MEM32(clip + 8), (frame + 2) * 8u)) {
+        sub_00373150_gen(); return;
+    }
+    sub_00373150_gen();
+    /* Everything the first decode left behind is the state the guest would
+     * have seen; keep it and give it back after the extra decode. */
+    saved_arg_frame = MEM32(entry_sp + 8);
+    r_eax = g_eax; r_ebx = g_ebx; r_ecx = g_ecx; r_edx = g_edx;
+    r_esi = g_esi; r_edi = g_edi; r_ebp = g_ebp;
+    for (i = 0; i < bones; i++) for (j = 0; j < 12; j++)
+        first[i][j] = MEMF(output + i*60 + j*4);
+    g_esp = entry_sp; g_ecx = clip;
+    MEM32(entry_sp + 4) = dest; MEM32(entry_sp + 8) = frame + 1;
+    sub_00373150_gen();
+    /* Undo the argument change and the second decode's volatile state.  The
+     * decode itself ends with "ret 8", so g_esp is already where the guest
+     * expects it; only the argument slot and the registers are restored. */
+    MEM32(entry_sp + 8) = saved_arg_frame;
+    g_eax = r_eax; g_ebx = r_ebx; g_ecx = r_ecx; g_edx = r_edx;
+    g_esi = r_esi; g_edi = r_edi; g_ebp = r_ebp;
+    for (i = 0; i < bones; i++) {
+        float m[12], second[12]; double n, dot;
+        int finite = 1;
+        for (j = 0; j < 12; j++) {
+            second[j] = MEMF(output + i*60 + j*4);
+            m[j] = first[i][j] + fraction * (second[j] - first[i][j]);
+            if (!(m[j] > -1e30f && m[j] < 1e30f)) finite = 0;
+        }
+        /* A non-finite or degenerate pair leaves the second pose in the
+         * output (a real decode) instead of writing a collapsed matrix. */
+        if (!finite) continue;
+        n = sqrt(m[0]*m[0]+m[1]*m[1]+m[2]*m[2]);
+        if (n < 1e-6) continue;
+        for (j=0;j<3;j++) m[j] /= (float)n;
+        dot = m[0]*m[3]+m[1]*m[4]+m[2]*m[5];
+        for (j=0;j<3;j++) m[j+3] -= (float)dot*m[j];
+        n = sqrt(m[3]*m[3]+m[4]*m[4]+m[5]*m[5]);
+        if (n < 1e-6) continue;
+        for (j=3;j<6;j++) m[j] /= (float)n;
+        m[6]=m[1]*m[5]-m[2]*m[4];
+        m[7]=m[2]*m[3]-m[0]*m[5];
+        m[8]=m[0]*m[4]-m[1]*m[3];
+        for(j=0;j<12;j++) MEMF(output+i*60+j*4)=m[j];
+    }
+}
+
+extern void sub_00223ED0_gen(void);
+void sub_00223ED0(void)
+{
+    pedestrian_call_note(3, g_ecx);
+    sub_00223ED0_gen();
+}
+
+extern void sub_00222900_gen(void);
+void sub_00222900(void)
+{
+    pedestrian_call_note(2, g_ecx);
+    sub_00222900_gen();
+}
+
+extern void sub_00222920_gen(void);
+void sub_00222920(void)
+{
+    pedestrian_call_note(0, g_ecx);
+    sub_00222920_gen();
+}
+
+extern void sub_00222F00_gen(void);
+void sub_00222F00(void)
+{
+    pedestrian_call_note(1, g_ecx);
+    sub_00222F00_gen();
+}
+
 extern void sub_0020B6F0_gen(void);
 void sub_0020B6F0(void)
 {
@@ -2319,7 +2735,12 @@ void sub_0020B6F0(void)
     static float lo = 1e9f, hi = 0.0f, sum = 0.0f;
     static uint32_t last_ms;
     static uint64_t last_ns;
+    static FILE *ped_trace;
+    static uint64_t ped_trace_ns;
+    static float ped_game_start;
+    static unsigned ped_steps;
     float dt, real;
+    int frame_rate_mode = mc3_frame_rate_mode();
     if (on < 0) {
         const char *e = getenv("MC3_TIME_TRACE");
         on = e && e[0] == '1';
@@ -2332,7 +2753,54 @@ void sub_0020B6F0(void)
         real = last_ns ? (float)((now - last_ns) / 1e9) : 0.0f;
         last_ns = now;
     }
+    /* Races normally force a fixed 1/30 s simulation step. When the isolated
+     * 60 Hz test lets the main loop advance every vblank, halve only that
+     * known race step. Flythroughs already use 1/60 and remain unchanged.
+     * The gameplay query is only needed in the 60 Hz test, so 30 Hz mode does
+     * not call into the port layer at all. */
+    int gameplay = 0;
+    if (frame_rate_mode >= 60) {
+#if defined(_WIN32) || defined(__linux__)
+        extern int windows_media_gameplay_get(void);
+        gameplay = windows_media_gameplay_get();
+#endif
+    }
+    if (frame_rate_mode >= 60 && gameplay && MEMF(0x004B2D58u) >= 0.030f &&
+        MEMF(0x004B2D58u) <= 0.037f)
+#ifdef MC3_ALLOW_120
+        MEMF(0x004B2D58u) = 1.0f / (float)frame_rate_mode;
+#else
+        MEMF(0x004B2D58u) = 1.0f / 60.0f;
+#endif
     sub_0020B6F0_gen();
+    {
+        static int time_trace = -1;
+        if (time_trace < 0) {
+            const char *trace = getenv("MC3_PEDESTRIAN_TIME_TRACE");
+            time_trace = trace && trace[0] == '1';
+        }
+        if (time_trace) {
+            if (!ped_trace) {
+                ped_trace = fopen("pedestrian-time-trace.log", "w");
+                ped_trace_ns = last_ns;
+                ped_game_start = MEMF(0x0053475Cu);
+            }
+            ped_steps++;
+            if (ped_trace && last_ns - ped_trace_ns >= 1000000000ull) {
+                float game_now = MEMF(0x0053475Cu);
+                fprintf(ped_trace,
+                        "real=%.3f game=%.6f steps=%u dt=%.6f fixed=%.6f scale=%.6f gameplay=%d\n",
+                        (double)(last_ns - ped_trace_ns) / 1e9,
+                        game_now - ped_game_start, ped_steps,
+                        MEMF(0x004B2D70u), MEMF(0x004B2D58u),
+                        MEMF(0x004B2D6Cu), gameplay);
+                fflush(ped_trace);
+                ped_trace_ns = last_ns;
+                ped_game_start = game_now;
+                ped_steps = 0;
+            }
+        }
+    }
     realtime_step(real);
     if (!on)
         return;
@@ -2458,7 +2926,7 @@ extern void sub_00348BE0(void),sub_00348950(void),sub_001395E0(void);
 #if defined(_WIN32)
 #include <windows.h>
 #endif
-static uint32_t port_self,port_list,port_rows[16];
+static uint32_t port_self,port_list,port_rows[17];
 static uint32_t port_list_vtable;
 static int port_open,port_back_down,port_back_release;
 static int port_accept_down;
@@ -2728,7 +3196,7 @@ static void port_text(uint32_t row,const char *text)
 static void port_labels(void)
 {
     if(!port_context_valid())return;
-    for(int i=0;i<16;i++) {char text[96];windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);}
+    for(int i=0;i<17;i++) {char text[96];windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);}
 }
 static uint32_t port_add(uint32_t event,const char *text)
 {
@@ -2761,8 +3229,14 @@ static void port_build(void)
     MEM32(port_list+0x238+page*4)=0;
     MEM8(state+0x26C)=0;MEM32(state+0x268)=0;
     MEM8(state+0x29C)=0;MEM32(state+0x298)=0;
-    const int order[]={0,5,2,12,3,4,6,13,14,1,7,9,10,11,15,8};
-    int settings=MEM32(port_list+0x230)>=17?16:15;
+    /* The Options page holds 16 rows including BACK (4 columns x 4 rows,
+     * page 2 is the last page), so the row count must stay below capacity:
+     * 15 settings + BACK at capacity 16. FRAME RATE takes PC MUSIC VOLUME's
+     * slot (the music slider in Audio Options owns that value); RESTORE
+     * GRAPHICS DEFAULTS and PC MUSIC VOLUME return first if a list has room. */
+    const int order[]={0,5,2,12,3,4,6,13,14,1,16,7,9,11,15,8,10};
+    int capacity=MEM32(port_list+0x230);
+    int settings=capacity>=18?17:capacity>=17?16:15;
     for(int k=0;k<settings;k++){int i=order[k];port_rows[i]=port_add(0x7F00u+i,NULL);}
     port_add(0x7F11u,"BACK");port_labels();
     port_building=0;

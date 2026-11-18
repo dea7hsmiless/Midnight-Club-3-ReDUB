@@ -20,6 +20,7 @@ static int fullscreen_mode=1,resolution_width,resolution_height;
 static WNDPROC previous;
 static const char *values[]={"1","1.5","2","3","5"};
 static atomic_int fullscreen,scale_index=2,swap_interval,fxaa=1,aniso=16,sharp=2,overlay,preset;
+static atomic_int frame_rate=30;
 static const char *hud_values[]={"1","2","3","5"};
 static atomic_int hud_index=1,gamma_index=2,brightness_index=4;
 float windows_port_gamma_get(void){return 0.8f+atomic_load(&gamma_index)*0.1f;}
@@ -115,6 +116,7 @@ static void change_on_main(void *p)
     else if(id==12){int n=(hud_index+1)%4;if(save_setting("RECOMP_GL_UI_SCALE",hud_values[n]))hud_index=n;return;}
     else if(id==13){int n=(gamma_index+1)%7;char v[16];snprintf(v,sizeof v,"%.1f",0.8+n*0.1);if(save_setting("MC3_GAMMA",v))gamma_index=n;return;}
     else if(id==14){int n=(brightness_index+1)%9;char v[16];snprintf(v,sizeof v,"%.2f",0.8+n*0.05);if(save_setting("MC3_BRIGHTNESS",v))brightness_index=n;return;}
+    else if(id==16){int n=atomic_load(&frame_rate)>=60?30:60;char v[8];snprintf(v,sizeof v,"%d",n);if(save_setting("MC3_FRAME_RATE",v)){atomic_store(&frame_rate,n);fprintf(stderr,"[PORT] frame rate %d saved (restart to apply)\n",n);}return;}
     else if(id==15){int at=4;for(int i=0;i<9;i++)if(rumble_values[i]==rumble_strength){at=i;break;}int n=rumble_values[(at+1)%9];char v[8];snprintf(v,sizeof v,"%d",n);if(save_setting("MC3_RUMBLE_STRENGTH",v)){atomic_store(&rumble_strength,n);xbox_InputSetRumbleStrength(n);}return;}
     if(id>=1&&id<=6){preset=0;save_setting("MC3_GRAPHICS_PRESET","0");}
 }
@@ -145,6 +147,7 @@ void windows_port_setting_label(int id,char *out,size_t size)
     if(id==13)snprintf(out,size,"GAMMA: %.1f",windows_port_gamma_get());
     if(id==14)snprintf(out,size,"BRIGHTNESS: %d%%",80+brightness_index*5);
     if(id==15)snprintf(out,size,"CONTROLLER VIBRATION: %d%%",rumble_strength);
+    if(id==16)snprintf(out,size,"FRAME RATE: %d FPS (RESTART)",atomic_load(&frame_rate)>=60?60:30);
 
 }
 static LRESULT CALLBACK settings_proc(HWND h,UINT msg,WPARAM w,LPARAM l)
@@ -174,6 +177,8 @@ void windows_port_settings_attach(SDL_Window *win)
     v=getenv("RECOMP_GL_SHARPEN");sharp=v?(int)(atof(v)*4+0.5):2;if(sharp<0)sharp=0;if(sharp>4)sharp=4;
     v=getenv("MC3_FPS_OVERLAY");overlay=v&&atoi(v)!=0;
     v=getenv("MC3_GRAPHICS_PRESET");preset=v?atoi(v):0;if(preset<0||preset>3)preset=0;
+    v=getenv("MC3_FRAME_RATE");if(!v||!v[0])v=getenv("MC3_FRAME_RATE_TEST_FPS");
+    atomic_store(&frame_rate,v&&atoi(v)>=60?60:30);
     v=getenv("MC3_PC_MUSIC");pc_music=v&&atoi(v)!=0;windows_media_set(pc_music);
     v=getenv("MC3_PC_MUSIC_RESTORE_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)music_restore=n;}
     v=getenv("MC3_PC_MUSIC_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)windows_media_volume_set(n);}

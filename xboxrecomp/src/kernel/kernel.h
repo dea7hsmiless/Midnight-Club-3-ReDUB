@@ -91,6 +91,11 @@ enum {
 #ifndef STATUS_INVALID_HANDLE
 #define STATUS_INVALID_HANDLE           ((NTSTATUS)0xC0000008L)
 #endif
+#ifndef STATUS_SEMAPHORE_LIMIT_EXCEEDED
+/* NtReleaseSemaphore's own status when ReleaseCount would take the count past
+ * MaximumCount: the release is refused and the count stays where it was. */
+#define STATUS_SEMAPHORE_LIMIT_EXCEEDED ((NTSTATUS)0xC000004DL)
+#endif
 #ifndef STATUS_INVALID_INFO_CLASS
 #define STATUS_INVALID_INFO_CLASS       ((NTSTATUS)0xC0000003L)
 #endif

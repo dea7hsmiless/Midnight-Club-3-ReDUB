@@ -7010,6 +7010,87 @@ swap:
         }
     }
     port_overlay_draw();
+#ifdef RECOMP_FRAME_RATE_TEST
+    {
+        static uint64_t test_start, test_frequency, test_frames;
+        static FILE *test_metrics;
+        static long test_last_loops, test_last_vblanks, test_last_callbacks;
+        static long test_last_stalls, test_last_retire_calls, test_last_retire_total;
+        extern volatile long g_mc3_loop_passes;
+        extern volatile long g_mc3_d3d_vblanks;
+        extern volatile long g_mc3_flip_callbacks;
+        extern volatile long g_recomp_flip_stalls;
+        extern volatile long g_recomp_retire_calls;
+        extern volatile long g_recomp_retire_total;
+        uint64_t test_now;
+        if (!test_frequency) {
+            test_frequency = SDL_GetPerformanceFrequency();
+            test_start = SDL_GetPerformanceCounter();
+            test_metrics = fopen("frame-test-metrics.log", "w");
+        }
+        test_frames++;
+        test_now = SDL_GetPerformanceCounter();
+        /* Bounded capture of CPU-side present intervals. Buffer samples
+         * in memory so disk writes do not perturb each measured frame. */
+        {
+            static int interval_on = -1;
+            static uint64_t previous;
+            static double intervals[1800];
+            static unsigned count;
+            static int saved;
+            if (interval_on < 0) {
+                const char *e = getenv("MC3_PRESENT_INTERVAL_TRACE");
+                interval_on = e && e[0] == '1';
+            }
+            if (interval_on && !saved && test_frequency) {
+                if (previous && count < 1800)
+                    intervals[count++] = 1000.0 * (double)(test_now-previous) /
+                                         (double)test_frequency;
+                previous = test_now;
+                if (count == 1800) {
+                    FILE *capture = fopen("present-intervals.csv", "w");
+                    if (capture) {
+                        unsigned i;
+                        fprintf(capture, "frame,interval_ms\n");
+                        for (i=0;i<count;i++)
+                            fprintf(capture, "%u,%.6f\n", i, intervals[i]);
+                        fclose(capture);
+                    }
+                    saved = 1;
+                }
+            }
+        }
+        if (test_frequency && test_now - test_start >= test_frequency * 5) {
+            double elapsed = (double)(test_now - test_start) / (double)test_frequency;
+            if (test_metrics) {
+                long loops = g_mc3_loop_passes;
+                long vblanks = g_mc3_d3d_vblanks;
+                long callbacks = g_mc3_flip_callbacks;
+                long stalls = g_recomp_flip_stalls;
+                long retire_calls = g_recomp_retire_calls;
+                long retire_total = g_recomp_retire_total;
+                fprintf(test_metrics, "present_fps=%.2f loop_hz=%.2f vblank_hz=%.2f callback_hz=%.2f stall_hz=%.2f retire_call_hz=%.2f retire_total_hz=%.2f frames=%llu elapsed=%.3f\n",
+                        (double)test_frames / elapsed,
+                        (double)(loops-test_last_loops)/elapsed,
+                        (double)(vblanks-test_last_vblanks)/elapsed,
+                        (double)(callbacks-test_last_callbacks)/elapsed,
+                        (double)(stalls-test_last_stalls)/elapsed,
+                        (double)(retire_calls-test_last_retire_calls)/elapsed,
+                        (double)(retire_total-test_last_retire_total)/elapsed,
+                        (unsigned long long)test_frames, elapsed);
+                fflush(test_metrics);
+                test_last_loops = loops;
+                test_last_vblanks = vblanks;
+                test_last_callbacks = callbacks;
+                test_last_stalls = stalls;
+                test_last_retire_calls = retire_calls;
+                test_last_retire_total = retire_total;
+            }
+            test_start = test_now;
+            test_frames = 0;
+        }
+    }
+#endif
     SDL_GL_SwapWindow(s_win);
     gq_frame_end();
     s_mg_fb_draw = s_mg_fb_read = 0xFFFFFFFFu;   /* whatever the swap did */

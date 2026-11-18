@@ -508,6 +508,9 @@ int usb_gamepad_report(int dev, uint8_t *out, int max)
 void usb_gamepad_output(int dev, const uint8_t *data, int len)
 {
     static int trace = -1;
+    static FILE *capture;
+    static int capture_on = -1;
+    static unsigned capture_sequence;
     static uint16_t last_l[USB_GAMEPADS] = { 0xFFFF, 0xFFFF };
     static uint16_t last_r[USB_GAMEPADS] = { 0xFFFF, 0xFFFF };
     XBOX_VIBRATION vib;
@@ -522,6 +525,16 @@ void usb_gamepad_output(int dev, const uint8_t *data, int len)
         return;
     last_l[dev] = vib.wLeftMotorSpeed;
     last_r[dev] = vib.wRightMotorSpeed;
+    if (capture_on < 0)
+        capture_on = getenv("MC3_RUMBLE_CAPTURE") != NULL;
+    if (capture_on && !capture)
+        capture = fopen("rumble-test.log", "w");
+    if (capture) {
+        fprintf(capture, "%u port=%d left=%u right=%u\n", ++capture_sequence,
+                dev, (unsigned)vib.wLeftMotorSpeed,
+                (unsigned)vib.wRightMotorSpeed);
+        fflush(capture);
+    }
     if (trace < 0)
         trace = getenv("RECOMP_RUMBLE_TRACE") != NULL;
     if (trace) {

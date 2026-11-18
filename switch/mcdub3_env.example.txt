@@ -11,6 +11,16 @@
 # Switches: 1 = on, 0 = off.
 
 # ============================================================================
+# Frame rate (Windows and Linux builds)
+# ============================================================================
+
+# 30 is the Xbox's cadence and the default. 60 lifts the title's 30 Hz
+# gameplay cap (menus and pause stay 30) and keeps the pedestrian animation
+# and pose blending correct. The game advances one simulation step per
+# completed flip, so pick 60 only if the machine can hold it.
+#MC3_FRAME_RATE=30
+
+# ============================================================================
 # Picture
 # ============================================================================
 

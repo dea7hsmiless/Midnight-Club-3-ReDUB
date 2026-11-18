@@ -393,6 +393,7 @@ int   WideCharToMultiByte(UINT cp, DWORD flags, LPCWSTR wide, int wideCount,
 #define ERROR_ALREADY_EXISTS          183u
 #define ERROR_MORE_DATA               234u
 #define ERROR_NOT_OWNER               288u
+#define ERROR_TOO_MANY_POSTS          298u
 #define ERROR_MR_MID_NOT_FOUND        317u
 #define ERROR_INVALID_ADDRESS         487u
 #define ERROR_IO_PENDING              997u

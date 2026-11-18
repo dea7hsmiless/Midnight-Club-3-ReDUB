@@ -164,9 +164,22 @@ NTSTATUS __stdcall xbox_NtReleaseSemaphore(
     PLONG PreviousCount)
 {
     if (!ReleaseSemaphore(SemaphoreHandle, ReleaseCount, PreviousCount)) {
+        DWORD error = GetLastError();
+        /* A release that would pass MaximumCount is refused by the console
+         * too, with its own status: the count is unchanged. Reporting it as a
+         * bad handle made the title treat a full semaphore as a dead one. */
+        if (error == ERROR_TOO_MANY_POSTS) {
+            static LONG reported;
+            LONG n = InterlockedIncrement(&reported);
+            if (n <= 8 || (n & 0xFFF) == 0)
+                xbox_log(XBOX_LOG_ERROR, XBOX_LOG_SYNC,
+                    "NtReleaseSemaphore: handle %p is at its maximum (count unchanged, %ld so far)",
+                    SemaphoreHandle, (long)n);
+            return STATUS_SEMAPHORE_LIMIT_EXCEEDED;
+        }
         xbox_log(XBOX_LOG_ERROR, XBOX_LOG_SYNC,
             "NtReleaseSemaphore: failed for handle %p (error %u)",
-            SemaphoreHandle, GetLastError());
+            SemaphoreHandle, error);
         return STATUS_INVALID_HANDLE;
     }
 

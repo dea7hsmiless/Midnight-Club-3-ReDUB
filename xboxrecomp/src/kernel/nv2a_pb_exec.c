@@ -4134,12 +4134,36 @@ static void trap_deliver_hooked(volatile uint32_t *nv, uint32_t method,
  * counted from here). Until something reports one, FLIP_STALL does not wait. */
 static volatile LONG s_flip_retired;
 static volatile LONG s_flip_hooked;
+volatile LONG g_recomp_flip_stalls;
+volatile LONG g_recomp_retire_calls;
+volatile LONG g_recomp_retire_total;
 
 void nv2a_pb_flip_retired(unsigned n)
 {
+#ifdef RECOMP_FRAME_RATE_TEST
+    InterlockedIncrement(&g_recomp_retire_calls);
+    InterlockedExchangeAdd(&g_recomp_retire_total, (LONG)n);
+#endif
     InterlockedExchange(&s_flip_hooked, 1);
     if (n) {
         InterlockedExchangeAdd(&s_flip_retired, (LONG)n);
+        SetEvent(driver_event());
+    }
+}
+
+/* A synthetic 60 Hz retirement is only a wake-up token.  Do not bank these
+ * tokens while the title is not blocked in FLIP_STALL: accumulated credits
+ * let later frames run without pacing and can overflow guest synchronizers. */
+void nv2a_pb_flip_retired_one_if_empty(void)
+{
+#ifdef RECOMP_FRAME_RATE_TEST
+    InterlockedIncrement(&g_recomp_retire_calls);
+#endif
+    InterlockedExchange(&s_flip_hooked, 1);
+    if (InterlockedCompareExchange(&s_flip_retired, 1, 0) == 0) {
+#ifdef RECOMP_FRAME_RATE_TEST
+        InterlockedIncrement(&g_recomp_retire_total);
+#endif
         SetEvent(driver_event());
     }
 }
@@ -4583,6 +4607,9 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         return;
 
     case NV097_FLIP_STALL:
+#ifdef RECOMP_FRAME_RATE_TEST
+        InterlockedIncrement(&g_recomp_flip_stalls);
+#endif
         if (InterlockedCompareExchange(&s_flip_hooked, 0, 0)) {
             /* PGRAPH holds here while the buffer it is about to draw into is
              * the one being read (read == write), until the driver retires a
