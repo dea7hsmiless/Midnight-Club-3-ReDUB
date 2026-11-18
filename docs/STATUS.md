@@ -36,7 +36,7 @@ reproducibility. `SHA256SUMS.txt` matches the folder:
 | `ReDUB-0.2.4-x86_64.AppImage` | 22,133,240 | `d83379d70d1b52bc2d35ad7cffd73436252309fa67517352fd03c650d878ee44` |
 | `ReDUB-0.2.4-x86_64.tar.gz` | 23,831,708 | `377e12ff8e986868324c9e9e787527108b07a2ef560d731ed23381d5ac3f8da4` |
 | `mcdub3remix-0.2.4-garagefix-unsigned.ipa` | 16,393,246 | `ced12ed2b3a3655bbfc56db012133bea5ef07bdf85691f2e3cfe5147c7c1cd38` |
-| `ReDUB-iOS-0.2.4-source.zip` | 4,934,944 | `b60092e52e359a23bd404b4adb4376dc00c16f6c6a65712a35688a41debce13e` |
+| `ReDUB-iOS-0.2.4-source.zip` | 4,934,967 | `7565c5369a28f51fd7ae2137cc6e01223947375975e25eec72239cf4e84a6f4e` |
 
 Launcher: `bc6b0d046740618785dcd90f0bbfb14158d80a3d42b34cb8dfbfb3e66ee5a1d4`
 (112,640 B, file version 0.2.4.0). Setup source: `f83817f2…` (12,705,590 B).
@@ -170,7 +170,7 @@ engine harness on an existing install (marker preserved, 2 files, staging remove
 | tarball `377e12ff…` | not scanned |
 | launcher `bc6b0d04…` | not scanned (0.2.3 `6e2466f6…` was 1/71) |
 | iOS IPA `ced12ed2…` | not scanned (new garagefix build; old beta `0b58f94b…` superseded) |
-| iOS source snapshot `b60092e5…` | not a scan target |
+| iOS source snapshot `7565c536…` | not a scan target |
 
 ## Environment
 
