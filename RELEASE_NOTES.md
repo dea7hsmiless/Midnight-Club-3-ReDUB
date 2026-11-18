@@ -24,14 +24,16 @@
 - AppRun accepts `--game-dir`, `--portable DIR`, `--save-dir`, `--settings`, `--hd`, `--fullscreen`, `--resolution`, `--scale`, `--frame-rate`, `--diagnose`, `--version`, `--help` and `--` passthrough. XDG paths stay the default; portable mode is opt-in.
 - The package version comes from the repository version rather than a hardcoded AppImage number.
 
-### iOS (beta)
+### iOS (unsigned sideload; beta validation)
 
-- `mcdub3remix-beta-0.2.4-unsigned.ipa` is the unchanged 0.2.3 beta binary repackaged with the 0.2.4 version and beta bundle id. The iOS source is not yet unified into this repository.
+- `mcdub3remix-0.2.4-garagefix-unsigned.ipa` is the official-bundle-id 0.2.4 build (`com.ladastra.mcdub3remix`) with the garage render-target feedback fix: a stage that samples the surface being drawn into now uses a `glCopyTexSubImage2D` snapshot. `RECOMP_GL_FEEDBACK=0` restores the old behavior. Unsigned sideload only.
+- User-confirmed on device: the garage graphics glitch is gone. 16 XDVDFS reader tests and `verify_packages.py` pass. Because this uses the official bundle id, it installs alongside a previous `.beta` build rather than replacing it.
+- iOS remains outside the Git tree for this release; `ReDUB-iOS-0.2.4-source.zip` is attached so the IPA can be rebuilt. The side-by-side beta IPA is not included.
 
 ### Packaging
 
 - Windows zip: launcher, setup source and the prebuilt game in `work-remix/build-windows-x86_64/dist/`.
-- Existing 0.2.3 saves, settings and game files remain compatible.
+- Existing 0.2.3 Windows/Linux saves, settings and game files remain compatible.
 
 ## v0.2.3 - 2026-11-17
 
