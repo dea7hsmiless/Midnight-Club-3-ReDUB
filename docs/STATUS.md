@@ -59,7 +59,9 @@ launcher say 0.2.4.
 - Launcher **Add game files** accepts an ISO/XISO or an extracted folder. Import
   stages in `game-remix.importing`, verifies `default.xbe`, then swaps
   `game-remix`; a failed or cancelled import leaves the old folder, saves and
-  settings alone. Replacing the game files asks first.
+  settings alone. Replacing the game files asks first. Import has a **Cancel
+  import** button and Esc shortcut; closing the launcher mid-import offers to
+  cancel and exit.
 - **Play** still starts the shipped exe directly. If `dist` is missing, the
   launcher says so and points at the full release zip or Settings → Advanced.
 - Build/Repair moved to **Settings → Advanced → Rebuild from source** with the
@@ -101,8 +103,11 @@ launcher say 0.2.4.
   `Build.ps1 -Mode Import -Disc` now re-copies when game files already exist.
   `test-launcher.sh` covers both flag orders.
 
-**Known limitation:** the launcher import has no Cancel button and blocks closing
-while it runs; the reader supports cancellation but the UI does not expose it yet.
+**Cancellation:** the Add game files page has a **Cancel import** button and an Esc
+shortcut; closing the launcher mid-import offers to cancel and exit. Cancelling
+deletes staging and leaves `game-remix` untouched. Verified with an off-screen
+launcher harness (ISO import cancelled at 1.5 s: no game folder, no staging) and an
+engine harness on an existing install (marker preserved, 2 files, staging removed).
 
 **AppImage and tarball**
 

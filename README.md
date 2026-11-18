@@ -27,7 +27,7 @@ Use only game files you are legally authorized to use. Where permitted, these ma
 1. Put the self-contained **ReDUB Launcher.exe** in the writable folder where you want to install, such as `D:\Games\ReDUB`. The full release zip already contains the game executable and its runtime. A full source checkout also works.
 2. Open **ReDUB Launcher.exe**. From source without that executable, open **Launch ReDUB.cmd** to compile the launcher using Windows' .NET Framework compiler.
 3. For a new installation, open **Add game files** and choose your **original Xbox DUB Edition Remix ISO/XISO** or the complete extracted Xbox folder.
-4. Select **Add game files**. Extracted folders are copied and ISOs are unpacked by the built-in reader. Nothing is compiled, and no MSYS2, CMake or internet download is needed.
+4. Select **Add game files**. Extracted folders are copied and ISOs are unpacked by the built-in reader. Nothing is compiled, and no MSYS2, CMake or internet download is needed. Import shows progress; **Cancel import** or Esc stops it and keeps the existing game files.
 5. Choose **Play**. Open **Options → Port Options** for graphics and PC Music settings.
 
 An existing installation is detected automatically and can play immediately. Replacing game files keeps saves and settings. If the release folder is missing the game executable, use the full ReDUB Windows zip or **Settings → Advanced → Rebuild from source**. The launcher does not download games or pull source updates from GitHub.

@@ -6,7 +6,7 @@ Open **ReDUB Launcher.exe**, or **Launch ReDUB.cmd** when building the launcher 
 
 1. Open **Add game files**.
 2. Choose your own original Xbox Remix ISO/XISO or the extracted folder containing `default.xbe`.
-3. Select **Add game files**. The folder is copied, or the ISO is unpacked by the built-in reader, into `game-remix/`. The `default.xbe` is checked against the supported Remix editions.
+3. Select **Add game files**. The folder is copied, or the ISO is unpacked by the built-in reader, into `game-remix/`. The `default.xbe` is checked against the supported Remix editions. Import shows progress; **Cancel import** or Esc stops it and leaves the previous game files.
 4. Select **Play**. The release zip already contains the game executable and runtime; nothing is compiled, and no MSYS2, CMake or internet download is used.
 
 An existing installation can play immediately. Replacing game files keeps saves and settings. If the release folder is missing `work-remix/build-windows-x86_64/dist/mcdub3remix.exe`, use the full ReDUB Windows zip or **Settings → Advanced → Rebuild from source**.

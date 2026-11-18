@@ -9,6 +9,7 @@
 - The launcher's Install page is now **Add game files**. Choose an original Xbox Remix ISO/XISO or an extracted folder; the disc is copied into `game-remix/` beside the launcher.
 - ISOs are read by a new in-house XDVDFS reader in the launcher. It verifies `default.xbe` against the supported region7/EUR/USA Remix editions before keeping the files. No third-party extractor is bundled.
 - Import stages in `game-remix.importing`, checks the disc, then swaps it in. A failed or cancelled import leaves the previous game files, saves and settings alone. Replacing game files asks first.
+- Import shows progress; **Cancel import** or Esc stops it without touching the existing game files. Closing the launcher mid-import offers to cancel and exit.
 - The release zip already contains the game executable and its runtime. Play starts it directly; MSYS2, CMake and internet downloads are not used for normal setup.
 
 ### Advanced

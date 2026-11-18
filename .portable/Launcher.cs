@@ -57,9 +57,9 @@ public class BrandPanel : Panel {
     protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);var g=e.Graphics;g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;g.SmoothingMode=SmoothingMode.AntiAlias;using(var bg=new LinearGradientBrush(ClientRectangle,Color.FromArgb(31,21,38),Color.FromArgb(8,13,26),75))g.FillRectangle(bg,ClientRectangle);if(hero!=null){float zoom=Math.Max((float)Width/hero.Width,(float)Height/hero.Height);float w=hero.Width*zoom,h=hero.Height*zoom;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.DrawImage(hero,(Width-w)/2,(Height-h)/2,w,h);using(var wash=new LinearGradientBrush(ClientRectangle,Color.FromArgb(80,8,13,26),Color.FromArgb(225,8,13,26),90))g.FillRectangle(wash,ClientRectangle);}var ellipse=new Rectangle(Width/2-300,Height/2-140,600,280);using(var p=new GraphicsPath()){p.AddEllipse(ellipse);using(var glow=new PathGradientBrush(p)){glow.CenterColor=Color.FromArgb(135,93,27,51);glow.SurroundColors=new[]{Color.FromArgb(0,8,13,26)};g.FillPath(glow,p);}}if(logo!=null){float zoom=Math.Min((float)Width*.78f/logo.Width,(float)Height*.65f/logo.Height);float w=logo.Width*zoom,h=logo.Height*zoom;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.DrawImage(logo,(Width-w)/2,(Height-h)/2,w,h);return;}float size=Math.Min(132,Width/5.5f);using(var f=new Font("Segoe UI",size,FontStyle.Bold|FontStyle.Italic)){var measured=g.MeasureString("ReDUB",f);float x=(Width-measured.Width)/2;float y=(Height-measured.Height)/2+8;using(var shadow=new SolidBrush(Color.FromArgb(120,0,0,0)))g.DrawString("ReDUB",f,shadow,x+4,y+6);using(var ink=new SolidBrush(Color.FromArgb(244,246,252)))g.DrawString("ReDUB",f,ink,x,y);using(var red=new SolidBrush(Color.FromArgb(242,65,84)))g.FillRectangle(red,x+16,y+measured.Height-20,measured.Width-20,4);using(var sub=new Font("Segoe UI",12,FontStyle.Bold))using(var ink=new SolidBrush(Color.FromArgb(188,196,213)))g.DrawString("M I D N I G H T   C L U B   3",sub,ink,(Width-280)/2,y-4);}}
 }
 public sealed class Launcher : Form {
-    readonly string root;readonly Label status=new Label();readonly TextBox source=new TextBox();readonly RichTextBox log=new RichTextBox();readonly RedubButton play=new RedubButton {Primary=true};readonly ProgressBar progress=new ProgressBar();readonly System.Windows.Forms.Timer refresh=new System.Windows.Forms.Timer();readonly Panel content=new Panel();readonly List<RedubButton> navigation=new List<RedubButton>();Process job;string page="Game";string category="Display";bool advancedWheelSettings,advancedGraphicsSettings;volatile bool working;string importStatus="";
+    readonly string root;readonly Label status=new Label();readonly TextBox source=new TextBox();readonly RichTextBox log=new RichTextBox();readonly RedubButton play=new RedubButton {Primary=true};readonly ProgressBar progress=new ProgressBar();readonly System.Windows.Forms.Timer refresh=new System.Windows.Forms.Timer();readonly Panel content=new Panel();readonly List<RedubButton> navigation=new List<RedubButton>();Process job;string page="Game";string category="Display";bool advancedWheelSettings,advancedGraphicsSettings;volatile bool working;string importStatus="";CancellationTokenSource importCancellation;RedubButton cancelImport,importAction;bool closeAfterImport;
     static readonly Color Bg=Color.FromArgb(8,13,26),Rail=Color.FromArgb(5,9,18),Card=Color.FromArgb(15,23,42),Muted=Color.FromArgb(153,165,188);
-    public Launcher(string directory){root=directory;Text="Midnight Club 3: ReDUB";Size=new Size(1200,800);MinimumSize=new Size(1000,700);StartPosition=FormStartPosition.CenterScreen;BackColor=Bg;ForeColor=Color.FromArgb(235,239,247);Font=new Font("Segoe UI",10);AutoScaleMode=AutoScaleMode.Dpi;
+    public Launcher(string directory){root=directory;Text="Midnight Club 3: ReDUB";Size=new Size(1200,800);MinimumSize=new Size(1000,700);StartPosition=FormStartPosition.CenterScreen;BackColor=Bg;ForeColor=Color.FromArgb(235,239,247);Font=new Font("Segoe UI",10);AutoScaleMode=AutoScaleMode.Dpi;KeyPreview=true;KeyDown+=(s,e)=>{if(working&&e.KeyCode==Keys.Escape){CancelImport();e.Handled=true;}};
         var shell=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=2,RowCount=2,Margin=Padding.Empty,Padding=Padding.Empty};shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,220));shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));shell.RowStyles.Add(new RowStyle(SizeType.Percent,100));shell.RowStyles.Add(new RowStyle(SizeType.Absolute,38));Controls.Add(shell);
         var rail=new Panel {Dock=DockStyle.Fill,BackColor=Rail,Margin=Padding.Empty,Padding=new Padding(16)};shell.Controls.Add(rail,0,0);var mark=BrandPanel.LoadArt("logo.png");
         if(mark!=null){var brand=new PictureBox {Image=mark,SizeMode=PictureBoxSizeMode.Zoom,BackColor=Rail,AccessibleName="Midnight Club 3 ReDUB logo",TabStop=false};brand.SetBounds(16,24,188,84);brand.Disposed+=(sender,e)=>mark.Dispose();rail.Controls.Add(brand);}
@@ -69,7 +69,13 @@ public sealed class Launcher : Form {
         content.Dock=DockStyle.Fill;content.Margin=Padding.Empty;shell.Controls.Add(content,1,0);
         var footer=new Panel {Dock=DockStyle.Fill,BackColor=Color.FromArgb(14,22,39),Margin=Padding.Empty};shell.Controls.Add(footer,0,1);shell.SetColumnSpan(footer,2);status.SetBounds(20,9,930,22);status.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;status.ForeColor=Muted;status.Font=new Font("Segoe UI",9);footer.Controls.Add(status);progress.SetBounds(980,12,165,14);progress.Anchor=AnchorStyles.Right|AnchorStyles.Top;progress.Style=ProgressBarStyle.Marquee;progress.Visible=false;footer.Controls.Add(progress);
         source.BackColor=Card;source.ForeColor=ForeColor;source.BorderStyle=BorderStyle.FixedSingle;source.Font=Font;log.ReadOnly=true;log.BackColor=Rail;log.ForeColor=ForeColor;log.BorderStyle=BorderStyle.None;log.Font=new Font("Consolas",9);
-        play.Click+=(s,e)=>{if(Ready())PlayGame();else if(Renderer(root)=="vulkan"&&File.Exists(PathAt("game-remix/default.xbe")))Run(".portable/Build-Vulkan-Experiment.ps1",DlssMode(root)!="Off"?new[]{"-WithDLSS"}:new string[0]);else ShowInstall();};Append("ReDUB launcher ready. Setup, checks and build output appear here.");Append("Installation folder: "+root);ShowHome();refresh.Interval=1500;refresh.Tick+=(s,e)=>UpdateStatus();refresh.Start();UpdateStatus();FormClosing+=(s,e)=>{if(working||(job!=null&&!job.HasExited)){MessageBox.Show(this,"Setup is still running. Leave ReDUB open until it finishes.","Setup in progress");e.Cancel=true;}};
+        play.Click+=(s,e)=>{if(Ready())PlayGame();else if(Renderer(root)=="vulkan"&&File.Exists(PathAt("game-remix/default.xbe")))Run(".portable/Build-Vulkan-Experiment.ps1",DlssMode(root)!="Off"?new[]{"-WithDLSS"}:new string[0]);else ShowInstall();};Append("ReDUB launcher ready. Setup, checks and build output appear here.");Append("Installation folder: "+root);ShowHome();refresh.Interval=1500;refresh.Tick+=(s,e)=>UpdateStatus();refresh.Start();UpdateStatus();FormClosing+=(s,e)=>{
+            if(job!=null&&!job.HasExited){MessageBox.Show(this,"Setup is still running. Leave ReDUB open until it finishes.","Setup in progress");e.Cancel=true;return;}
+            if(!working)return;
+            if(closeAfterImport){e.Cancel=true;return;}
+            if(MessageBox.Show(this,"An import is running. Cancel it and exit?\n\nThe previous game files are left untouched.","Import in progress",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes){e.Cancel=true;return;}
+            closeAfterImport=true;e.Cancel=true;CancelImport();
+        };
     }
     static Label LabelAt(string text,float size,bool bold){return new Label {Text=text,Font=new Font("Segoe UI",size,bold?FontStyle.Bold:FontStyle.Regular),ForeColor=Color.FromArgb(230,235,245),BackColor=Color.Transparent,AutoEllipsis=true};}
     void Nav(Control host,string title,int x,int y,Action action){var b=new RedubButton {Text=title,Tag=title,BackColor=Rail};b.SetBounds(x,y,188,52);b.Click+=(s,e)=>action();host.Controls.Add(b);navigation.Add(b);}
@@ -95,11 +101,11 @@ public sealed class Launcher : Form {
         var p=Standard("Add game files","Add game files",ready?"Your original Xbox disc files are installed. Play starts the game directly; nothing is compiled.":"Copy your own original Xbox DUB Edition Remix disc into this folder. Nothing is compiled.");
         var box=new Panel {BackColor=Card,Location=new Point(36,146),Size=new Size(Math.Max(600,content.Width-72),330),Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right};p.Controls.Add(box);
         var h=LabelAt(ready?"Your game files are ready":runtime?"Choose your game files":"The game runtime is missing",17,true);h.SetBounds(24,20,720,40);box.Controls.Add(h);
-        var hint=LabelAt(ready?"The disc files are in game-remix. Replacing them keeps saves and settings.":runtime?"Select an original Xbox Remix ISO or a folder containing default.xbe. PS2 and Switch files are not supported.":"This release folder has no game executable. Download the full ReDUB Windows zip, or rebuild from source in Settings → Advanced. You can still add game files now.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,65,720,54);box.Controls.Add(hint);
+        var hint=LabelAt(ready?"The disc files are in game-remix. Replacing them keeps saves and settings.":runtime?"Select an original Xbox Remix ISO or a folder containing default.xbe. PS2 and Switch files are not supported. Press Esc to cancel an import.":"This release folder has no game executable. Download the full ReDUB Windows zip, or rebuild from source in Settings → Advanced. You can still add game files now.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,65,720,54);box.Controls.Add(hint);
         source.SetBounds(24,125,box.Width-48,30);source.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;box.Controls.Add(source);
         ButtonAt(box,"Choose ISO",24,173,164,()=>{using(var d=new OpenFileDialog {Filter="Xbox disc image (*.iso;*.xiso)|*.iso;*.xiso|All files (*.*)|*.*",Title="Choose Xbox Remix disc"})if(d.ShowDialog(this)==DialogResult.OK)source.Text=d.FileName;});
         ButtonAt(box,"Choose folder",200,173,164,()=>{using(var d=new FolderBrowserDialog {Description="Extracted Xbox Remix folder"})if(d.ShowDialog(this)==DialogResult.OK)source.Text=d.SelectedPath;});
-        var add=ButtonAt(box,ready?"Replace game files":"Add game files",24,246,270,()=>StartImport(source.Text),true);add.Enabled=!working;
+        var add=ButtonAt(box,ready?"Replace game files":"Add game files",24,246,270,()=>StartImport(source.Text),true);add.Enabled=!working;importAction=add;var cancel=ButtonAt(box,"Cancel import",310,246,150,()=>CancelImport());cancel.Visible=working;cancel.Enabled=working;cancelImport=cancel;
         var note=LabelAt("Files are copied into game-remix beside this launcher. No compiler, MSYS2 or download is used.\nUse a writable folder. Save and close the game first.",10,false);note.ForeColor=Muted;note.SetBounds(38,504,800,70);p.Controls.Add(note);
         ButtonAt(p,"Check game files",36,600,210,()=>VerifySetup());
     }
@@ -210,26 +216,44 @@ public sealed class Launcher : Form {
         if(!File.Exists(selected)&&!Directory.Exists(selected)){MessageBox.Show(this,"The selected disc or folder does not exist.","Choose game files");return;}
         bool replace=File.Exists(PathAt("game-remix/default.xbe"));
         if(replace&&MessageBox.Show(this,"Replace the game files in game-remix?\n\nYour saves and settings are kept. The new files are checked before the old copy is removed.","Replace game files",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes)return;
-        working=true;importStatus="Adding game files...";progress.Style=ProgressBarStyle.Marquee;progress.Visible=true;UpdateStatus();
-        string sourcePath=selected;var ui=this;
+        closeAfterImport=false;
+        if(importCancellation!=null){try{importCancellation.Dispose();}catch{}}
+        importCancellation=new CancellationTokenSource();
+        working=true;importStatus="Adding game files... Press Esc to cancel.";if(importAction!=null&&!importAction.IsDisposed)importAction.Enabled=false;if(cancelImport!=null&&!cancelImport.IsDisposed){cancelImport.Visible=true;cancelImport.Enabled=true;}progress.Style=ProgressBarStyle.Marquee;progress.Visible=true;UpdateStatus();
+        string sourcePath=selected;var ui=this;var cancellation=importCancellation;
         var thread=new Thread(delegate(){
-            string edition=null,error=null;
-            try{edition=ImportGameFiles(root,sourcePath,replace,delegate(long done,long total,string name){if(ui.IsDisposed||!ui.IsHandleCreated)return;try{ui.BeginInvoke(new Action<long,long,string>(ui.UpdateImportProgress),done,total,name);}catch(InvalidOperationException){}},CancellationToken.None);}
-            catch(OperationCanceledException){error="Adding game files was cancelled.";}
+            string edition=null,error=null;bool cancelled=false;
+            try{edition=ImportGameFiles(root,sourcePath,replace,delegate(long done,long total,string name){if(ui.IsDisposed||!ui.IsHandleCreated)return;try{ui.BeginInvoke(new Action<long,long,string>(ui.UpdateImportProgress),done,total,name);}catch(InvalidOperationException){}},cancellation.Token);}
+            catch(OperationCanceledException){cancelled=true;}
             catch(Exception ex){error=ex.Message;}
-            if(!ui.IsDisposed&&ui.IsHandleCreated)ui.BeginInvoke(new Action<string,string>(ui.FinishImport),edition,error);
-        });thread.IsBackground=true;thread.Start();
+            if(!ui.IsDisposed&&ui.IsHandleCreated)ui.BeginInvoke(new Action<string,string,bool>(ui.FinishImport),edition,error,cancelled);
+        });thread.IsBackground=true;
+        try{thread.Start();}catch(Exception ex){working=false;try{cancellation.Dispose();}catch{} importCancellation=null;progress.Visible=false;if(importAction!=null&&!importAction.IsDisposed)importAction.Enabled=true;if(cancelImport!=null&&!cancelImport.IsDisposed){cancelImport.Visible=false;cancelImport.Enabled=false;}MessageBox.Show(this,ex.Message,"Add game files",MessageBoxButtons.OK,MessageBoxIcon.Error);UpdateStatus();}
+    }
+    void CancelImport(){
+        if(!working||importCancellation==null)return;
+        if(cancelImport!=null&&!cancelImport.IsDisposed)cancelImport.Enabled=false;
+        importStatus="Cancelling game file import...";UpdateStatus();
+        try{importCancellation.Cancel();}catch(ObjectDisposedException){}
     }
     void UpdateImportProgress(long done,long total,string name){
         if(total>0){progress.Style=ProgressBarStyle.Continuous;progress.Minimum=0;progress.Maximum=1000;int value=(int)Math.Min(1000.0,done*1000.0/total);progress.Value=Math.Max(0,value);importStatus="Adding game files — "+(int)(done*100.0/total)+"% — "+Path.GetFileName(name);}
         else importStatus="Adding game files...";
         status.Text=importStatus;
     }
-    void FinishImport(string edition,string error){
-        working=false;progress.Visible=false;progress.Style=ProgressBarStyle.Marquee;progress.Value=0;importStatus="";
-        if(error!=null){Append("Add game files failed: "+error);MessageBox.Show(this,error,"Add game files",MessageBoxButtons.OK,MessageBoxIcon.Error);UpdateStatus();return;}
+    void FinishImport(string edition,string error,bool cancelled){
+        working=false;progress.Visible=false;progress.Style=ProgressBarStyle.Marquee;progress.Value=0;importStatus="";cancelImport=null;
+        if(importCancellation!=null){try{importCancellation.Dispose();}catch{} importCancellation=null;}
+        if(cancelled){
+            Append("Add game files cancelled. The previous game files were left untouched.");
+            if(closeAfterImport){closeAfterImport=false;Close();return;}
+            MessageBox.Show(this,"Adding game files was cancelled. The previous game files were left untouched.","Add game files",MessageBoxButtons.OK,MessageBoxIcon.Information);
+            UpdateStatus();if(page=="Add game files")ShowInstall();return;
+        }
+        if(error!=null){Append("Add game files failed: "+error);if(closeAfterImport){closeAfterImport=false;Close();return;}MessageBox.Show(this,error,"Add game files",MessageBoxButtons.OK,MessageBoxIcon.Error);UpdateStatus();if(page=="Add game files")ShowInstall();return;}
         Append("Game files added"+(edition!=null?" ("+edition+" edition)":"")+".");
         if(!RuntimePresent(root))Append("The game executable is missing from this release folder. Use the full ReDUB Windows zip, or rebuild from source in Settings → Advanced.");
+        if(closeAfterImport){closeAfterImport=false;Close();return;}
         UpdateStatus();ShowHome();
     }
     public static string Quote(string value){var b=new StringBuilder("\"");int slashes=0;foreach(char c in value){if(c=='\\'){slashes++;continue;}if(c=='\"'){b.Append('\\',slashes*2+1);b.Append(c);}else{b.Append('\\',slashes);b.Append(c);}slashes=0;}b.Append('\\',slashes*2);return b.Append('"').ToString();}
