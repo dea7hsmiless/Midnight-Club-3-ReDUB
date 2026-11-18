@@ -33,6 +33,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <wchar.h>
 
 #ifndef MC3_APP
 #  define MC3_APP "mcdub3"
@@ -284,5 +285,333 @@ void android_boot(void)
         mkdir(path, 0775);
         setenv("MC3_SAVE_DIR", path, 1);
     }
+}
+
+/* The shared renderer carries the desktop music HUD and the F1 settings
+ * window. Android has no Windows media session, so those hooks stay off.
+ * The in-game Port Options rows below use a small env-backed store: changes
+ * apply immediately where the renderer reads a getter, and the RESTART rows
+ * persist for the next launch. */
+int windows_media_get(wchar_t *out, int count)
+{
+    (void)out;
+    (void)count;
+    return 0;
+}
+
+int windows_media_banner_get(wchar_t *out, int count)
+{
+    (void)out;
+    (void)count;
+    return 0;
+}
+
+int windows_media_gameplay_get(void)
+{
+    return 0;
+}
+
+void windows_media_context(int context)
+{
+    (void)context;
+}
+
+void windows_media_native_hud(int active)
+{
+    (void)active;
+}
+
+void windows_media_route_commit(const wchar_t *text, int native)
+{
+    (void)text;
+    (void)native;
+}
+
+void windows_media_skip(int next)
+{
+    (void)next;
+}
+
+int windows_port_pc_music_get(void)
+{
+    return 0;
+}
+
+int windows_port_music_hud_get(void)
+{
+    return 0;
+}
+
+void windows_port_music_backup(float volume)
+{
+    (void)volume;
+}
+
+float windows_port_music_restore(void)
+{
+    return 1.0f;
+}
+
+static const char *android_scales[] = { "1", "1.5", "2", "3", "5" };
+static const char *android_hud_scales[] = { "1", "2", "3", "5" };
+static int s_scale = 2, s_hud = 1, s_aniso = 16, s_sharpen = 2, s_fxaa = 1;
+static int s_overlay, s_gamma = 2, s_brightness = 4, s_vsync = 1, s_preset;
+static int s_frame_rate = 30;
+
+/* Replace one key in <app>_env.txt, keeping comments and other settings.
+ * The rename commits the new file only after it is complete. */
+static int android_env_set(const char *key, const char *value)
+{
+    char path[600], tmp[608], line[1024];
+    size_t keylen = strlen(key);
+    int last = '\n';
+    FILE *in, *out;
+    if (!s_dir[0])
+        return 0;
+    snprintf(path, sizeof path, "%s/" MC3_APP "_env.txt", s_dir);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    if (!(out = fopen(tmp, "w")))
+        return 0;
+    if ((in = fopen(path, "r")) != NULL) {
+        while (fgets(line, sizeof line, in)) {
+            char *p = line;
+            while (*p == ' ' || *p == '\t')
+                p++;
+            if (!strncmp(p, key, keylen) && p[keylen] == '=')
+                continue;
+            fputs(line, out);
+            size_t n = strlen(line);
+            if (n)
+                last = (unsigned char)line[n - 1];
+        }
+        if (ferror(in)) {
+            fclose(in);
+            fclose(out);
+            remove(tmp);
+            return 0;
+        }
+        fclose(in);
+    }
+    if (last != '\n')
+        fputc('\n', out);
+    fprintf(out, "%s=%s\n", key, value);
+    if (ferror(out) || fclose(out) != 0) {
+        remove(tmp);
+        return 0;
+    }
+    if (rename(tmp, path) != 0) {
+        remove(tmp);
+        return 0;
+    }
+    return 1;
+}
+
+static void android_save_int(const char *key, int value)
+{
+    char text[16];
+    snprintf(text, sizeof text, "%d", value);
+    if (!android_env_set(key, text))
+        fprintf(stderr, "[android] could not save %s\n", key);
+}
+
+int windows_port_overlay_get(void)
+{
+    return s_overlay;
+}
+
+float windows_port_gamma_get(void)
+{
+    return 0.8f + s_gamma * 0.1f;
+}
+
+float windows_port_brightness_get(void)
+{
+    return 0.8f + s_brightness * 0.05f;
+}
+
+float windows_port_sharpen_get(void)
+{
+    return s_sharpen * 0.25f;
+}
+
+int windows_port_fxaa_get(void)
+{
+    return s_fxaa;
+}
+
+int windows_port_vsync_get(void)
+{
+    return s_vsync;
+}
+
+void windows_port_setting_change(int id)
+{
+    switch (id) {
+    case 1:
+        s_vsync = s_vsync == 0 ? 1 : s_vsync == 1 ? -1 : 0;
+        android_save_int("RECOMP_GL_VSYNC", s_vsync);
+        break;
+    case 2:
+        s_scale = (s_scale + 1) % 5;
+        android_env_set("RECOMP_GL_SCALE", android_scales[s_scale]);
+        break;
+    case 3:
+        s_fxaa = s_fxaa == 0 ? 2 : s_fxaa == 2 ? 1 : s_fxaa == 1 ? 3 : 0;
+        android_save_int("RECOMP_GL_FXAA", s_fxaa);
+        break;
+    case 4:
+        s_aniso = s_aniso == 16 ? 4 : s_aniso == 4 ? 1 : 16;
+        android_save_int("RECOMP_GL_ANISO", s_aniso);
+        break;
+    case 6:
+        s_sharpen = (s_sharpen + 1) % 5;
+        {
+            static const char *values[] = { "0", "0.25", "0.5", "0.75", "1" };
+            android_env_set("RECOMP_GL_SHARPEN", values[s_sharpen]);
+        }
+        break;
+    case 7:
+        s_overlay = !s_overlay;
+        android_save_int("MC3_FPS_OVERLAY", s_overlay);
+        break;
+    case 8:
+        s_scale = 2; s_hud = 1; s_fxaa = 1; s_aniso = 16; s_sharpen = 2;
+        s_overlay = 0; s_gamma = 2; s_brightness = 4; s_vsync = 0; s_preset = 2;
+        android_env_set("RECOMP_GL_SCALE", "2");
+        android_env_set("RECOMP_GL_UI_SCALE", "2");
+        android_save_int("RECOMP_GL_FXAA", 1);
+        android_save_int("RECOMP_GL_ANISO", 16);
+        android_env_set("RECOMP_GL_SHARPEN", "0.5");
+        android_save_int("RECOMP_GL_VSYNC", 0);
+        android_save_int("MC3_GRAPHICS_PRESET", 2);
+        android_save_int("MC3_FPS_OVERLAY", 0);
+        android_env_set("MC3_GAMMA", "1.0");
+        android_env_set("MC3_BRIGHTNESS", "1.00");
+        break;
+    case 12:
+        s_hud = (s_hud + 1) % 4;
+        android_env_set("RECOMP_GL_UI_SCALE", android_hud_scales[s_hud]);
+        break;
+    case 13:
+        s_gamma = (s_gamma + 1) % 7;
+        {
+            char text[16];
+            snprintf(text, sizeof text, "%.1f", 0.8 + s_gamma * 0.1);
+            android_env_set("MC3_GAMMA", text);
+        }
+        break;
+    case 14:
+        s_brightness = (s_brightness + 1) % 9;
+        {
+            char text[16];
+            snprintf(text, sizeof text, "%.2f", 0.8 + s_brightness * 0.05);
+            android_env_set("MC3_BRIGHTNESS", text);
+        }
+        break;
+    case 16:
+        s_frame_rate = s_frame_rate >= 60 ? 30 : 60;
+        android_save_int("MC3_FRAME_RATE", s_frame_rate);
+        {
+            char text[16];
+            snprintf(text, sizeof text, "%d", s_frame_rate);
+            setenv("MC3_FRAME_RATE", text, 1);
+        }
+        fprintf(stderr, "[PORT] frame rate %d saved (restart to apply)\n", s_frame_rate);
+        break;
+    }
+    if (id >= 1 && id <= 6) {
+        s_preset = 0;
+        android_save_int("MC3_GRAPHICS_PRESET", 0);
+    }
+}
+
+void windows_port_setting_label(int id, char *out, size_t size)
+{
+    static const char *aa_names[] = { "OFF", "FXAA", "FXAA LOW", "FXAA HIGH" };
+    static const char *preset_names[] = { "CUSTOM", "PERFORMANCE", "BALANCED", "QUALITY" };
+    if (id == 0)
+        snprintf(out, size, "FULLSCREEN: ON");
+    if (id == 1)
+        snprintf(out, size, "VSYNC: %s", s_vsync < 0 ? "ADAPTIVE" : s_vsync ? "ON" : "OFF");
+    if (id == 2)
+        snprintf(out, size, "RENDER SCALE: %sX (RESTART)", android_scales[s_scale]);
+    if (id == 3)
+        snprintf(out, size, "ANTI-ALIASING: %s", aa_names[s_fxaa >= 0 && s_fxaa <= 3 ? s_fxaa : 1]);
+    if (id == 4)
+        snprintf(out, size, "FILTERING: %dX (RESTART)", s_aniso);
+    if (id == 5)
+        snprintf(out, size, "PRESET: %s (RESTART)", preset_names[s_preset]);
+    if (id == 6)
+        snprintf(out, size, "SHARPENING: %d%%", s_sharpen * 25);
+    if (id == 7)
+        snprintf(out, size, "FPS OVERLAY: %s", s_overlay ? "ON" : "OFF");
+    if (id == 8)
+        snprintf(out, size, "RESTORE GRAPHICS DEFAULTS");
+    if (id == 9)
+        snprintf(out, size, "PC MUSIC: DESKTOP ONLY");
+    if (id == 10)
+        snprintf(out, size, "PC MUSIC VOLUME: DESKTOP ONLY");
+    if (id == 11)
+        snprintf(out, size, "SONG DISPLAY: RADIO");
+    if (id == 12)
+        snprintf(out, size, "HUD TEXTURES: %sX (RESTART)", android_hud_scales[s_hud]);
+    if (id == 13)
+        snprintf(out, size, "GAMMA: %.1f", windows_port_gamma_get());
+    if (id == 14)
+        snprintf(out, size, "BRIGHTNESS: %d%%", 80 + s_brightness * 5);
+    if (id == 15)
+        snprintf(out, size, "CONTROLLER VIBRATION: ON");
+    if (id == 16)
+        snprintf(out, size, "FRAME RATE: %d FPS (RESTART)", s_frame_rate);
+}
+
+void windows_port_settings_attach(SDL_Window *win)
+{
+    const char *v;
+    (void)win;
+    if ((v = getenv("RECOMP_GL_SCALE")) != NULL) {
+        for (int i = 0; i < 5; i++)
+            if (atof(v) == atof(android_scales[i]))
+                s_scale = i;
+    }
+    if ((v = getenv("RECOMP_GL_UI_SCALE")) != NULL) {
+        for (int i = 0; i < 4; i++)
+            if (atoi(v) == atoi(android_hud_scales[i]))
+                s_hud = i;
+    }
+    if ((v = getenv("RECOMP_GL_ANISO")) != NULL)
+        s_aniso = atoi(v) == 4 ? 4 : atoi(v) == 1 ? 1 : 16;
+    if ((v = getenv("RECOMP_GL_SHARPEN")) != NULL) {
+        s_sharpen = (int)(atof(v) * 4 + 0.5);
+        if (s_sharpen < 0) s_sharpen = 0;
+        if (s_sharpen > 4) s_sharpen = 4;
+    }
+    if ((v = getenv("RECOMP_GL_FXAA")) != NULL) {
+        s_fxaa = atoi(v);
+        if (s_fxaa < 0 || s_fxaa > 3)
+            s_fxaa = 1;
+    }
+    if ((v = getenv("MC3_FPS_OVERLAY")) != NULL)
+        s_overlay = atoi(v) != 0;
+    if ((v = getenv("RECOMP_GL_VSYNC")) != NULL)
+        s_vsync = atoi(v);
+    if ((v = getenv("MC3_GAMMA")) != NULL) {
+        s_gamma = (int)((atof(v) - 0.8) * 10 + 0.5);
+        if (s_gamma < 0) s_gamma = 0;
+        if (s_gamma > 6) s_gamma = 6;
+    }
+    if ((v = getenv("MC3_BRIGHTNESS")) != NULL) {
+        s_brightness = (int)((atof(v) - 0.8) * 20 + 0.5);
+        if (s_brightness < 0) s_brightness = 0;
+        if (s_brightness > 8) s_brightness = 8;
+    }
+    if ((v = getenv("MC3_GRAPHICS_PRESET")) != NULL) {
+        s_preset = atoi(v);
+        if (s_preset < 0 || s_preset > 3)
+            s_preset = 0;
+    }
+    if ((v = getenv("MC3_FRAME_RATE")) == NULL || !v[0])
+        v = getenv("MC3_FRAME_RATE_TEST_FPS");
+    s_frame_rate = v && atoi(v) >= 60 ? 60 : 30;
 }
 #endif

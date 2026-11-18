@@ -1113,6 +1113,8 @@ void sub_0041B170(void)
 #if defined(_WIN32) || defined(__linux__)
         extern int windows_media_gameplay_get(void);
         gameplay = windows_media_gameplay_get();
+#else
+        gameplay = atomic_load(&port_gameplay_active);
 #endif
         {
             uint32_t vblank = (uint32_t)g_mc3_d3d_vblanks;
@@ -2763,6 +2765,8 @@ void sub_0020B6F0(void)
 #if defined(_WIN32) || defined(__linux__)
         extern int windows_media_gameplay_get(void);
         gameplay = windows_media_gameplay_get();
+#else
+        gameplay = atomic_load(&port_gameplay_active);
 #endif
     }
     if (frame_rate_mode >= 60 && gameplay && MEMF(0x004B2D58u) >= 0.030f &&
