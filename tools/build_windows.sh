@@ -134,9 +134,9 @@ printf '%s\r\n' \
   'if exist "%~dp0mcdub3_defaults.txt" for /f "usebackq eol=# tokens=* delims=" %%l in ("%~dp0mcdub3_defaults.txt") do set "%%l"' \
   'if exist "%~dp0mcdub3_env.txt" for /f "usebackq eol=# tokens=* delims=" %%l in ("%~dp0mcdub3_env.txt") do set "%%l"' \
   'tasklist /fi "imagename eq mcdub3.exe" | find /i "mcdub3.exe" >nul && (echo The game is already running: close it first, or end mcdub3.exe in Task Manager & pause & exit /b 1)' \
-  'for /f %%t in ('"'"'powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"'"'"') do set "TS=%%t"' \
   'set "LOG=%~dp0mcdub3_log.txt"' \
-  'if exist "%~dp0..\..\logs\" set "LOG=%~dp0..\..\logs\windows_run_%TS%.log"' \
+  'if exist "%~dp0..\..\logs\" set "LOG=%~dp0..\..\logs\windows_run.log"' \
+  'if exist "%LOG%" move /y "%LOG%" "%LOG%.previous" >nul' \
   'echo Log:  %LOG%' \
   'mcdub3.exe > "%LOG%" 2>&1' \
   'set "RC=%ERRORLEVEL%"' \

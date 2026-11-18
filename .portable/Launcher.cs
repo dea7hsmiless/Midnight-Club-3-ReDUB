@@ -199,13 +199,35 @@ public sealed class Launcher : Form {
     public static string DlssMode(string root){string value=LauncherValue(root,"DlssMode","Off");return new[]{"Off","Quality","Balanced","Performance"}.FirstOrDefault(mode=>mode.Equals(value,StringComparison.OrdinalIgnoreCase))??"Off";}
     public static void SetDlssMode(string root,string mode){if(!new[]{"Off","Quality","Balanced","Performance"}.Contains(mode))throw new ArgumentException("Unknown DLSS mode.");SaveLauncherValue(root,"DlssMode",mode);}
     public static bool InstallationReady(string root){string dist=RendererDist(root);bool ready=File.Exists(Path.Combine(dist,"mcdub3remix.exe"))&&File.Exists(Path.Combine(dist,"SDL2.dll"))&&File.Exists(Path.Combine(root,@"game-remix\default.xbe"));if(ready&&Renderer(root)=="vulkan"&&DlssMode(root)!="Off")ready=File.Exists(Path.Combine(dist,"redub_dlss.dll"))&&File.Exists(Path.Combine(dist,"nvngx_dlss.dll"));return ready;}
-    public static ProcessStartInfo LaunchInfo(string root){
+    /* The Vulkan experiment used to be started by a hidden PowerShell script that
+     * merged the renderer settings and exported them as environment variables.
+     * Do the same here so playing never spawns a shell. */
+    static ProcessStartInfo VulkanLaunchInfo(string root){
         string dist=RendererDist(root);
-        if(Renderer(root)=="vulkan"){
-            string args="-NoProfile -ExecutionPolicy Bypass -File "+Quote(Path.Combine(root,@".portable\Start-Vulkan-Experiment.ps1"))+" -DlssMode "+DlssMode(root);
-            if(DlssMode(root)!="Off")args+=" -PresentScene";
-            return new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe"),args){WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true};
-        }
+        string save=Path.Combine(root,@"work-remix\save");
+        string legacy=Path.Combine(root,@"work-remix\dlss-experimental-save");
+        try{if(!Directory.Exists(save)&&Directory.Exists(legacy))Directory.Move(legacy,save);}catch{}
+        Directory.CreateDirectory(save);Directory.CreateDirectory(Path.Combine(root,@"work-remix\logs"));
+        var env=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        env["MC3_GAME_DIR"]=Path.Combine(root,"game-remix");env["MC3_SAVE_DIR"]=save;
+        env["RECOMP_GL_SCALE"]="1.5";env["RECOMP_GL_VSYNC"]="1";env["MC3_PC_MUSIC"]="0";
+        env["MC3_FULLSCREEN"]="0";env["MC3_RESOLUTION"]="auto";env["RECOMP_QUIET"]="1";env["RECOMP_FPS_LOG"]="1";
+        env["RECOMP_VK_HEADLESS"]="0";env["RECOMP_WATCHDOG_SECS"]="0";
+        string[] keys={"MC3_FULLSCREEN","MC3_RESOLUTION","MC3_GAMMA","MC3_BRIGHTNESS","MC3_FPS_OVERLAY","MC3_GRAPHICS_PRESET","MC3_PC_MUSIC","MC3_PC_MUSIC_HUD","MC3_PC_MUSIC_VOLUME","MC3_PC_MUSIC_RESTORE_VOLUME","MC3_WHEEL","MC3_WHEEL_DEVICE","MC3_WHEEL_RUMBLE","MC3_RUMBLE_STRENGTH","MC3_WHEEL_STEER_AXIS","MC3_WHEEL_THROTTLE_AXIS","MC3_WHEEL_BRAKE_AXIS","MC3_WHEEL_STEER_INVERT","MC3_WHEEL_THROTTLE_INVERT","MC3_WHEEL_BRAKE_INVERT","RECOMP_GL_SCALE","RECOMP_GL_UI_SCALE","RECOMP_GL_VSYNC","RECOMP_GL_FXAA","RECOMP_GL_ANISO","RECOMP_GL_SHARPEN","RECOMP_GL_QUEUE_FRAMES"};
+        var files=new[]{Path.Combine(root,@"work-remix\build-windows-x86_64\dist\mcdub3remix_env.txt"),Path.Combine(dist,"mcdub3remix_env.txt")}.Where(File.Exists).OrderBy(File.GetLastWriteTimeUtc).ToArray();
+        foreach(string file in files)foreach(string raw in File.ReadAllLines(file)){int eq=raw.IndexOf('=');if(eq<=0)continue;string key=raw.Substring(0,eq).Trim(),value=raw.Substring(eq+1).Trim();if(keys.Contains(key,StringComparer.OrdinalIgnoreCase))env[key]=value;}
+        int mode=Array.IndexOf(new[]{"Off","Quality","Balanced","Performance"},DlssMode(root));if(mode<0)mode=0;
+        env["MC3_DLSS"]=mode.ToString();env["MC3_DLSS_PRESENT"]=mode!=0?"1":"0";
+        env["MC3_DLSS_JITTER"]="0";env["MC3_DLSS_EVALUATE"]="0";env["MC3_DLSS_CAPTURE"]="";
+        if(env["MC3_FULLSCREEN"]!="0"&&env["MC3_FULLSCREEN"]!="1"&&env["MC3_FULLSCREEN"]!="2")env["MC3_FULLSCREEN"]="0";
+        if(env["MC3_RESOLUTION"]!="auto"&&!System.Text.RegularExpressions.Regex.IsMatch(env["MC3_RESOLUTION"],@"^\d{3,4}x\d{3,4}$"))env["MC3_RESOLUTION"]="auto";
+        var psi=new ProcessStartInfo(Path.Combine(dist,"mcdub3remix.exe")){WorkingDirectory=dist,UseShellExecute=true};
+        foreach(var pair in env)psi.EnvironmentVariables[pair.Key]=pair.Value;
+        return psi;
+    }
+    public static ProcessStartInfo LaunchInfo(string root){
+        if(Renderer(root)=="vulkan")return VulkanLaunchInfo(root);
+        string dist=RendererDist(root);
         return new ProcessStartInfo(Path.Combine(dist,"mcdub3remix.exe")){WorkingDirectory=dist,UseShellExecute=true};
     }
     static void StartDirect(string root){var running=Process.GetProcessesByName("mcdub3remix");bool active=running.Length>0;foreach(var p in running)p.Dispose();if(active)return;if(!InstallationReady(root))throw new IOException("The selected renderer is not built. Build it from Settings → Graphics, or choose OpenGL.");Process.Start(LaunchInfo(root));}
@@ -218,7 +240,7 @@ public sealed class Launcher : Form {
     static Stream OpenSourceBundle(){
         string[] candidates={Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"launcher-source.zip"),Path.Combine(AppDomain.CurrentDomain.BaseDirectory,@"work-remix\launcher-source.zip")};
         foreach(string path in candidates)if(File.Exists(path))return File.OpenRead(path);
-        return Assembly.GetExecutingAssembly().GetManifestResourceStream("ReDUB.Source.zip");
+        return null;
     }
     public static void ExtractSource(string destination){
         string prefix=Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
