@@ -81,6 +81,7 @@ enum { STEER_STICK, STEER_TILT, STEER_BOTH, STEER_COUNT };
 static int s_steer_mode = STEER_STICK;
 static float s_steer_sens = 1.0f;
 static float s_deadzone = 0.05f;
+static int s_tilt_invert;
 static float s_tilt, s_tilt_zero;
 static SDL_Sensor *s_accel;
 static int s_accel_tried;
@@ -132,6 +133,8 @@ static void settings(void)
     }
     if ((e = getenv("RECOMP_TOUCH_HAPTICS")) != NULL)
         s_haptics = e[0] != '0' && e[0] != '\0';
+    if ((e = getenv("RECOMP_TOUCH_TILT_INVERT")) != NULL)
+        s_tilt_invert = e[0] != '0' && e[0] != '\0';
     if (s_steer_mode != STEER_STICK)
         tilt_open();
 }
@@ -282,6 +285,8 @@ static float tilt_read(void)
     }
     v -= s_tilt_zero;
     if (o == SDL_ORIENTATION_LANDSCAPE_FLIPPED)
+        v = -v;
+    if (s_tilt_invert)
         v = -v;
     if (v > 0.0f) {
         v = v <= 0.04f ? 0.0f : (v - 0.04f) / 0.30f;

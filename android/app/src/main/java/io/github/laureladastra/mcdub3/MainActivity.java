@@ -20,6 +20,10 @@ public class MainActivity extends SDLActivity {
     /* Steering: "stick", "tilt" or "both"; response multiplier 0.5..2. */
     public static final String EXTRA_TOUCH_STEER = "touchSteer";
     public static final String EXTRA_TOUCH_SENS = "touchSteerSens";
+    /* Dead zone percent 0..20; touch haptics "1" on, "0" off. */
+    public static final String EXTRA_TOUCH_DEADZONE = "touchDeadzone";
+    public static final String EXTRA_TOUCH_HAPTICS = "touchHaptics";
+    public static final String EXTRA_TOUCH_INVERT = "touchTiltInvert";
 
     @Override
     protected void onCreate(Bundle state) {
@@ -29,6 +33,9 @@ public class MainActivity extends SDLActivity {
         String pad = getIntent() != null ? getIntent().getStringExtra(EXTRA_TOUCH_PAD) : null;
         String steer = getIntent() != null ? getIntent().getStringExtra(EXTRA_TOUCH_STEER) : null;
         String sens = getIntent() != null ? getIntent().getStringExtra(EXTRA_TOUCH_SENS) : null;
+        String deadzone = getIntent() != null ? getIntent().getStringExtra(EXTRA_TOUCH_DEADZONE) : null;
+        String haptics = getIntent() != null ? getIntent().getStringExtra(EXTRA_TOUCH_HAPTICS) : null;
+        String invert = getIntent() != null ? getIntent().getStringExtra(EXTRA_TOUCH_INVERT) : null;
         try {
             if (dir != null)
                 Os.setenv("MC3_LAUNCHER_GAME_DIR", dir, true);
@@ -38,6 +45,12 @@ public class MainActivity extends SDLActivity {
                 Os.setenv("RECOMP_TOUCH_STEER", steer, true);
             if (sens != null)
                 Os.setenv("RECOMP_TOUCH_STEER_SENS", sens, true);
+            if (deadzone != null)
+                Os.setenv("RECOMP_TOUCH_DEADZONE", deadzone, true);
+            if (haptics != null)
+                Os.setenv("RECOMP_TOUCH_HAPTICS", haptics, true);
+            if (invert != null)
+                Os.setenv("RECOMP_TOUCH_TILT_INVERT", invert, true);
         } catch (Exception e) {
             /* the native search and defaults then */
         }

@@ -43,7 +43,8 @@ public class LauncherActivity extends Activity {
     private static final int PICK_FOLDER = 1;
     private static final String PREFS = "launcher", FOLDERS = "folders", LAST = "last",
                                 TOUCH_PAD = "touchPad", TOUCH_STEER = "touchSteer",
-                                TOUCH_SENS = "touchSteerSens";
+                                TOUCH_SENS = "touchSteerSens", TOUCH_DEADZONE = "touchDeadzone",
+                                TOUCH_HAPTICS = "touchHaptics", TOUCH_INVERT = "touchTiltInvert";
 
     private SharedPreferences prefs;
     private LinearLayout root;
@@ -213,9 +214,25 @@ public class LauncherActivity extends Activity {
             { "1.35", "Quick" },
             { "1.7", "Sharp" },
         });
+        choiceSetting("Steering dead zone", TOUCH_DEADZONE, "5", 2300, new String[][] {
+            { "0", "Off" },
+            { "3", "3%" },
+            { "5", "5% (default)" },
+            { "8", "8%" },
+            { "12", "12%" },
+        });
+        choiceSetting("Invert tilt", TOUCH_INVERT, "0", 2500, new String[][] {
+            { "0", "Off" },
+            { "1", "On" },
+        });
+        choiceSetting("Touch haptics", TOUCH_HAPTICS, "1", 2400, new String[][] {
+            { "1", "On" },
+            { "0", "Off" },
+        });
         root.addView(text("Tilt uses the phone's accelerometer. Hold the phone level "
             + "when the race starts to set its centre; steering response boosts small "
-            + "inputs without changing full lock.", 13, false, Color.GRAY));
+            + "inputs without changing full lock. Touch haptics click when the gas or "
+            + "brake engages and buzz at full travel.", 13, false, Color.GRAY));
         root.addView(text(pads.isEmpty() ? "Controllers connected now: none"
             : "Controllers connected now: " + String.join(", ", pads), 13, false, Color.GRAY));
     }
@@ -400,6 +417,9 @@ public class LauncherActivity extends Activity {
         i.putExtra(MainActivity.EXTRA_TOUCH_PAD, prefs.getString(TOUCH_PAD, "auto"));
         i.putExtra(MainActivity.EXTRA_TOUCH_STEER, prefs.getString(TOUCH_STEER, "stick"));
         i.putExtra(MainActivity.EXTRA_TOUCH_SENS, prefs.getString(TOUCH_SENS, "1"));
+        i.putExtra(MainActivity.EXTRA_TOUCH_DEADZONE, prefs.getString(TOUCH_DEADZONE, "5"));
+        i.putExtra(MainActivity.EXTRA_TOUCH_HAPTICS, prefs.getString(TOUCH_HAPTICS, "1"));
+        i.putExtra(MainActivity.EXTRA_TOUCH_INVERT, prefs.getString(TOUCH_INVERT, "0"));
         startActivity(i);
         finish();
     }
