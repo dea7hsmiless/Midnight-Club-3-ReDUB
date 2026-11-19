@@ -9,7 +9,11 @@
     "check": {
       "file": "default.xbe",
       "xdvdfs": "default.xbe"
-    }
+    },
+    "dumps": [
+      { "name": "USA (Platinum Hits)", "size": 7825162240, "crc32": "a4337b2a" },
+      { "name": "Europe", "size": 7825162240, "crc32": "e0cad5e2" }
+    ]
   },
   "prepare": {
     "program": ["ReDUB Launcher.exe"],

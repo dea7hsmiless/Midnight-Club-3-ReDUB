@@ -15,7 +15,7 @@ def copy(src,dst):
  dst=Path(dst);dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,dst)
 copy(W/'linux-build/mcdub3remix',A/'usr/bin/mcdub3remix')
 subprocess.run(['cc',str(P/'redub-message.c'),'-o',str(A/'usr/bin/redub-message')]+run('pkg-config','--cflags','--libs','sdl2').split(),check=True)
-for f in ['AppRun','redub.png']:copy(P/f,A/f)
+for f in ['AppRun','redub.png','recomplauncher.json']:copy(P/f,A/f)
 (A/'version').write_text(VERSION+'\n')
 copy(P/'io.github.dea7hsmiless.ReDUB.desktop',A/'usr/share/applications/io.github.dea7hsmiless.ReDUB.desktop')
 copy(P/'io.github.dea7hsmiless.ReDUB.metainfo.xml',A/'usr/share/metainfo/io.github.dea7hsmiless.ReDUB.appdata.xml')

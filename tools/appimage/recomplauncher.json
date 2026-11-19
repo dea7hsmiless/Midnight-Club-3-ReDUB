@@ -1,0 +1,156 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "repo": "dea7hsmiless/Midnight-Club-3-ReDUB",
+  "name": "ReDUB",
+  "game": {
+    "kind": "folder",
+    "label": "Your own original Xbox copy of Midnight Club 3: DUB Edition Remix, extracted as a folder containing default.xbe. The USA and Europe discs both work; an ISO is not read on Linux, and the PS2 and non-Remix releases do not work.",
+    "check": {
+      "file": "default.xbe"
+    }
+  },
+  "start": {
+    "program": ["ReDUB.AppImage"],
+    "args": ["--game-dir", "{game}"]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "ini",
+      "file": [
+        { "path": "{config}/redub/mcdub3remix_env.txt", "if": "{config}/redub/mcdub3remix_env.txt" },
+        { "path": "{install}/redub-data/config/mcdub3remix_env.txt" }
+      ]
+    }
+  ],
+  "folders": {
+    "saves": [
+      { "path": "{local}/redub/saves", "if": "{local}/redub/saves" },
+      { "path": "{install}/redub-data/data/saves" }
+    ],
+    "logs": [
+      { "path": "{home}/.local/state/redub", "if": "{home}/.local/state/redub" },
+      { "path": "{install}/redub-data/state" }
+    ]
+  },
+  "settings": [
+    {
+      "id": "frame_rate",
+      "label": "Frame rate",
+      "help": "30 is the game's own rate. 60 and 120 keep real time on races that cannot hold the rate; 120 needs a 120 Hz display and a CPU that can keep up. Restart to apply.",
+      "choices": [
+        { "label": "30 (original)", "set": { "MC3_FRAME_RATE": "30" } },
+        { "label": "60", "set": { "MC3_FRAME_RATE": "60" } },
+        { "label": "120", "set": { "MC3_FRAME_RATE": "120" } }
+      ],
+      "defaults": { "MC3_FRAME_RATE": "30" }
+    },
+    {
+      "id": "internal_resolution",
+      "label": "Internal resolution",
+      "help": "What the game draws at, as a multiple of the console's 480p. Higher is sharper and costs more on the graphics card.",
+      "choices": [
+        { "label": "1x (480p)", "set": { "RECOMP_GL_SCALE": "1" } },
+        { "label": "1.5x (720p)", "set": { "RECOMP_GL_SCALE": "1.5" } },
+        { "label": "2x (960p)", "set": { "RECOMP_GL_SCALE": "2" } },
+        { "label": "3x (1440p)", "set": { "RECOMP_GL_SCALE": "3" } },
+        { "label": "5x (2400p)", "set": { "RECOMP_GL_SCALE": "5" } }
+      ],
+      "defaults": { "RECOMP_GL_SCALE": "2" }
+    },
+    {
+      "id": "window",
+      "label": "Window",
+      "help": "Fullscreen gives the game the screen to itself. Borderless makes switching apps quicker. Windowed uses Window size.",
+      "choices": [
+        { "label": "Fullscreen", "set": { "MC3_FULLSCREEN": "1" } },
+        { "label": "Borderless", "set": { "MC3_FULLSCREEN": "2" } },
+        { "label": "Windowed", "set": { "MC3_FULLSCREEN": "0" } }
+      ],
+      "defaults": { "MC3_FULLSCREEN": "1" }
+    },
+    {
+      "id": "window_size",
+      "label": "Window size",
+      "help": "The size of the game's window in Windowed mode. Automatic fits your screen.",
+      "choices": [
+        { "label": "Automatic", "set": { "MC3_RESOLUTION": "auto" } },
+        { "label": "1280 x 720", "set": { "MC3_RESOLUTION": "1280x720" } },
+        { "label": "1600 x 900", "set": { "MC3_RESOLUTION": "1600x900" } },
+        { "label": "1920 x 1080", "set": { "MC3_RESOLUTION": "1920x1080" } },
+        { "label": "2560 x 1440", "set": { "MC3_RESOLUTION": "2560x1440" } }
+      ],
+      "defaults": { "MC3_RESOLUTION": "auto", "MC3_FULLSCREEN": "1" },
+      "when": { "MC3_FULLSCREEN": "0" }
+    },
+    {
+      "id": "vsync",
+      "label": "V-Sync",
+      "help": "Waits for the screen between frames to stop tearing. Off can feel quicker but may tear. Restart to apply.",
+      "choices": [
+        { "label": "On", "set": { "RECOMP_GL_VSYNC": "1" } },
+        { "label": "Off", "set": { "RECOMP_GL_VSYNC": "0" } }
+      ],
+      "defaults": { "RECOMP_GL_VSYNC": "0" }
+    },
+    {
+      "id": "anisotropic",
+      "label": "Texture filtering",
+      "help": "Keeps road markings and signs sharp at shallow angles. Costs almost nothing.",
+      "choices": [
+        { "label": "Game's own", "set": { "RECOMP_GL_ANISO": "1" } },
+        { "label": "4x", "set": { "RECOMP_GL_ANISO": "4" } },
+        { "label": "16x", "set": { "RECOMP_GL_ANISO": "16" } }
+      ],
+      "defaults": { "RECOMP_GL_ANISO": "16" }
+    },
+    {
+      "id": "sharpen",
+      "label": "Sharpening",
+      "help": "Sharpens the upscaled picture. A little helps at 1x; too much adds a halo around edges.",
+      "choices": [
+        { "label": "Off", "set": { "RECOMP_GL_SHARPEN": "0" } },
+        { "label": "Light", "set": { "RECOMP_GL_SHARPEN": "0.25" } },
+        { "label": "Medium", "set": { "RECOMP_GL_SHARPEN": "0.5" } },
+        { "label": "Strong", "set": { "RECOMP_GL_SHARPEN": "0.75" } },
+        { "label": "Maximum", "set": { "RECOMP_GL_SHARPEN": "1" } }
+      ],
+      "defaults": { "RECOMP_GL_SHARPEN": "0.5" }
+    },
+    {
+      "id": "fps_overlay",
+      "label": "Show FPS",
+      "help": "The frame rate in the corner of the screen.",
+      "choices": [
+        { "label": "Off", "set": { "MC3_FPS_OVERLAY": "0" } },
+        { "label": "On", "set": { "MC3_FPS_OVERLAY": "1" } }
+      ],
+      "defaults": { "MC3_FPS_OVERLAY": "0" }
+    },
+    {
+      "id": "pc_music",
+      "label": "Phone music in the radio",
+      "help": "Plays music from your PC through the game's radio slot while driving.",
+      "choices": [
+        { "label": "Off", "set": { "MC3_PC_MUSIC": "0" } },
+        { "label": "On", "set": { "MC3_PC_MUSIC": "1" } }
+      ],
+      "defaults": { "MC3_PC_MUSIC": "0" }
+    }
+  ],
+  "actions": [
+    {
+      "id": "saves",
+      "label": "Saves",
+      "help": "Your career saves and settings.",
+      "open": "saves"
+    },
+    {
+      "id": "logs",
+      "label": "Logs",
+      "help": "The last few runs, for a bug report.",
+      "open": "logs"
+    }
+  ]
+}
