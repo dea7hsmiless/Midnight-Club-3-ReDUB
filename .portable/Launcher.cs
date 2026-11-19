@@ -360,7 +360,7 @@ public sealed class Launcher : Form {
         foreach(string file in files)foreach(string raw in File.ReadAllLines(file)){int eq=raw.IndexOf('=');if(eq<=0)continue;string key=raw.Substring(0,eq).Trim(),value=raw.Substring(eq+1).Trim();if(keys.Contains(key,StringComparer.OrdinalIgnoreCase))env[key]=value;}
         int mode=Array.IndexOf(new[]{"Off","Quality","Balanced","Performance"},DlssMode(root));if(mode<0)mode=0;
         env["MC3_DLSS"]=mode.ToString();env["MC3_DLSS_PRESENT"]=mode!=0?"1":"0";
-        env["MC3_DLSS_JITTER"]="0";env["MC3_DLSS_EVALUATE"]="0";env["MC3_DLSS_CAPTURE"]="";
+        env["MC3_DLSS_JITTER"]=mode!=0?"1":"0";env["MC3_DLSS_EVALUATE"]=mode!=0?"1":"0";env["MC3_DLSS_CAPTURE"]="";
         if(env["MC3_FULLSCREEN"]!="0"&&env["MC3_FULLSCREEN"]!="1"&&env["MC3_FULLSCREEN"]!="2")env["MC3_FULLSCREEN"]="0";
         if(env["MC3_RESOLUTION"]!="auto"&&!System.Text.RegularExpressions.Regex.IsMatch(env["MC3_RESOLUTION"],@"^\d{3,4}x\d{3,4}$"))env["MC3_RESOLUTION"]="auto";
         var psi=new ProcessStartInfo(Path.Combine(dist,"mcdub3remix.exe")){WorkingDirectory=dist,UseShellExecute=true};
