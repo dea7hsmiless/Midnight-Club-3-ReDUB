@@ -2382,6 +2382,21 @@ void sub_00020880(void)
  * 0x4B2D48 (clamped) and 0x4B2D50 (its reciprocal). Only steps of 1/30
  * (races); the title flythrough's 1/60 half-speed showcase is left alone.
  * Replays recorded this way may play back slightly differently. */
+/* Is the player in gameplay (a race) right now? The desktop builds never run
+ * port_gameplay_update() -- it is compiled out with #ifndef _WIN32 -- so
+ * port_gameplay_active stays 0 there and every mode-specific catch-up gate
+ * below would decline for ever. The desktop answer is the media context the
+ * title already reports (the same one FXAA and the music HUD use). */
+static int realtime_gameplay(void)
+{
+#if (defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)
+    extern int windows_media_gameplay_get(void);
+    return windows_media_gameplay_get();
+#else
+    return atomic_load(&port_gameplay_active);
+#endif
+}
+
 static void realtime_step(float real)
 {
     static int on = -1;
@@ -2397,14 +2412,33 @@ static void realtime_step(float real)
                     " (MC3_REALTIME)\n", cap);
     }
     if (!on || MEM32(0x00534770u) == 0 || real <= f * 1.1f)
+    {
+        /* MC3_REALTIME_TRACE=1: why the catch-up declined (a rare print, so a
+         * session can be read without a profiler). */
+        static int dbg = -1;
+        static unsigned dbg_n;
+        if (dbg < 0) {
+            const char *e = getenv("MC3_REALTIME_TRACE");
+            dbg = e && e[0] == '1';
+        }
+        if (dbg && (dbg_n++ % 90u) == 0)
+            fprintf(stderr, "[RT] skip f=%.4f real=%.4f mode=%d gameplay=%d flag=%u on=%d\n",
+                    f, real, mc3_frame_rate_mode(),
+                    atomic_load(&port_gameplay_active), MEM32(0x00534770u), on);
         return;
+    }
     /* The 1/30 race step, as before, and the 1/60 step of the 60 fps mode:
      * without the second range a race that could not hold 60 advanced by
      * one 1/60 step per drawn frame and ran at 2/3 speed at 40 fps, which
-     * read as the whole game slowing down (2026-11-18). */
+     * read as the whole game slowing down (2026-11-18). The 120 fps mode
+     * needs the same compensation for its 1/120 step: without it a build
+     * that presents ~80 frames/s advanced 80/120 of real time, measured as
+     * a race clock running at 72.6% (2026-11-18). */
     if (!(f >= 0.030f && f <= 0.037f)
-        && !(mc3_frame_rate_mode() >= 60 && atomic_load(&port_gameplay_active)
-             && f > 0.010f && f < 0.023f))
+        && !(mc3_frame_rate_mode() >= 60 && realtime_gameplay()
+             && f > 0.010f && f < 0.023f)
+        && !(mc3_frame_rate_mode() >= 120 && realtime_gameplay()
+             && f > 0.0070f && f < 0.0112f))
         return;
     d = real < cap ? real : cap;
     MEMF(0x004B2D70u) = d;
