@@ -13,13 +13,15 @@ warn() { printf 'warn  %s\n' "$*"; }
 
 # 1. One version for every game (CI: Tests -> Version and release notes)
 if [ -f config/dub/app.env ] && [ -f config/remix/app.env ]; then
-  ver=$(bash -c 'source config/dub/app.env; echo "$APP_VERSION"')
+  # Strip CR: a Windows worktree keeps these files CRLF (core.autocrlf=true), and
+  # `source` then folds the CR into the value, which breaks the greps below.
+  ver=$(bash -c 'source config/dub/app.env; echo "$APP_VERSION"' | tr -d '\r')
   case "$ver" in
     [0-9]*.[0-9]*.[0-9]*) ok "config/dub APP_VERSION=$ver" ;;
     *) bad "config/dub APP_VERSION '$ver' is not x.y.z" ;;
   esac
   for cfg in config/*/app.env; do
-    v=$(bash -c 'source "$1"; echo "$APP_VERSION"' _ "$cfg")
+    v=$(bash -c 'source "$1"; echo "$APP_VERSION"' _ "$cfg" | tr -d '\r')
     [ "$v" = "$ver" ] && ok "$cfg = $ver" || bad "$cfg = $v, expected $ver (one version for every game)"
   done
 else

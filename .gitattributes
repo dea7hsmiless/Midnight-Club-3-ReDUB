@@ -8,3 +8,8 @@ tools/appimage/AppRun text eol=lf
 # The AppImage/package scripts and desktop metadata run inside Linux containers:
 # CRLF breaks desktop-file-validate and shell shebangs. Keep this directory LF.
 tools/appimage/** text eol=lf
+
+# Version files are sourced by bash on every platform. A CR from a Windows
+# checkout is folded into the value by `source` and breaks version matching,
+# so store and check them out as LF everywhere.
+config/*/app.env text eol=lf
