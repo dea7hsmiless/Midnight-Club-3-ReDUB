@@ -1,6 +1,6 @@
-# ReDUB — notes for AI agents
+﻿# ReDUB — notes for AI agents
 
-Midnight Club 3: DUB Edition Remix, statically recompiled for Windows, Linux and iOS.
+Midnight Club 3: DUB Edition Remix, statically recompiled for Windows, Linux, iOS and Android.
 
 **Read `docs/STATUS.md` first.** It is the only current state; Desktop handoffs are
 snapshots and may be stale.
@@ -29,7 +29,7 @@ Never modify `game-remix/` — it is the user's own disc data.
 - **`csc` gets `/codepage:65001`.** Without it the launcher compiles UTF-8 text as ANSI.
 - **Release notes are the release body.** `RELEASE_NOTES.md` section `## v<version>` is the
   source; do not hand-write a body and upload it.
-- **No game data in any artifact.** No ISOs, XBEs, extracted discs or `hd/` packs.
+- **No third-party game data in any artifact.** No ISOs, XBEs, extracted discs or third-party texture packs. Project-owned ReDUB launcher/logo artwork may be bundled.
 
 ## Before saying "done"
 
@@ -45,7 +45,7 @@ launcher's BOM/codepage, and whether the tree is dirty.
 ## Build entry points
 
 ```
-# Normal install (copy-only, no compiler): launcher -> Add game files, or
+# Normal install (copy-only, no compiler): launcher -> , or
 ReDUB Launcher.exe --import <folder-or-iso>
 ReDUB Launcher.exe --check
 ReDUB Launcher.exe --play
@@ -78,7 +78,7 @@ python ios/build_launcher.py && python ios/package_launcher.py --beta
 - Building replaces `work-remix/build-windows-x86_64/dist` entirely — repackage the zip after.
 - Import stages in `game-remix.importing`, verifies `default.xbe`, then swaps `game-remix`; a
   failed or cancelled import must leave the old folder and saves untouched.
-- Normal Play and Add game files must never run `Build.ps1`; a release already ships the
+- Normal Play and  must never run `Build.ps1`; a release already ships the
   prebuilt game. `launcher-source.zip` is for Advanced rebuild only.
 - Linux portable mode is opt-in (`--portable` / `REDUB_DATA_DIR`); XDG stays the default.
   Do not flip that default without a product decision.
@@ -86,3 +86,7 @@ python ios/build_launcher.py && python ios/package_launcher.py --beta
   flags, not one flag per setting.
 - VirusTotal whitelisting is per hash: any rebuild invalidates a pending false-positive
   report.
+
+## Android mobile parity (2026-11-18)
+
+Active Android source: `C:\Users\Donte\Desktop\ReDUB-0.2.4-build-kit\source`. The user explicitly authorized switching from iOS to Android for parity. Edit Android only during this phase; do not write into the iOS tree. Build ARM64 first; avoid the unreliable Windows emulator for verification. See `docs/ANDROID-PARITY.md`. Java source is UTF-8 without BOM (javac rejects the BOM); preserve BOM for native and other source files.

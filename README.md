@@ -26,8 +26,8 @@ Use only game files you are legally authorized to use. Where permitted, these ma
 
 1. Put the self-contained **ReDUB Launcher.exe** in the writable folder where you want to install, such as `D:\Games\ReDUB`. The full release zip already contains the game executable and its runtime. A full source checkout also works.
 2. Open **ReDUB Launcher.exe**. From source without that executable, open **Launch ReDUB.cmd** to compile the launcher using Windows' .NET Framework compiler.
-3. For a new installation, open **Add game files** and choose your **original Xbox DUB Edition Remix ISO/XISO** or the complete extracted Xbox folder.
-4. Select **Add game files**. Extracted folders are copied and ISOs are unpacked by the built-in reader. Nothing is compiled, and no MSYS2, CMake or internet download is needed. Import shows progress; **Cancel import** or Esc stops it and keeps the existing game files.
+3. For a new installation, open **Install** and choose your **original Xbox DUB Edition Remix ISO/XISO** or the complete extracted Xbox folder.
+4. Select **Install**. Extracted folders are copied and ISOs are unpacked by the built-in reader. Nothing is compiled, and no MSYS2, CMake or internet download is needed. Import shows progress; **Cancel import** or Esc stops it and keeps the existing game files.
 5. Choose **Play**. Open **Options → Port Options** for graphics and PC Music settings.
 
 An existing installation is detected automatically and can play immediately. Replacing game files keeps saves and settings. If the release folder is missing the game executable, use the full ReDUB Windows zip or **Settings → Advanced → Rebuild from source**. The launcher does not download games or pull source updates from GitHub.
@@ -51,8 +51,8 @@ The sidebar layout is inspired by [SafeHouse](https://github.com/FridiNaTor1/Saf
 
 | Page | Purpose |
 | --- | --- |
-| Game | Installation status, Play/Add game files, verification, repair, game folder, desktop/library shortcuts. |
-| Add game files | Choose an Xbox Remix ISO/XISO or extracted folder; copies or unpacks the disc data only. |
+| Game | Installation status, Play/Install, verification, repair, game folder, desktop/library shortcuts. |
+| Install | Choose an Xbox Remix ISO/XISO or extracted folder; copies or unpacks the disc data only. |
 | Settings | Display, Graphics, Controls, Music, Diagnostics, Launcher, and Advanced groups. Advanced rebuilds the game from source. |
 | Support | Local setup output, checks, logs, and this guide. |
 | About | Project identity, features, limitations, and upstream credits. |
@@ -166,7 +166,7 @@ See [Windows build instructions](BUILDING-WINDOWS.md) or the [Linux build guide]
 - `.portable/Launcher.cs`: launcher source.
 - `.portable/Build-Launcher.ps1`: compile launcher/create shortcuts.
 - `.portable/Build.ps1`: folder import, advanced build/repair, and prerequisite checks.
-- `.portable/Xdvdfs.cs`: in-house Xbox disc reader used by **Add game files**.
+- `.portable/Xdvdfs.cs`: in-house Xbox disc reader used by **Install**.
 - `src/windows_settings.c` and `src/linux_settings.c`: shared native options with per-platform persistence and display/input hooks.
 - `src/windows_media.c` and `tools/windows/now_playing.ps1`: optional Windows media integration.
 - `work-remix/build-windows-x86_64/dist`: installed game/settings.

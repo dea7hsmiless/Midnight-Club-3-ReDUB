@@ -1,4 +1,4 @@
-﻿param([switch]$CheckOnly)
+param([switch]$CheckOnly)
 $ErrorActionPreference = 'Stop'
 try {
     $repo = Split-Path -Parent $PSScriptRoot
@@ -20,7 +20,7 @@ try {
     $dist = Join-Path $repo 'work-remix\build-windows-x86_64\dist'
     $exe = Join-Path $dist 'mcdub3remix.exe'
     foreach ($file in @($exe, (Join-Path $dist 'SDL2.dll'), (Join-Path $repo 'game-remix\default.xbe'))) {
-        if (!(Test-Path -LiteralPath $file)) { throw "Missing $file. Open ReDUB Launcher.exe and choose Add game files first." }
+        if (!(Test-Path -LiteralPath $file)) { throw "Missing $file. Open ReDUB Launcher.exe and " }
     }
     if ($CheckOnly) { Write-Host 'Installed game, controller runtime and disc files found.'; exit 0 }
     if (Get-Process mcdub3remix -ErrorAction SilentlyContinue) { Write-Host 'Midnight Club 3 Remix is already running.'; exit 0 }

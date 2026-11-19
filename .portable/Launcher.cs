@@ -64,7 +64,7 @@ public sealed class Launcher : Form {
         var rail=new Panel {Dock=DockStyle.Fill,BackColor=Rail,Margin=Padding.Empty,Padding=new Padding(16)};shell.Controls.Add(rail,0,0);var mark=BrandPanel.LoadArt("logo.png");
         if(mark!=null){var brand=new PictureBox {Image=mark,SizeMode=PictureBoxSizeMode.Zoom,BackColor=Rail,AccessibleName="Midnight Club 3 ReDUB logo",TabStop=false};brand.SetBounds(16,24,188,84);brand.Disposed+=(sender,e)=>mark.Dispose();rail.Controls.Add(brand);}
         else{var brand=LabelAt("ReDUB",25,true);brand.SetBounds(16,30,188,50);brand.ForeColor=Color.FromArgb(245,80,96);rail.Controls.Add(brand);}
-        Nav(rail,"Game",16,118,()=>ShowHome());Nav(rail,"Add game files",16,180,()=>ShowInstall());Nav(rail,"Settings",16,242,()=>ShowSettings(category));
+        Nav(rail,"Game",16,118,()=>ShowHome());Nav(rail,"Install",16,180,()=>ShowInstall());Nav(rail,"Settings",16,242,()=>ShowSettings(category));
         var bottom=new Panel {Dock=DockStyle.Bottom,Height=120};rail.Controls.Add(bottom);Nav(bottom,"Support",0,4,()=>ShowSupport());Nav(bottom,"About",0,62,()=>ShowAbout());
         content.Dock=DockStyle.Fill;content.Margin=Padding.Empty;shell.Controls.Add(content,1,0);
         var footer=new Panel {Dock=DockStyle.Fill,BackColor=Color.FromArgb(14,22,39),Margin=Padding.Empty};shell.Controls.Add(footer,0,1);shell.SetColumnSpan(footer,2);status.SetBounds(20,9,930,22);status.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;status.ForeColor=Muted;status.Font=new Font("Segoe UI",9);footer.Controls.Add(status);progress.SetBounds(980,12,165,14);progress.Anchor=AnchorStyles.Right|AnchorStyles.Top;progress.Style=ProgressBarStyle.Marquee;progress.Visible=false;footer.Controls.Add(progress);
@@ -95,17 +95,17 @@ public sealed class Launcher : Form {
         var title=LabelAt("Midnight Club 3: ReDUB",23,true);title.SetBounds(0,58,360,48);left.Controls.Add(title);
         var desc=LabelAt("DUB Edition Remix, rebuilt for PC.",10,false);desc.ForeColor=Muted;desc.SetBounds(0,112,360,30);left.Controls.Add(desc);
         Action sizeLabels=()=>{foreach(Control label in left.Controls)label.Width=Math.Max(1,left.ClientSize.Width-16);float fontSize=left.ClientSize.Width<440?20:23;if(Math.Abs(title.Font.Size-fontSize)>.1f){var oldFont=title.Font;title.Font=new Font("Segoe UI",fontSize,FontStyle.Bold);oldFont.Dispose();}};left.SizeChanged+=(sender,e)=>sizeLabels();left.Layout+=(sender,e)=>sizeLabels();sizeLabels();
-        var right=new Panel {Dock=DockStyle.Fill,Margin=Padding.Empty,BackColor=Bg};bottom.Controls.Add(right,1,0);play.Text=ready?"▶   Play":"Add game files";play.SetBounds(0,22,288,58);right.Controls.Add(play);ButtonAt(right,"Verify setup",0,92,140,()=>VerifySetup());ButtonAt(right,"Repair",148,92,140,()=>ShowInstall());ButtonAt(right,"Game folder",0,146,140,()=>Open(RendererDist(root)));ButtonAt(right,"Add shortcut",148,146,140,()=>Run(".portable/Build-Launcher.ps1","-ShortcutsOnly"));UpdateStatus();}
+        var right=new Panel {Dock=DockStyle.Fill,Margin=Padding.Empty,BackColor=Bg};bottom.Controls.Add(right,1,0);play.Text=ready?"▶   Play":"Install";play.SetBounds(0,22,288,58);right.Controls.Add(play);ButtonAt(right,"Verify setup",0,92,140,()=>VerifySetup());ButtonAt(right,"Repair",148,92,140,()=>ShowInstall());ButtonAt(right,"Game folder",0,146,140,()=>Open(RendererDist(root)));ButtonAt(right,"Add shortcut",148,146,140,()=>Run(".portable/Build-Launcher.ps1","-ShortcutsOnly"));UpdateStatus();}
     void ShowInstall(){
         bool ready=Ready(),runtime=RuntimePresent(root);
-        var p=Standard("Add game files","Add game files",ready?"Your original Xbox disc files are installed. Play starts the game directly; nothing is compiled.":"Copy your own original Xbox DUB Edition Remix disc into this folder. Nothing is compiled.");
+        var p=Standard("Install","Install ReDUB",ready?"Your original Xbox disc files are installed. Play starts the game directly; nothing is compiled.":"Copy your own original Xbox DUB Edition Remix disc into this folder. Nothing is compiled.");
         var box=new Panel {BackColor=Card,Location=new Point(36,146),Size=new Size(Math.Max(600,content.Width-72),330),Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right};p.Controls.Add(box);
         var h=LabelAt(ready?"Your game files are ready":runtime?"Choose your game files":"The game runtime is missing",17,true);h.SetBounds(24,20,720,40);box.Controls.Add(h);
-        var hint=LabelAt(ready?"The disc files are in game-remix. Replacing them keeps saves and settings.":runtime?"Select an original Xbox Remix ISO or a folder containing default.xbe. PS2 and Switch files are not supported. Press Esc to cancel an import.":"This release folder has no game executable. Download the full ReDUB Windows zip, or rebuild from source in Settings → Advanced. You can still add game files now.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,65,720,54);box.Controls.Add(hint);
+        var hint=LabelAt(ready?"The disc files are in game-remix. Replacing them keeps saves and settings.":runtime?"Select an original Xbox Remix ISO or a folder containing default.xbe. PS2 and Switch files are not supported. Press Esc to cancel an import.":"This release folder has no game executable. Download the full ReDUB Windows zip, or rebuild from source in Settings → Advanced. You can still install game files now.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,65,720,54);box.Controls.Add(hint);
         source.SetBounds(24,125,box.Width-48,30);source.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;box.Controls.Add(source);
         ButtonAt(box,"Choose ISO",24,173,164,()=>{using(var d=new OpenFileDialog {Filter="Xbox disc image (*.iso;*.xiso)|*.iso;*.xiso|All files (*.*)|*.*",Title="Choose Xbox Remix disc"})if(d.ShowDialog(this)==DialogResult.OK)source.Text=d.FileName;});
         ButtonAt(box,"Choose folder",200,173,164,()=>{using(var d=new FolderBrowserDialog {Description="Extracted Xbox Remix folder"})if(d.ShowDialog(this)==DialogResult.OK)source.Text=d.SelectedPath;});
-        var add=ButtonAt(box,ready?"Replace game files":"Add game files",24,246,270,()=>StartImport(source.Text),true);add.Enabled=!working;importAction=add;var cancel=ButtonAt(box,"Cancel import",310,246,150,()=>CancelImport());cancel.Visible=working;cancel.Enabled=working;cancelImport=cancel;
+        var add=ButtonAt(box,ready?"Replace game files":"Install",24,246,270,()=>StartImport(source.Text),true);add.Enabled=!working;importAction=add;var cancel=ButtonAt(box,"Cancel import",310,246,150,()=>CancelImport());cancel.Visible=working;cancel.Enabled=working;cancelImport=cancel;
         var note=LabelAt("Files are copied into game-remix beside this launcher. No compiler, MSYS2 or download is used.\nUse a writable folder. Save and close the game first.",10,false);note.ForeColor=Muted;note.SetBounds(38,504,800,70);p.Controls.Add(note);
         ButtonAt(p,"Check game files",36,600,210,()=>VerifySetup());
     }
@@ -150,7 +150,7 @@ public sealed class Launcher : Form {
             ButtonAt(card,"Rebuild from source",24,y,250,()=>ConfirmRebuild(true),true);y+=54;
             ButtonAt(card,"Repair build",24,y,250,()=>ConfirmRebuild(false));y+=54;
             ButtonAt(card,"Check prerequisites",24,y,250,()=>Run(".portable/Build.ps1","-Mode","Doctor"));y+=62;
-            var hint=LabelAt("Use Add game files for normal setup. Rebuild is for a source checkout, a damaged runtime, or renderer development. Game files and saves are kept.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,y,Math.Max(400,card.Width-48),80);hint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(hint);
+            var hint=LabelAt("Use Install for normal setup. Rebuild is for a source checkout, a damaged runtime, or renderer development. Game files and saves are kept.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,y,Math.Max(400,card.Width-48),80);hint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(hint);
         }
 
     }
@@ -190,7 +190,7 @@ public sealed class Launcher : Form {
     void ShowSupport(){var p=Standard("Support","Support & activity","Local setup output. Your game and saves are never uploaded.");ButtonAt(p,"Open log folder",36,140,190,()=>Open("work-remix/logs"));ButtonAt(p,"Check setup",240,140,190,()=>VerifySetup());ButtonAt(p,"Read guide",444,140,190,()=>Open("README.md"));log.SetBounds(36,205,Math.Max(600,content.Width-72),Math.Max(280,content.Height-245));log.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;p.Controls.Add(log);}
     void ShowAbout(){var p=Standard("About","Midnight Club 3: ReDUB","A Windows-focused community edition of the original Xbox DUB Edition Remix.");var copy=LabelAt("Built on mcdub3-nx and xboxrecomp.\n\nNative Port Options, independent HUD quality, PC Music integration,\nand targeted controller, menu and GPU stability fixes.\n\nOriginal 30 FPS simulation\n\nNo game data is included. Use your own supported Xbox Remix disc.\nNot affiliated with Rockstar Games, Take-Two or Microsoft.\n\nLauncher design reference: SafeHouse by FridiNaTor1 and contributors.\nReDUB uses its own implementation and branding.",11,false);copy.SetBounds(38,150,790,330);p.Controls.Add(copy);ButtonAt(p,"Features & credits",36,510,230,()=>Open("README.md"));}
     string PathAt(string p){return Path.Combine(root,p.Replace('/',Path.DirectorySeparatorChar));}
-    void UpdateStatus(){bool running=GameRunning(),hasDisc=File.Exists(PathAt("game-remix/default.xbe")),runtime=RuntimePresent(root);play.Enabled=job==null&&!working&&!running;play.Text=running?"Game is running":Ready()||Renderer(root)=="vulkan"&&hasDisc?"▶   Play":"Add game files";string active=Renderer(root)=="vulkan"?(DlssMode(root)!="Off"?"Vulkan • DLSS "+DlssMode(root):"Vulkan • Native"):"OpenGL • Native";if(working){status.Text=importStatus.Length>0?importStatus:"Adding game files...";return;}status.Text=job!=null?"Working — setup progress is in Support.":running?"Game is running • Save and close before changing launcher settings or installing builds.":Ready()?"Ready to play • "+active+" • shared Career saves":!runtime?"Game runtime missing • use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.":hasDisc?"Game files found • choose Play to finish setup":"Not installed • choose Add game files to copy your own Xbox Remix disc.";}
+    void UpdateStatus(){bool running=GameRunning(),hasDisc=File.Exists(PathAt("game-remix/default.xbe")),runtime=RuntimePresent(root);play.Enabled=job==null&&!working&&!running;play.Text=running?"Game is running":Ready()||Renderer(root)=="vulkan"&&hasDisc?"▶   Play":"Install";string active=Renderer(root)=="vulkan"?(DlssMode(root)!="Off"?"Vulkan • DLSS "+DlssMode(root):"Vulkan • Native"):"OpenGL • Native";if(working){status.Text=importStatus.Length>0?importStatus:"Installing game files...";return;}status.Text=job!=null?"Working — setup progress is in Support.":running?"Game is running • Save and close before changing launcher settings or installing builds.":Ready()?"Ready to play • "+active+" • shared Career saves":!runtime?"Game runtime missing • use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.":hasDisc?"Game files found • choose Play to finish setup":"Not installed • choose Install to copy your own Xbox Remix disc.";}
     void Append(string text){if(IsDisposed)return;if(InvokeRequired){BeginInvoke(new Action<string>(Append),text);return;}log.AppendText(text+Environment.NewLine);log.SelectionStart=log.TextLength;log.ScrollToCaret();}
     void PlayGame(){try{StartDirect(root);UpdateStatus();}catch(Exception x){MessageBox.Show(this,x.Message,"ReDUB");}}
     void VerifySetup(){
@@ -210,7 +210,7 @@ public sealed class Launcher : Form {
     void StartImport(string selected){
         if(working)return;
         if(job!=null){MessageBox.Show(this,"Wait for the current operation to finish.","ReDUB");return;}
-        if(GameRunning()){MessageBox.Show(this,"Save and close the game before adding game files.","Game is running");return;}
+        if(GameRunning()){MessageBox.Show(this,"Save and close the game before installing game files.","Game is running");return;}
         selected=(selected??"").Trim();
         if(selected.Length==0){MessageBox.Show(this,"Choose your own Xbox Remix ISO or extracted folder first.","Choose game files");return;}
         if(!File.Exists(selected)&&!Directory.Exists(selected)){MessageBox.Show(this,"The selected disc or folder does not exist.","Choose game files");return;}
@@ -219,7 +219,7 @@ public sealed class Launcher : Form {
         closeAfterImport=false;
         if(importCancellation!=null){try{importCancellation.Dispose();}catch{}}
         importCancellation=new CancellationTokenSource();
-        working=true;importStatus="Adding game files... Press Esc to cancel.";if(importAction!=null&&!importAction.IsDisposed)importAction.Enabled=false;if(cancelImport!=null&&!cancelImport.IsDisposed){cancelImport.Visible=true;cancelImport.Enabled=true;}progress.Style=ProgressBarStyle.Marquee;progress.Visible=true;UpdateStatus();
+        working=true;importStatus="Installing game files... Press Esc to cancel.";if(importAction!=null&&!importAction.IsDisposed)importAction.Enabled=false;if(cancelImport!=null&&!cancelImport.IsDisposed){cancelImport.Visible=true;cancelImport.Enabled=true;}progress.Style=ProgressBarStyle.Marquee;progress.Visible=true;UpdateStatus();
         string sourcePath=selected;var ui=this;var cancellation=importCancellation;
         var thread=new Thread(delegate(){
             string edition=null,error=null;bool cancelled=false;
@@ -228,7 +228,7 @@ public sealed class Launcher : Form {
             catch(Exception ex){error=ex.Message;}
             if(!ui.IsDisposed&&ui.IsHandleCreated)ui.BeginInvoke(new Action<string,string,bool>(ui.FinishImport),edition,error,cancelled);
         });thread.IsBackground=true;
-        try{thread.Start();}catch(Exception ex){working=false;try{cancellation.Dispose();}catch{} importCancellation=null;progress.Visible=false;if(importAction!=null&&!importAction.IsDisposed)importAction.Enabled=true;if(cancelImport!=null&&!cancelImport.IsDisposed){cancelImport.Visible=false;cancelImport.Enabled=false;}MessageBox.Show(this,ex.Message,"Add game files",MessageBoxButtons.OK,MessageBoxIcon.Error);UpdateStatus();}
+        try{thread.Start();}catch(Exception ex){working=false;try{cancellation.Dispose();}catch{} importCancellation=null;progress.Visible=false;if(importAction!=null&&!importAction.IsDisposed)importAction.Enabled=true;if(cancelImport!=null&&!cancelImport.IsDisposed){cancelImport.Visible=false;cancelImport.Enabled=false;}MessageBox.Show(this,ex.Message,"Install",MessageBoxButtons.OK,MessageBoxIcon.Error);UpdateStatus();}
     }
     void CancelImport(){
         if(!working||importCancellation==null)return;
@@ -237,21 +237,21 @@ public sealed class Launcher : Form {
         try{importCancellation.Cancel();}catch(ObjectDisposedException){}
     }
     void UpdateImportProgress(long done,long total,string name){
-        if(total>0){progress.Style=ProgressBarStyle.Continuous;progress.Minimum=0;progress.Maximum=1000;int value=(int)Math.Min(1000.0,done*1000.0/total);progress.Value=Math.Max(0,value);importStatus="Adding game files — "+(int)(done*100.0/total)+"% — "+Path.GetFileName(name);}
-        else importStatus="Adding game files...";
+        if(total>0){progress.Style=ProgressBarStyle.Continuous;progress.Minimum=0;progress.Maximum=1000;int value=(int)Math.Min(1000.0,done*1000.0/total);progress.Value=Math.Max(0,value);importStatus="Installing game files - "+(int)(done*100.0/total)+"% — "+Path.GetFileName(name);}
+        else importStatus="Installing game files...";
         status.Text=importStatus;
     }
     void FinishImport(string edition,string error,bool cancelled){
         working=false;progress.Visible=false;progress.Style=ProgressBarStyle.Marquee;progress.Value=0;importStatus="";cancelImport=null;
         if(importCancellation!=null){try{importCancellation.Dispose();}catch{} importCancellation=null;}
         if(cancelled){
-            Append("Add game files cancelled. The previous game files were left untouched.");
+            Append("Install cancelled. The previous game files were left untouched.");
             if(closeAfterImport){closeAfterImport=false;Close();return;}
-            MessageBox.Show(this,"Adding game files was cancelled. The previous game files were left untouched.","Add game files",MessageBoxButtons.OK,MessageBoxIcon.Information);
-            UpdateStatus();if(page=="Add game files")ShowInstall();return;
+            MessageBox.Show(this,"Installing game files was cancelled. The previous game files were left untouched.","Install",MessageBoxButtons.OK,MessageBoxIcon.Information);
+            UpdateStatus();if(page=="Install")ShowInstall();return;
         }
-        if(error!=null){Append("Add game files failed: "+error);if(closeAfterImport){closeAfterImport=false;Close();return;}MessageBox.Show(this,error,"Add game files",MessageBoxButtons.OK,MessageBoxIcon.Error);UpdateStatus();if(page=="Add game files")ShowInstall();return;}
-        Append("Game files added"+(edition!=null?" ("+edition+" edition)":"")+".");
+        if(error!=null){Append("Install failed: "+error);if(closeAfterImport){closeAfterImport=false;Close();return;}MessageBox.Show(this,error,"Install",MessageBoxButtons.OK,MessageBoxIcon.Error);UpdateStatus();if(page=="Install")ShowInstall();return;}
+        Append("Game files installed"+(edition!=null?" ("+edition+" edition)":"")+".");
         if(!RuntimePresent(root))Append("The game executable is missing from this release folder. Use the full ReDUB Windows zip, or rebuild from source in Settings → Advanced.");
         if(closeAfterImport){closeAfterImport=false;Close();return;}
         UpdateStatus();ShowHome();
@@ -283,7 +283,7 @@ public sealed class Launcher : Form {
     public static string[] InstallationProblems(string root){
         var problems=new List<string>();
         string game=Path.Combine(root,@"game-remix"),xbe=Path.Combine(game,"default.xbe");
-        if(!File.Exists(xbe))problems.Add("Game files are missing: "+xbe+". Choose Add game files.");
+        if(!File.Exists(xbe))problems.Add("Game files are missing: "+xbe+". Choose Install.");
         else{string edition,error;if(!Xdvdfs.TryVerify(game,out edition,out error))problems.Add(error);}
         string dist=RendererDist(root),exe=Path.Combine(dist,"mcdub3remix.exe"),sdl=Path.Combine(dist,"SDL2.dll");
         if(!File.Exists(exe))problems.Add("Game executable is missing: "+exe+". Use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.");
@@ -372,7 +372,7 @@ public sealed class Launcher : Form {
         string dist=RendererDist(root);
         return new ProcessStartInfo(Path.Combine(dist,"mcdub3remix.exe")){WorkingDirectory=dist,UseShellExecute=true};
     }
-    static void StartDirect(string root){var running=Process.GetProcessesByName("mcdub3remix");bool active=running.Length>0;foreach(var p in running)p.Dispose();if(active)return;if(!InstallationReady(root)){string[] problems=InstallationProblems(root);throw new IOException(problems.Length>0?problems[0]:"The game is not ready. Choose Add game files.");}Process.Start(LaunchInfo(root));}
+    static void StartDirect(string root){var running=Process.GetProcessesByName("mcdub3remix");bool active=running.Length>0;foreach(var p in running)p.Dispose();if(active)return;if(!InstallationReady(root)){string[] problems=InstallationProblems(root);throw new IOException(problems.Length>0?problems[0]:"The game is not ready. Choose Install.");}Process.Start(LaunchInfo(root));}
     public static bool IsSourceRoot(string path){return Directory.Exists(path)&&File.Exists(Path.Combine(path,@".portable\Build.ps1"))&&File.Exists(Path.Combine(path,"CMakeLists.txt"));}
     static void CliLog(string root,string message){try{string dir=Path.Combine(root,@"work-remix\logs");Directory.CreateDirectory(dir);File.AppendAllText(Path.Combine(dir,"launcher-cli.log"),DateTime.Now.ToString("s")+" "+message+Environment.NewLine,new UTF8Encoding(false));}catch{}}
     static int RunCommand(string root,string command,string[] args){
@@ -453,3 +453,5 @@ public sealed class Launcher : Form {
     }
 }
 }
+
+

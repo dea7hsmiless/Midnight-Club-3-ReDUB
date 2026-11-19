@@ -1,6 +1,10 @@
-# ReDUB status
+﻿# ReDUB status
 
 _Updated 2026-11-18. This file is the single current state. Overwrite it; do not append._
+
+## Android mobile parity — current local work
+
+User authorized Android parity after iOS reportedly mostly holds 60 FPS. See `ANDROID-PARITY.md` for changes and phone checks still pending. Existing release artifacts below are historical; do not substitute the new local test APK without verification.
 
 ## Released
 
@@ -58,7 +62,7 @@ launcher say 0.2.4.
   directory reaches 754. The port keeps the same left/current/right order but uses
   an explicit stack. Directory depth is still capped at 48, entries at 200k and
   tables at 16 MiB.
-- Launcher **Add game files** accepts an ISO/XISO or an extracted folder. Import
+- Launcher **Install** accepts an ISO/XISO or an extracted folder. Import
   stages in `game-remix.importing`, verifies `default.xbe`, then swaps
   `game-remix`; a failed or cancelled import leaves the old folder, saves and
   settings alone. Replacing the game files asks first. Import has a **Cancel
@@ -107,7 +111,7 @@ launcher say 0.2.4.
   `Build.ps1 -Mode Import -Disc` now re-copies when game files already exist.
   `test-launcher.sh` covers both flag orders.
 
-**Cancellation:** the Add game files page has a **Cancel import** button and an Esc
+**Cancellation:** the Install page has a **Cancel import** button and an Esc
 shortcut; closing the launcher mid-import offers to cancel and exit. Cancelling
 deletes staging and leaves `game-remix` untouched. Verified with an off-screen
 launcher harness (ISO import cancelled at 1.5 s: no game folder, no staging) and an
