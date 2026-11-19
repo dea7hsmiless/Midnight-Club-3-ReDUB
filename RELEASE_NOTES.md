@@ -35,7 +35,7 @@
 - `ReDUB-0.2.4-Android-universal.apk` carries arm64-v8a, armeabi-v7a and x86_64 in one APK. Android 13+ and OpenGL ES 3.1+; sideload only, signed with the project's own key (certificate SHA-256 `ecd472d0d6cb4d676e5f4e5d583649d20e69eacbe8d46c8f916a40c13cec0272`).
 - The launcher follows the iOS launcher: rail of pages (Game / Install / Settings / Support / About), hero art and logo, the same palette, and the same 35 settings rows in the same groups with expandable sections and graphics presets. Values are written to the app's `mcdub3remix_env.txt`, the file in-game Port Options writes, so launcher and game agree.
 - **Install from an ISO on the device.** The Install page takes an original Xbox Remix ISO through Android's file picker and extracts it with an in-house XDVDFS reader. Extraction stages in `game-iso.importing`, verifies `default.xbe`, then swaps into `game-iso`; the previous install is backed up and restored if the swap fails, so a failed import cannot damage a working install or its saves. An extracted `default.xbe` folder is still accepted.
-- The custom ReDUB boot/menu logo set is bundled and extracted on first run; a user copy beside the game folder still wins.
+- The custom ReDUB boot/menu logo set is bundled and extracted on first run; a user copy beside the game folder still wins. The logos now actually appear on OpenGL ES: replacement textures used to be uploaded as S3TC, which ES does not have, so the renderer disabled the whole pack; they are decoded to RGBA and uploaded uncompressed when the compressed upload is refused.
 - Tilt steering with recentring at race start (stick / tilt / stick + tilt, response, dead zone, tilt range, invert), touch haptics, controller rumble, and an on-screen pad that hides itself when a controller connects.
 - 60 FPS mode as on PC: one flip retirement per vblank in gameplay, menus and pause at 30, the race step halved to 1/60 only while driving, with real-time catch-up so a late frame cannot slow the game down.
 - The Android app keeps its own version key (`ANDROID_VERSION=0.1.0`); the runtime, settings and saves are the same project as the PC packages.
@@ -44,7 +44,7 @@
 
 - `ReDUB-0.2.4-iOS-mobile-unsigned.ipa` holds 60 FPS on device. A feedback stage that used `glReadPixels` plus CPU strip replication on sampled-surface changes now copies on the GPU to a scratch texture and blits the last column/row/corner back, removing a per-frame synchronisation cost.
 - The 60 FPS race step now compensates in real time when a frame is late; the earlier build ran the simulation at two-thirds speed at about 40 FPS, which read as the whole game slowing down.
-- Tilt: corrected landscape sensor axes, a steadier default range and stronger smoothing. Pedal layouts and touch haptics as on Android.
+- Tilt: corrected landscape sensor axes, a steadier default range, stronger smoothing and a small dead zone by default (the phone is held in both hands and cannot be re-centred by thumb). Pedal layouts and touch haptics as on Android.
 - The same custom boot/menu logo set is bundled in the IPA.
 - Renderer fixes from PC: the minimap scissor seam (fractional horizontal scale left a one-pixel line) and the HUD upscale shader's alpha (transparent HUD edges no longer ring into faint square or line fringes).
 - Same bundle id as the garagefix IPA, so it **replaces** that install; Documents and saves are kept. Unsigned — sign with your own certificate. The garagefix IPA remains the conservative choice for a garage-only install.
