@@ -1604,6 +1604,111 @@ static void tex_hd(GlTex *t)
 
 
 /* Upload h as a new texture; 0 on failure. */
+/* S3TC does not exist in GLES and is missing on some desktop drivers, where
+ * glCompressedTexImage2D fails and the pack used to be switched off entirely
+ * -- the custom logos then never appeared on Android (2026-11-18). Decode the
+ * blocks to RGBA and upload that instead. */
+static void dxt_rgb565(uint16_t c, uint8_t *o)
+{
+    o[0] = (uint8_t)(((c >> 11) & 31) * 255 / 31);
+    o[1] = (uint8_t)(((c >> 5) & 63) * 255 / 63);
+    o[2] = (uint8_t)((c & 31) * 255 / 31);
+}
+
+static void dxt_rgba(const uint8_t *src, int w, int h, int dxt5, uint8_t *dst)
+{
+    int bw = (w + 3) / 4, bh = (h + 3) / 4, bx, by;
+    for (by = 0; by < bh; by++)
+        for (bx = 0; bx < bw; bx++) {
+            const uint8_t *b = src + ((size_t)by * bw + bx) * (dxt5 ? 16u : 8u);
+            uint8_t alpha[16], p[4][4];
+            uint16_t c0, c1;
+            uint32_t idx;
+            int i, x, y, k;
+            if (dxt5) {
+                int a0 = b[0], a1 = b[1];
+                uint64_t bits = 0;
+                for (i = 0; i < 6; i++)
+                    bits |= (uint64_t)b[2 + i] << (8 * i);
+                for (i = 0; i < 16; i++) {
+                    int c = (int)((bits >> (3 * i)) & 7);
+                    if (c == 0)
+                        alpha[i] = (uint8_t)a0;
+                    else if (c == 1)
+                        alpha[i] = (uint8_t)a1;
+                    else if (a0 > a1)
+                        alpha[i] = (uint8_t)(((8 - c) * a0 + (c - 1) * a1) / 7);
+                    else
+                        alpha[i] = (uint8_t)(c == 6 ? 0 : c == 7 ? 255
+                                            : ((6 - c) * a0 + (c - 1) * a1) / 5);
+                }
+                b += 8;
+            }
+            c0 = (uint16_t)(b[0] | (b[1] << 8));
+            c1 = (uint16_t)(b[2] | (b[3] << 8));
+            idx = (uint32_t)b[4] | ((uint32_t)b[5] << 8)
+                | ((uint32_t)b[6] << 16) | ((uint32_t)b[7] << 24);
+            dxt_rgb565(c0, p[0]); p[0][3] = 255;
+            dxt_rgb565(c1, p[1]); p[1][3] = 255;
+            if (c0 > c1 || dxt5) {
+                for (k = 0; k < 3; k++) {
+                    p[2][k] = (uint8_t)((2 * p[0][k] + p[1][k] + 1) / 3);
+                    p[3][k] = (uint8_t)((p[0][k] + 2 * p[1][k] + 1) / 3);
+                }
+                p[2][3] = p[3][3] = 255;
+            } else {
+                for (k = 0; k < 3; k++)
+                    p[2][k] = (uint8_t)((p[0][k] + p[1][k] + 1) / 2);
+                p[2][3] = 255;
+                p[3][0] = p[3][1] = p[3][2] = p[3][3] = 0;
+            }
+            for (y = 0; y < 4; y++)
+                for (x = 0; x < 4; x++) {
+                    int px = bx * 4 + x, py = by * 4 + y, e;
+                    uint8_t *o;
+                    if (px >= w || py >= h)
+                        continue;
+                    e = (int)((idx >> (2 * (y * 4 + x))) & 3);
+                    o = dst + ((size_t)py * w + px) * 4;
+                    o[0] = p[e][0];
+                    o[1] = p[e][1];
+                    o[2] = p[e][2];
+                    o[3] = dxt5 ? alpha[y * 4 + x] : p[e][3];
+                }
+        }
+}
+
+static GLuint hd_upload_rgba(const HdTex *h, uint32_t *bytes)
+{
+    int w = h->lw[0], hh = h->lh[0];
+    uint8_t *rgba;
+    GLuint id = 0;
+    *bytes = 0;
+    if (w <= 0 || hh <= 0 || !h->data[0])
+        return 0;
+    if (!(rgba = malloc((size_t)w * hh * 4)))
+        return 0;
+    dxt_rgba(h->data[0], w, hh, h->alpha != 0, rgba);
+    glGenTextures(1, &id);
+    tex_param_forget(id);
+    glBindTexture(GL_TEXTURE_2D, id);
+    while (glGetError() != GL_NO_ERROR) { }
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, hh, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    if (glGenerateMipmap)
+        glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, glGenerateMipmap ? 30 : 0);
+    tex_bind_forget();
+    free(rgba);
+    if (glGetError() != GL_NO_ERROR) {
+        glDeleteTextures(1, &id);
+        return 0;
+    }
+    *bytes = (uint32_t)((size_t)w * hh * 4);
+    fprintf(stderr, "  [GL] HD pack: %dx%d uploaded as RGBA (no S3TC here)\n", w, hh);
+    return id;
+}
+
 static GLuint hd_upload(const HdTex *h, uint32_t *bytes)
 {
     GLenum fmt = h->alpha ? GL_COMPRESSED_RGBA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
@@ -1624,7 +1729,7 @@ static GLuint hd_upload(const HdTex *h, uint32_t *bytes)
     tex_bind_forget();
     if (glGetError() != GL_NO_ERROR) {
         glDeleteTextures(1, &id);
-        return 0;
+        return hd_upload_rgba(h, bytes);   /* no S3TC here: RGBA instead */
     }
     return id;
 }
