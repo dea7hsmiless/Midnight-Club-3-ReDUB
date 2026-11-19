@@ -6683,59 +6683,86 @@ static uint32_t present_width(const GlSurf *s)
 
 /* Present s (sw stored columns drawn) into the window rectangle through
  * FXAA; 0 when it is off (the caller blits). Default framebuffer bound. */
-/* ── Frame generation scaffolding (RECOMP_FG=1) ───────────────────────
+/* -- Frame generation (RECOMP_FG) --------------------------------------
  *
- * Off by default. The finished frame -- scene plus every overlay, because
- * this copies after port_overlay_draw -- is kept in a texture and a second,
- * interpolated frame is presented before the next real one. This first cut
- * interpolates by crossfading the previous frame with the current one: it
- * proves the plumbing, the HUD handling and the real cost per frame, and it
- * is replaced by a motion-compensated warp once the pass is trusted.
+ * RECOMP_FG=1  crossfade of the previous frame with this one (plumbing test)
+ * RECOMP_FG=2  motion-compensated: half-res block match between the history
+ *              frame and the current one, then the history warped along it
  *
- * Why copy the back buffer instead of rendering the present into a texture:
- * the letterbox, the 4:3 hold, FXAA and the fills all live in the present
- * block, and copying after them keeps this pass out of that logic entirely.
+ * Off by default. The finished frame -- after every overlay, so the HUD is in
+ * it -- is kept in a texture and a second frame is presented before the next
+ * real one, two swaps per game frame. Copying the back buffer keeps this pass
+ * out of the letterbox / 4:3 hold / FXAA / fill logic entirely.
  *
- * Cost: one GPU copy plus one full-screen blend. Measured on the reference
- * machine, GL work was 1.9 ms of an 11 ms frame, so there is room.
+ * Fragment shaders only (GL 3.3 core): a compute-shader flow pass would
+ * exclude Mesa's GL 3.3 baseline and macOS's GL 4.1 ceiling. Where the match
+ * is poor (occlusion, new content) the composite falls back to the current
+ * frame instead of warping rubbish, so the failure mode is a repeated frame,
+ * not ghosting.
  */
 #if !defined(__ANDROID__) && !defined(__SWITCH__)
 static int    s_fg_on = -1, s_fg_ready, s_fg_have, s_fg_index, s_fg_w, s_fg_h;
 static GLuint s_fg_tex[2], s_fg_prog, s_fg_vao, s_fg_vbo;
+static GLuint s_fg_flow_tex, s_fg_flow_fbo, s_fg_flow_prog;
 
-static int fg_init(void)
+static const char *fg_vs[] = {
+    "#version 330 core\n"
+    "layout(location=0) in vec2 p;\n"
+    "out vec2 uv;\n"
+    "void main(){ uv = p*0.5+0.5; gl_Position = vec4(p, 0.0, 1.0); }\n" };
+
+static const char *fg_mix_fs[] = {
+    "#version 330 core\n"
+    "in vec2 uv;\n"
+    "out vec4 o;\n"
+    "uniform sampler2D a, b;\n"
+    "void main(){ o = mix(texture(a, uv), texture(b, uv), 0.5); }\n" };
+
+/* Half resolution. rg = (motion + 16 px) / 32 px, b = match error. */
+static const char *fg_flow_fs[] = {
+    "#version 330 core\n"
+    "in vec2 uv;\n"
+    "out vec4 o;\n"
+    "uniform sampler2D prev, cur;\n"
+    "uniform vec2 texel;\n"
+    "float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }\n"
+    "void main(){\n"
+    "  float here = lum(texture(cur, uv).rgb);\n"
+    "  float best = 4.0;\n"
+    "  vec2 bv = vec2(0.0);\n"
+    "  for (int y = -2; y <= 2; y++)\n"
+    "    for (int x = -2; x <= 2; x++) {\n"
+    "      vec2 d = vec2(float(x), float(y)) * 2.0 * texel;\n"
+    "      float e = abs(lum(texture(prev, uv - d).rgb) - here);\n"
+    "      if (e < best) { best = e; bv = vec2(float(x), float(y)) * 2.0; }\n"
+    "    }\n"
+    "  o = vec4(bv / 32.0 + 0.5, clamp(best * 4.0, 0.0, 1.0), 1.0);\n"
+    "}\n" };
+
+/* History warped by half the motion, mixed with the current frame. */
+static const char *fg_warp_fs[] = {
+    "#version 330 core\n"
+    "in vec2 uv;\n"
+    "out vec4 o;\n"
+    "uniform sampler2D prev, cur, flow;\n"
+    "uniform vec2 texel;\n"
+    "void main(){\n"
+    "  vec4 f = texture(flow, uv);\n"
+    "  vec2 v = (f.rg - 0.5) * 32.0 * texel;\n"
+    "  vec3 a = texture(prev, uv - 0.5 * v).rgb;\n"
+    "  vec3 b = texture(cur, uv).rgb;\n"
+    "  o = vec4(mix(b, a, 0.5 * (1.0 - f.b)), 1.0);\n"
+    "}\n" };
+
+static GLuint fg_program(const char *const *vs, const char *const *fs, const char *what)
 {
-    static const char *vs[] = {
-        "#version 330 core\n"
-        "layout(location=0) in vec2 p;\n"
-        "out vec2 uv;\n"
-        "void main(){ uv = p*0.5+0.5; gl_Position = vec4(p, 0.0, 1.0); }\n" };
-    static const char *fs[] = {
-        "#version 330 core\n"
-        "in vec2 uv;\n"
-        "out vec4 o;\n"
-        "uniform sampler2D a, b;\n"
-        "void main(){ o = mix(texture(a, uv), texture(b, uv), 0.5); }\n" };
-    static const float quad[12] = { -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f,
-                                    -1.0f,  1.0f, 1.0f, -1.0f,  1.0f, 1.0f };
-    GLuint v, f, p;
+    GLuint v = compile(GL_VERTEX_SHADER, vs, 1);
+    GLuint f = compile(GL_FRAGMENT_SHADER, fs, 1);
+    GLuint p;
     GLint ok = 0;
-    if (s_fg_on < 0) {
-        const char *e = getenv("RECOMP_FG");
-        s_fg_on = e && e[0] == '1';
-        if (s_fg_on)
-            fprintf(stderr, "  [GL] frame generation: crossfade scaffolding (RECOMP_FG)\n");
-    }
-    if (!s_fg_on)
-        return 0;
-    if (s_fg_ready)
-        return 1;
-    v = compile(GL_VERTEX_SHADER, vs, 1);
-    f = compile(GL_FRAGMENT_SHADER, fs, 1);
     if (!v || !f) {
         if (v) glDeleteShader(v);
         if (f) glDeleteShader(f);
-        s_fg_on = 0;
         return 0;
     }
     p = glCreateProgram();
@@ -6747,15 +6774,53 @@ static int fg_init(void)
     glGetProgramiv(p, GL_LINK_STATUS, &ok);
     if (!ok) {
         glDeleteProgram(p);
-        fprintf(stderr, "  [GL] frame generation: blend program did not link\n");
+        fprintf(stderr, "  [GL] frame generation: %s did not link\n", what);
+        return 0;
+    }
+    return p;
+}
+
+static int fg_init(void)
+{
+    static const float quad[12] = { -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f,
+                                    -1.0f,  1.0f, 1.0f, -1.0f,  1.0f, 1.0f };
+    if (s_fg_on < 0) {
+        const char *e = getenv("RECOMP_FG");
+        s_fg_on = e && e[0] ? atoi(e) : 0;
+        if (s_fg_on < 0 || s_fg_on > 2)
+            s_fg_on = 0;
+        if (s_fg_on)
+            fprintf(stderr, "  [GL] frame generation: %s (RECOMP_FG)\n",
+                    s_fg_on >= 2 ? "motion-compensated warp" : "crossfade");
+    }
+    if (!s_fg_on)
+        return 0;
+    if (s_fg_ready)
+        return 1;
+    s_fg_prog = fg_program(fg_vs, s_fg_on >= 2 ? fg_warp_fs : fg_mix_fs, "blend");
+    if (!s_fg_prog) {
         s_fg_on = 0;
         return 0;
     }
-    glUseProgram(p);
-    glUniform1i(glGetUniformLocation(p, "a"), 0);
-    glUniform1i(glGetUniformLocation(p, "b"), 1);
-    s_fg_prog = p;
-    s_cur_prog = p;
+    glUseProgram(s_fg_prog);
+    s_cur_prog = s_fg_prog;
+    if (s_fg_on >= 2) {
+        glUniform1i(glGetUniformLocation(s_fg_prog, "prev"), 0);
+        glUniform1i(glGetUniformLocation(s_fg_prog, "cur"), 1);
+        glUniform1i(glGetUniformLocation(s_fg_prog, "flow"), 2);
+        s_fg_flow_prog = fg_program(fg_vs, fg_flow_fs, "flow");
+        if (s_fg_flow_prog) {
+            glUseProgram(s_fg_flow_prog);
+            glUniform1i(glGetUniformLocation(s_fg_flow_prog, "prev"), 0);
+            glUniform1i(glGetUniformLocation(s_fg_flow_prog, "cur"), 1);
+        } else {
+            fprintf(stderr, "  [GL] frame generation: no flow pass, crossfade instead\n");
+            s_fg_on = 1;
+        }
+    } else {
+        glUniform1i(glGetUniformLocation(s_fg_prog, "a"), 0);
+        glUniform1i(glGetUniformLocation(s_fg_prog, "b"), 1);
+    }
     glGenVertexArrays(1, &s_fg_vao);
     glGenBuffers(1, &s_fg_vbo);
     glBindVertexArray(s_fg_vao);
@@ -6770,7 +6835,7 @@ static int fg_init(void)
 
 static void fg_size(int w, int h)
 {
-    int i;
+    int i, hw = (w + 1) / 2, hh = (h + 1) / 2;
     if (s_fg_w == w && s_fg_h == h)
         return;
     if (!s_fg_tex[0])
@@ -6783,6 +6848,26 @@ static void fg_size(int w, int h)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         tex_param_forget(s_fg_tex[i]);
+    }
+    if (s_fg_on >= 2) {
+        if (!s_fg_flow_tex)
+            glGenTextures(1, &s_fg_flow_tex);
+        if (!s_fg_flow_fbo)
+            glGenFramebuffers(1, &s_fg_flow_fbo);
+        glBindTexture(GL_TEXTURE_2D, s_fg_flow_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, hw, hh, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        tex_param_forget(s_fg_flow_tex);
+        glBindFramebuffer(GL_FRAMEBUFFER, s_fg_flow_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_fg_flow_tex, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            fprintf(stderr, "  [GL] frame generation: flow target incomplete, crossfade instead\n");
+            s_fg_on = 1;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
     s_fg_w = w;
     s_fg_h = h;
@@ -6807,31 +6892,86 @@ static void fg_capture(void)
     s_fg_have = 1;
 }
 
-/* Present the in-between frame. Returns 1 when something was drawn. */
-static int fg_second(void)
+static void fg_draw(int prev_unit_tex)
 {
-    if (s_fg_on != 1 || !s_fg_ready || !s_fg_have)
-        return 0;
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, s_fg_w, s_fg_h);
-    glDisable(GL_SCISSOR_TEST);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_STENCIL_TEST);
-    glDisable(GL_BLEND);
-    glDisable(GL_CULL_FACE);
-    glColorMask(1, 1, 1, 1);
-    glUseProgram(s_fg_prog);
-    s_cur_prog = s_fg_prog;
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index ^ 1]);
-    tex_param_forget(s_fg_tex[s_fg_index ^ 1]);
-    glActiveTexture(GL_TEXTURE0 + 1);
-    glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
-    tex_param_forget(s_fg_tex[s_fg_index]);
-    glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(s_fg_vao);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
+    (void)prev_unit_tex;
+}
+
+static void fg_set_texel(GLuint prog)
+{
+    float t2[2];
+    t2[0] = 1.0f / (float)s_fg_w;
+    t2[1] = 1.0f / (float)s_fg_h;
+    glUniform2fv(glGetUniformLocation(prog, "texel"), 1, t2);
+}
+
+/* Present the in-between frame. Returns 1 when something was drawn. */
+static int fg_second(void)
+{
+    if (s_fg_on < 1 || !s_fg_ready || !s_fg_have)
+        return 0;
+    if (s_fg_on >= 2 && s_fg_flow_prog) {
+        /* 1: half-res block match between history and the current frame */
+        glBindFramebuffer(GL_FRAMEBUFFER, s_fg_flow_fbo);
+        glViewport(0, 0, (s_fg_w + 1) / 2, (s_fg_h + 1) / 2);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
+        glColorMask(1, 1, 1, 1);
+        glUseProgram(s_fg_flow_prog);
+        s_cur_prog = s_fg_flow_prog;
+        fg_set_texel(s_fg_flow_prog);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index ^ 1]);
+        tex_param_forget(s_fg_tex[s_fg_index ^ 1]);
+        glActiveTexture(GL_TEXTURE0 + 1);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
+        tex_param_forget(s_fg_tex[s_fg_index]);
+        glActiveTexture(GL_TEXTURE0);
+        fg_draw(0);
+
+        /* 2: composite to the window */
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, s_fg_w, s_fg_h);
+        glUseProgram(s_fg_prog);
+        s_cur_prog = s_fg_prog;
+        fg_set_texel(s_fg_prog);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index ^ 1]);
+        tex_param_forget(s_fg_tex[s_fg_index ^ 1]);
+        glActiveTexture(GL_TEXTURE0 + 1);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
+        tex_param_forget(s_fg_tex[s_fg_index]);
+        glActiveTexture(GL_TEXTURE0 + 2);
+        glBindTexture(GL_TEXTURE_2D, s_fg_flow_tex);
+        tex_param_forget(s_fg_flow_tex);
+        glActiveTexture(GL_TEXTURE0);
+        fg_draw(0);
+    } else {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, s_fg_w, s_fg_h);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
+        glColorMask(1, 1, 1, 1);
+        glUseProgram(s_fg_prog);
+        s_cur_prog = s_fg_prog;
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index ^ 1]);
+        tex_param_forget(s_fg_tex[s_fg_index ^ 1]);
+        glActiveTexture(GL_TEXTURE0 + 1);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
+        tex_param_forget(s_fg_tex[s_fg_index]);
+        glActiveTexture(GL_TEXTURE0);
+        fg_draw(0);
+    }
     s_fg_index ^= 1;
     tex_bind_forget();
     return 1;
