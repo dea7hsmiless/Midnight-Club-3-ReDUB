@@ -6,6 +6,8 @@ Original Xbox code translated to native C, with OpenGL and Vulkan renderers, DLS
 
 <p align="center"><a href="https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/tree/main">Source</a> · <a href="https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases">Releases</a> · <a href="BUILDING-WINDOWS.md">Build from source</a></p>
 
+<p align="center"><a href="https://recomplauncher.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a></p>
+
 # Midnight Club 3: ReDUB
 
 A Windows-focused community edition of **Midnight Club 3: DUB Edition Remix**, built on [mcdub3-nx](https://github.com/laureladastra/mcdub3-nx) and [xboxrecomp](https://github.com/sp00nznet/xboxrecomp).

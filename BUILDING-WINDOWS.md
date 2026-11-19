@@ -28,6 +28,10 @@ ReDUB Launcher.exe --build
 
 `-Mode Import` copies an extracted folder only; ISO import lives in the launcher's built-in reader. `-NoInstall` stages a build. Build log: `work-remix/logs/easy-build.log`. Launcher CLI log: `work-remix/logs/launcher-cli.log`. Backups: `work-remix/build-backups/`.
 
+## Release zip
+
+Assemble the release folder as `ReDUB Launcher.exe`, `launcher-source.zip`, `work-remix/build-windows-x86_64/dist/`, and copy `recomplauncher.json` to the zip root beside the launcher. RecompLauncher reads it from the installed folder: `prepare` runs `ReDUB Launcher.exe --import`, `start` runs the game directly, and the settings rows come from `mcdub3remix_env.txt`. `--import` prints `progress <0..1> <text>` on stdout, which is what a launcher uses to show setup progress. The file must ship in every release, and its `prepare.version` must be bumped when an update changes what `--import` produces.
+
 Move the complete project together. Location-specific caches avoid stale CMake paths; recreate shortcuts after a move.
 
 Rebuild the launcher itself with `.portable/Build-Launcher.ps1`. This uses the Windows .NET Framework compiler (including `.portable/Xdvdfs.cs`) and does not need Python, Node, or a separate launcher runtime download. The release build uses a standard `asInvoker` Windows application manifest and deterministic compiler settings; it does not request administrator access or install a background updater. See [README.md](README.md) for included features and limitations.
