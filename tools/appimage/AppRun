@@ -4,12 +4,30 @@ APPDIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 export APPDIR
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 version=$(cat "$APPDIR/version" 2>/dev/null || printf 'unknown')
-config_dir=${XDG_CONFIG_HOME:-$HOME/.config}/redub
-data_dir=${XDG_DATA_HOME:-$HOME/.local/share}/redub
-cache_dir=${XDG_CACHE_HOME:-$HOME/.cache}/redub
-state_dir=${XDG_STATE_HOME:-$HOME/.local/state}/redub
+# Portable by default: everything lives beside the AppImage (or the AppDir when
+# running from an extracted tarball), so deleting the folder takes the game,
+# its saves and its settings with it. XDG is used only when an older install
+# already has data there -- stranding somebody's career to satisfy a layout
+# rule would be a worse bug than the one this fixes.
+xdg_config=${XDG_CONFIG_HOME:-$HOME/.config}/redub
+xdg_data=${XDG_DATA_HOME:-$HOME/.local/share}/redub
+xdg_cache=${XDG_CACHE_HOME:-$HOME/.cache}/redub
+xdg_state=${XDG_STATE_HOME:-$HOME/.local/state}/redub
 package_dir=${APPIMAGE:+$(dirname -- "$APPIMAGE")}
 package_dir=${package_dir:-$APPDIR}
+portable_dir=${REDUB_HOME:-$package_dir/redub-data}
+if [ ! -d "$portable_dir" ] && { [ -d "$xdg_data/saves" ] || [ -f "$xdg_config/mcdub3remix_env.txt" ]; }; then
+    config_dir=$xdg_config
+    data_dir=$xdg_data
+    cache_dir=$xdg_cache
+    state_dir=$xdg_state
+    printf '%s\n' "note: keeping the existing data in $xdg_data; to go portable, move it to $portable_dir" >&2
+else
+    config_dir=$portable_dir/config
+    data_dir=$portable_dir/data
+    cache_dir=$portable_dir/cache
+    state_dir=$portable_dir/state
+fi
 fail() {
     printf '%s\n' "$1" >&2
     if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ -x "$APPDIR/usr/bin/redub-message" ]; then
@@ -27,20 +45,24 @@ Game files (required):
   --game-dir DIR        folder containing default.xbe (remembered beside the AppImage)
   MC3_GAME_DIR          same, as an environment variable
 
-Where data goes (defaults follow the XDG layout):
+Where data goes (portable by default, beside the AppImage):
   --portable DIR        keep saves, settings, logs and caches inside DIR
-  REDUB_DATA_DIR=DIR    same, as an environment variable
+  REDUB_HOME=DIR        the portable root (default: ./redub-data beside the AppImage)
   --save-dir DIR        saves only          (MC3_SAVE_DIR)
   --settings FILE       settings file       (MC3_SETTINGS_FILE)
   --hd DIR              HD texture pack     (RECOMP_GL_HD_DIR)
-  Saves: $XDG_DATA_HOME/redub/saves   Settings: $XDG_CONFIG_HOME/redub/mcdub3remix_env.txt
-  Logs:  $XDG_STATE_HOME/redub        Caches:   $XDG_CACHE_HOME/redub
+  Saves: ROOT/data/saves   Settings: ROOT/config/mcdub3remix_env.txt
+  Logs:  ROOT/state        Caches:   ROOT/cache
+  An existing XDG install keeps using its own folders; the start-up note says so.
 
 Video and frame rate (same values as the launcher and Port Options):
   --fullscreen 0|1|2    0 windowed, 1 exclusive fullscreen, 2 borderless (restart)
   --resolution auto|WxH window size or display mode (restart)
   --scale N             render scale: 1, 1.5, 2, 3, 5 (restart)
-  --frame-rate 30|60    30 is the default; 60 needs a restart
+  --frame-rate 30|60|120 30 is the default; 60 and 120 need a restart (120 needs
+                        a 120 Hz display)
+  --frame-gen off|crossfade|motion
+                        frame generation (needs a 120 Hz display; default off)
 
 Other:
   --diagnose            print versions, display and library state
@@ -113,7 +135,19 @@ while [ "$#" -gt 0 ]; do
             shift 2 ;;
         --frame-rate)
             need_value "$@"
-            case "$2" in 30|60) MC3_FRAME_RATE=$2 ;; *) fail '--frame-rate takes 30 or 60.' ;; esac
+            case "$2" in
+                30|60|120) MC3_FRAME_RATE=$2 ;;
+                *) fail '--frame-rate takes 30, 60 or 120.' ;;
+            esac
+            shift 2 ;;
+        --frame-gen)
+            need_value "$@"
+            case "$2" in
+                off|0) RECOMP_FG=0 ;;
+                crossfade|1) RECOMP_FG=1 ;;
+                motion|2) RECOMP_FG=2 ;;
+                *) fail '--frame-gen takes off, crossfade or motion.' ;;
+            esac
             shift 2 ;;
         --) shift; break ;;
         -*) fail "Unknown option: $1. Run with --help." ;;

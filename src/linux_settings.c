@@ -128,7 +128,13 @@ void windows_port_setting_change(int id)
     case 12:{int n=(s_hud+1)%4;if(save_setting("RECOMP_GL_UI_SCALE",s_hud_scales[n]))s_hud=n;break;}
     case 13:{int n=(s_gamma+1)%7;snprintf(value,sizeof value,"%.1f",.8+n*.1);if(save_setting("MC3_GAMMA",value))s_gamma=n;break;}
     case 14:{int n=(s_brightness+1)%9;snprintf(value,sizeof value,"%.2f",.8+n*.05);if(save_setting("MC3_BRIGHTNESS",value))s_brightness=n;break;}
-    case 16:{int n=atomic_load(&s_frame_rate)>=60?30:60;snprintf(value,sizeof value,"%d",n);if(save_setting("MC3_FRAME_RATE",value)){atomic_store(&s_frame_rate,n);fprintf(stderr,"[PORT] frame rate %d saved (restart to apply)\n",n);}break;}
+    case 16:{int cur=atomic_load(&s_frame_rate), n;
+#ifdef MC3_ALLOW_120
+        n = cur >= 120 ? 30 : cur >= 60 ? 120 : 60;
+#else
+        n = cur >= 60 ? 30 : 60;
+#endif
+        snprintf(value,sizeof value,"%d",n);if(save_setting("MC3_FRAME_RATE",value)){atomic_store(&s_frame_rate,n);fprintf(stderr,"[PORT] frame rate %d saved (restart to apply)\n",n);}break;}
     case 15:{int at=4;for(int i=0;i<9;i++)if(s_rumble_values[i]==s_rumble){at=i;break;}int n=s_rumble_values[(at+1)%9];snprintf(value,sizeof value,"%d",n);if(save_setting("MC3_RUMBLE_STRENGTH",value)){s_rumble=n;xbox_InputSetRumbleStrength(n);}break;}
     }
     if(id>=1&&id<=6){atomic_store(&s_preset,0);save_setting("MC3_GRAPHICS_PRESET","0");}
