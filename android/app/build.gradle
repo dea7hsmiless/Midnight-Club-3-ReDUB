@@ -45,7 +45,7 @@ def releaseProps = new Properties()
 if (releaseKey.exists())
     releaseKey.withInputStream { releaseProps.load(it) }
 def app = game == 'remix' ? 'mcdub3remix' : 'mcdub3'
-def label = game == 'remix' ? 'Midnight Club 3 Remix' : 'Midnight Club 3'
+def label = game == 'remix' ? 'ReDUB' : 'Midnight Club 3'
 // SDL2's source: MC3_SDL_DIR (a build runner), else work-<game>/tools/.
 def sdl = System.getenv('MC3_SDL_DIR') ? new File(System.getenv('MC3_SDL_DIR'))
           : new File(repo, "work-${game == 'remix' ? 'remix' : 'dub'}/tools/SDL2-2.32.10")

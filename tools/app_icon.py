@@ -11,12 +11,11 @@ ignores an icon that is not 256x256. Non-square artwork is cropped to the
 middle square first.
 
 android: the foreground of an adaptive launcher icon, 432x432 (108 dp at
-xxxhdpi). Launchers cut the layer to their own shape (circle, squircle,
-...) and show only its middle 72 dp; a circle cuts that to its inscribed
-disc. So the artwork is 60 dp with rounded corners, the whole logo inside
-even a circle, over itself enlarged, blurred and darkened for whatever a
-shape shows around it. Full-bleed (or 76 dp) the cover's logo lost its
-ends in a circle.
+xxxhdpi). Launchers cut the layer to their own shape (circle, squircle, ...),
+so the artwork covers the whole canvas and the mask is the icon's only edge.
+An earlier version inset the art at 60 dp on a blurred copy of itself; its
+rounded border showed inside the launcher's mask as a stray outline, so it
+was dropped (2026-11-18).
 
 (The Mac's rounded .icns is tools/mac_icon.py, Windows' .ico
 tools/windows/win_icon.py.)
@@ -43,19 +42,15 @@ def switch(src, dst):
 
 
 def android(src, dst):
-    from PIL import ImageDraw, ImageFilter
-    side, body = 432, round(432 * 60 / 108)
+    # Full-bleed: the launcher's own mask is the icon's only shape. The inset
+    # badge this used to draw put its rounded border inside that mask, which
+    # read as a stray outline around the icon (2026-11-18). The wordmark sits
+    # in the middle third, so it survives a circular mask.
+    side = 432
     im = square(Image.open(src).convert("RGB"))
-    back = im.resize((side, side), Image.LANCZOS).filter(ImageFilter.GaussianBlur(18))
-    back = Image.eval(back, lambda v: int(v * 0.55))               # darker: the art stands out
-    art = im.resize((body, body), Image.LANCZOS)
-    mask = Image.new("L", (body * 4, body * 4), 0)              # 4x: smooth corners
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, body * 4 - 1, body * 4 - 1),
-                                           radius=round(body * 4 * 0.12), fill=255)
-    mask = mask.resize((body, body), Image.LANCZOS)
-    back.paste(art, ((side - body) // 2, (side - body) // 2), mask)
-    back.save(dst, format="PNG", optimize=True)
-    print("  icon: %s -> %s (Android adaptive foreground)" % (os.path.relpath(src), os.path.relpath(dst)))
+    im.resize((side, side), Image.LANCZOS).save(dst, format="PNG", optimize=True)
+    print("  icon: %s -> %s (Android adaptive foreground, full-bleed)"
+          % (os.path.relpath(src), os.path.relpath(dst)))
 
 
 def main():
