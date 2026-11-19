@@ -371,7 +371,19 @@ public sealed class Launcher : Form {
         try{
             if(command=="--import"){
                 if(args.Length<2){CliLog(root,"--import needs a folder or .iso path");return 2;}
-                string edition=ImportGameFiles(root,args[1],true,null,CancellationToken.None);
+                /* Launchers run this without a window and read progress lines from
+                 * stdout: "progress 0.437 Copying name". Percent steps keep the
+                 * output small on a multi-gigabyte copy. */
+                long last=-1;
+                Action<long,long,string> report=(done,total,name)=>{
+                    if(total<=0)return;
+                    long step=done*1000/total;
+                    if(step==last)return;
+                    last=step;
+                    string fraction=((double)step/1000.0).ToString("0.000",System.Globalization.CultureInfo.InvariantCulture);
+                    try{Console.Out.WriteLine("progress "+fraction+" "+Path.GetFileName(name));Console.Out.Flush();}catch{}
+                };
+                string edition=ImportGameFiles(root,args[1],true,report,CancellationToken.None);
                 CliLog(root,"Imported game files ("+edition+").");return 0;
             }
             if(command=="--play"){StartDirect(root);CliLog(root,"Started the game.");return 0;}
