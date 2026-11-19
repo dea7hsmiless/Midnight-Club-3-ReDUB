@@ -53,7 +53,7 @@
 
 - iOS: a few-hundred-millisecond hitch can still occur at the race -> menu transition (the game loads `flash/transition.xbck` and runs a worker thread; renderer instrumentation shows it is not GPU work). Builds with `MC3_PERF>0` now log which side owns the time.
 - iOS: occasional 51-59 FPS dips rather than a perfectly locked 60.
-- Android: logo replacement, haptics and tilt feel still need on-device confirmation. BlueStacks 5 (Android 13) runs the APK for setup and imports but is not a phone.
+- Android: logo replacement, haptics and tilt feel still need on-device confirmation. BlueStacks 5 (Android 13) runs the launcher and completes an ISO import, but the game itself does not boot there (it spins after loading its asset files); the Android SDK emulator with -gpu host does render it. Neither is a phone.
 - Android: no store distribution; sideload only, and Play Protect will ask about it.
 
 ### Packaging
