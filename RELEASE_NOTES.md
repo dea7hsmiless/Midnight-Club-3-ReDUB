@@ -1,6 +1,68 @@
 # Release notes
 
-## v0.2.3 — 2026-11-17
+## v0.2.4 - 2026-11-18
+
+### Frame rate
+
+- **30 FPS remains the default**, the title's own cadence. Nothing changes for anyone who
+  does not touch the setting.
+- **60 FPS and 120 FPS are opt-in** (launcher -> Settings -> Graphics -> Frame rate, or
+  in-game Port Options, which cycles 30 -> 60 -> 120 on this build).
+- **120 needs three things:** a Windows build with `MC3_ALLOW_120` (all of them now), the
+  setting on 120, and a display actually running at 120 Hz or higher. A CPU that can carry
+  120 steps per second makes it native; below that the game keeps real time and presents
+  what it can.
+- **60 FPS keeps real time.** The simulation now compensates when a race cannot hold its
+  cadence instead of advancing at `fps/target` speed. Measured: 19.85 s of race clock in
+  20.10 s of wall time (98.8 %). Before the fix: 70.5 %.
+- **Frame generation** (launcher -> Graphics -> Frame generation, default **Off**):
+  - `Crossfade` - plumbing test, visible double exposure in motion.
+  - `Motion-compensated` - half-res block match between history and the current frame, the
+    history warped by half the motion, mix weight scaled by match confidence so a failed
+    match repeats a frame instead of ghosting.
+  - Costs about 0.5 ms per frame. The HUD is captured after every overlay and never
+    interpolated.
+  - **Requires a 120 Hz display.** On anything slower it refuses to run rather than halve
+    the game rate; `RECOMP_FG_FORCE=1` overrides for testing.
+  - Measured at the title on a 60 Hz machine with the override: rendering 28.5 fps,
+    presenting 57.0 fps - exactly two presented frames per rendered frame.
+
+### Hardware for 120 (full table in SPECS-120.md)
+
+- **Minimum, 120 via frame generation:** 120 Hz display, CPU that holds 60 fps (Ryzen 5 3600
+  / i5-10400 class), GPU with ~10 ms of headroom (GTX 1660 Super / RX 5600 XT class).
+- **Recommended, native 120:** 120 Hz display, single-thread ~25-30 % faster than a Ryzen 5
+  5600 (7600 / 7800X3D / 13600K / 13700K class). GPU is not the limit.
+- **Ceiling is 120.** No 144 or 240 mode.
+- Why it is CPU-bound: 9.2 ms per frame in guest code and pushbuffer decode against an 8.3 ms
+  budget at 120, with only 1.9 ms of GL work. Lowering resolution does not help.
+
+### Renderer
+
+- **OpenGL is the renderer.** DLSS was removed from the launcher: the NGX bridge is
+  Vulkan-only, and the Vulkan renderer runs at 5-20 fps against OpenGL's 60-95 on the same
+  race, so the control could only promise something the shipping renderer cannot do.
+- The Vulkan experiment remains in the source for investigation; it is not part of the
+  release and is not selectable for play.
+
+### Known limitations
+
+- 120 and frame generation are **unverified on a 120 Hz display** - the reference machine is
+  60 Hz. Correctness, cost, pacing and HUD handling are verified; smoothness is not.
+- Frame generation's flow search covers about +/-4 px per frame; faster camera motion falls
+  back to a repeated frame rather than warping.
+- The in-game Port Options row for frame generation is launcher-only.
+- Android and iOS packages carry their own mobile work (phone music in the radio, mix gain,
+  rumble row) and are otherwise unchanged by the PC work.
+
+### Not in this release
+
+- Vulkan performance work (renderer-scale).
+- DLSS at all (removed while its renderer is not viable).
+- A working per-draw motion attachment (no stable draw identity across frames; measured
+  0 matches with two different keys).
+
+## v0.2.3 - 2026-11-17
 
 **60 FPS becomes an option, and the release stops looking like malware to virus scanners.**
 

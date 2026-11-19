@@ -8,6 +8,12 @@ plugins {
 def repo = rootProject.projectDir.parentFile
 def game = project.hasProperty('MC3_GAME') ? project.MC3_GAME : 'dub'
 def edition = project.hasProperty('MC3_EDITION') ? project.MC3_EDITION : (game == 'remix' ? 'eur' : 'usa')
+// Release packages are arm64 by default. -PMC3_ABI=x86_64 makes a local
+// emulator test build; -PMC3_ABI=universal bundles the three current ABIs.
+def abiArg = project.hasProperty('MC3_ABI') ? project.MC3_ABI : 'arm64-v8a'
+def abis = abiArg == 'universal'
+           ? ['arm64-v8a', 'armeabi-v7a', 'x86_64']
+           : abiArg.split(',')
 def appEnv = new File(repo, "config/${game}/app.env").text
 def envVar = { String name, String dflt ->
     def m = (appEnv =~ /(?m)^${name}="?([^"\n]*)"?/)
@@ -39,7 +45,7 @@ def releaseProps = new Properties()
 if (releaseKey.exists())
     releaseKey.withInputStream { releaseProps.load(it) }
 def app = game == 'remix' ? 'mcdub3remix' : 'mcdub3'
-def label = game == 'remix' ? 'Midnight Club 3 Remix' : 'Midnight Club 3'
+def label = game == 'remix' ? 'ReDUB' : 'Midnight Club 3'
 // SDL2's source: MC3_SDL_DIR (a build runner), else work-<game>/tools/.
 def sdl = System.getenv('MC3_SDL_DIR') ? new File(System.getenv('MC3_SDL_DIR'))
           : new File(repo, "work-${game == 'remix' ? 'remix' : 'dub'}/tools/SDL2-2.32.10")
@@ -62,11 +68,12 @@ def makeIcon = tasks.register('mc3Icon') {
         def xml = new File(iconRes, 'mipmap-anydpi-v26/ic_launcher.xml')
         iconRes.deleteDir()
         fg.parentFile.mkdirs()
-        def proc = ['bash', '-c',
-                    '. tools/env.sh && mc3_app_env && art=$(mc3_app_artwork "$1") && [ -n "$art" ] '
-                    + '&& py=$(mc3_pillow_python) && [ -n "$py" ] '
-                    + '&& "$py" tools/app_icon.py android "$art" "$2"', 'mc3Icon',
-                    edition, fg.path].execute(["GAME=${game}"] + System.getenv().collect { k, v -> "$k=$v" }, repo)
+        // Direct Python invocation works on Windows too (no Bash/MSYS
+        // environment or personal artwork path needed for the Remix icon).
+        def art = game == 'remix' ? new File(repo, 'launcher/art/android-icon.png')
+                                  : new File(repo, envVar('APP_ICON', 'launcher/art/hero.jpg'))
+        def proc = ['python', new File(repo,'tools/app_icon.py').path,
+                    'android', art.path, fg.path].execute(null, repo)
         proc.waitForProcessOutput(System.out, System.err)
         if (proc.exitValue() == 0 && fg.exists()) {
             xml.parentFile.mkdirs()
@@ -97,7 +104,7 @@ android {
         versionName versionLabel
         resValue 'string', 'app_name', label
         resValue 'string', 'sd_dir', "${app}-nx"     // the Switch build's folder (MC3_SD_DIR)
-        ndk { abiFilters 'arm64-v8a' }
+        ndk { abiFilters.addAll(abis) }
         externalNativeBuild {
             cmake {
                 arguments "-DMC3_REPO=${repo}", "-DMC3_SDL_DIR=${sdl}",
@@ -145,7 +152,9 @@ android {
     // debug builds -debug.apk
     applicationVariants.all { variant ->
         variant.outputs.all {
-            outputFileName = "${app}-${versionLabel}${variant.buildType.name == 'release' ? '' : '-debug'}.apk"
+            def abiTag = abis.size() > 1 ? '-universal'
+                         : abis[0] == 'arm64-v8a' ? '' : "-${abis[0]}"
+            outputFileName = "${app}-${versionLabel}${abiTag}${variant.buildType.name == 'release' ? '' : '-debug'}.apk"
         }
     }
     packagingOptions {

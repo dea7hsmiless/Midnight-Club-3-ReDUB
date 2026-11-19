@@ -10,6 +10,6 @@
   <url type="homepage">https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB</url>
   <url type="bugtracker">https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/issues</url>
   <provides><binary>mcdub3remix</binary></provides>
-  <releases><release version="0.2.2" date="2026-11-16" type="stable"><description><p>Linux AppImage release with bundled dependencies and persistent user settings.</p></description></release></releases>
+  <releases><release version="0.2.4" date="2026-11-18" type="stable"><description><p>AppImage and plain tarball with game-folder, portable-mode, save/settings and video/frame-rate flags, plus the shared launcher import changes.</p></description></release><release version="0.2.2" date="2026-11-16" type="stable"><description><p>Linux AppImage release with bundled dependencies and persistent user settings.</p></description></release></releases>
   <content_rating type="oars-1.1"/>
 </component>

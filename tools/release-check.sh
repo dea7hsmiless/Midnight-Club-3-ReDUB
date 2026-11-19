@@ -13,13 +13,15 @@ warn() { printf 'warn  %s\n' "$*"; }
 
 # 1. One version for every game (CI: Tests -> Version and release notes)
 if [ -f config/dub/app.env ] && [ -f config/remix/app.env ]; then
-  ver=$(bash -c 'source config/dub/app.env; echo "$APP_VERSION"')
+  # Strip CR: a Windows worktree keeps these files CRLF (core.autocrlf=true), and
+  # `source` then folds the CR into the value, which breaks the greps below.
+  ver=$(bash -c 'source config/dub/app.env; echo "$APP_VERSION"' | tr -d '\r')
   case "$ver" in
     [0-9]*.[0-9]*.[0-9]*) ok "config/dub APP_VERSION=$ver" ;;
     *) bad "config/dub APP_VERSION '$ver' is not x.y.z" ;;
   esac
   for cfg in config/*/app.env; do
-    v=$(bash -c 'source "$1"; echo "$APP_VERSION"' _ "$cfg")
+    v=$(bash -c 'source "$1"; echo "$APP_VERSION"' _ "$cfg" | tr -d '\r')
     [ "$v" = "$ver" ] && ok "$cfg = $ver" || bad "$cfg = $v, expected $ver (one version for every game)"
   done
 else
@@ -36,7 +38,7 @@ if [ -n "${ver:-}" ] && [ -f RELEASE_NOTES.md ]; then
 fi
 
 # 3. Mojibake in tracked text (the launcher and the release body both hit this)
-mojibake=$(git grep -I -n -e 'â€' -e '├ó' -e 'Ã¢â' -e $'\uFFFD' -- . 2>/dev/null | head -20)
+mojibake=$(git grep -I -n -e 'â€' -e '├ó' -e 'Ã¢â' -e $'\uFFFD' -- . ':!tools/release-check.sh' 2>/dev/null | head -20)
 if [ -n "$mojibake" ]; then
   bad "mojibake in tracked text:"
   printf '%s\n' "$mojibake"
@@ -44,16 +46,24 @@ else
   ok "no mojibake in tracked text"
 fi
 
-# 4. Launcher source: UTF-8 BOM + compiler told it is UTF-8
-cs=.portable/Launcher.cs
-if [ -f "$cs" ]; then
-  head3=$(head -c 3 "$cs" | od -An -tx1 | tr -d ' \n')
-  [ "$head3" = "efbbbf" ] && ok ".portable/Launcher.cs has a UTF-8 BOM" \
-    || bad ".portable/Launcher.cs lost its UTF-8 BOM (UTF-8 text will compile as ANSI)"
+# 4. Launcher sources: UTF-8 BOM + compiler told it is UTF-8
+for cs in .portable/Launcher.cs .portable/Xdvdfs.cs; do
+  if [ -f "$cs" ]; then
+    head3=$(head -c 3 "$cs" | od -An -tx1 | tr -d ' \n')
+    [ "$head3" = "efbbbf" ] && ok "$cs has a UTF-8 BOM" \
+      || bad "$cs lost its UTF-8 BOM (UTF-8 text will compile as ANSI)"
+  fi
+done
+if [ -f .portable/Launcher.cs ]; then
   if grep -q -- '/codepage:65001' .portable/Build-Launcher.ps1 2>/dev/null; then
     ok "Build-Launcher.ps1 passes /codepage:65001"
   else
     bad "Build-Launcher.ps1 is missing /codepage:65001"
+  fi
+  if [ -f .portable/Xdvdfs.cs ]; then
+    grep -q -- 'Xdvdfs.cs' .portable/Build-Launcher.ps1 2>/dev/null \
+      && ok "Build-Launcher.ps1 compiles Xdvdfs.cs" \
+      || bad "Build-Launcher.ps1 does not compile Xdvdfs.cs"
   fi
 else
   warn "no .portable/Launcher.cs in this tree; skipping launcher checks"

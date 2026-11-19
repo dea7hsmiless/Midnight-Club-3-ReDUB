@@ -70,6 +70,15 @@ elif [ ! -f "$ICON" ] || [ "$ART" -nt "$ICON" ]; then
     [ -n "$ICON_OK" ] || { echo "  (no icon: no Python with Pillow)"; ICON=""; }
 fi
 ARGS+=(-DMC3_WIN_ICON="$ICON" -DMC3_VERSION="${APP_VERSION:-dev}")
+# On by default for Windows releases; MC3_ALLOW_120=0 turns it off. Windows
+# only by decision -- the Linux and macOS builds must not set this.
+if [ "${MC3_ALLOW_120:-1}" = "1" ]; then
+    ARGS+=(-DMC3_ALLOW_120=ON)
+fi
+# Extra CFLAGS for measurement builds (e.g. MC3_C_FLAGS=-DRECOMP_FRAME_RATE_TEST).
+if [ -n "${MC3_C_FLAGS:-}" ]; then
+    ARGS+=(-DCMAKE_C_FLAGS="$MC3_C_FLAGS")
+fi
 # Native (MSYS2) and cross builds keep separate trees: work/ may be shared
 # between the Mac and a Windows VM, and CMake refuses a tree configured at
 # another path (the first install stopped there, 2026-10-23).

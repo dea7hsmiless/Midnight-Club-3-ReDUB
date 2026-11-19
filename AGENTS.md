@@ -1,6 +1,6 @@
 # ReDUB — notes for AI agents
 
-Midnight Club 3: DUB Edition Remix, statically recompiled for Windows, Linux and iOS.
+Midnight Club 3: DUB Edition Remix, statically recompiled for Windows, Linux, iOS and Android.
 
 **Read `docs/STATUS.md` first.** It is the only current state; Desktop handoffs are
 snapshots and may be stale.

@@ -12,6 +12,17 @@
 #include <math.h>
 #include "apu_xaudio2.h"
 
+/* Optional host hook: 1.0 normally; the iOS/Android phone-music bridge lowers
+ * it while external music is the soundtrack. Weak, so every other host and
+ * game links unchanged. */
+#if defined(__APPLE__)
+#  define MC3_GAIN_HOOK 1
+extern float mc3_output_gain(void) __attribute__((weak_import));
+#elif defined(__GNUC__) || defined(__clang__)
+#  define MC3_GAIN_HOOK 1
+extern float mc3_output_gain(void) __attribute__((weak));
+#endif
+
 /* Hearing safety, for every output path: master volume, then a soft limiter
  * whose output never exceeds -6 dBFS (16384). c * tanh(x / c) is linear for
  * quiet signals and bends smoothly towards the ceiling for loud ones, so a
@@ -483,6 +494,20 @@ int xa2_submit_samples(const int16_t *samples, int num_samples)
     g_sdla_stats.samples += (uint64_t)num_samples;
     apu_output_safety(samples, buf, n);
     dump_block(buf, num_samples);
+#ifdef MC3_GAIN_HOOK
+    /* Phone music owns the soundtrack: bring the game's own mix down so the
+     * external player is audible over the engine. Only the queued copy is
+     * scaled; the limiter above still guards the peaks. */
+    if (mc3_output_gain) {
+        float gain = mc3_output_gain();
+        if (gain < 0.999f) {
+            int k;
+            if (gain < 0.0f) gain = 0.0f;
+            for (k = 0; k < n; k++)
+                buf[k] = (int16_t)((float)buf[k] * gain);
+        }
+    }
+#endif
 
     if (SDL_QueueAudio(g_sdla_dev, buf, (Uint32)(n * sizeof(int16_t))) != 0)
         return 0;

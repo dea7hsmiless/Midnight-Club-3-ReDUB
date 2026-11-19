@@ -17,7 +17,7 @@ fi
 make -j8 > /work/ffmpeg-build.log 2>&1
 make install >> /work/ffmpeg-build.log 2>&1
 export PKG_CONFIG_PATH=/work/ffmpeg-install/lib/pkgconfig
-cmake -S /work/release-source -B /work/linux-build -G Ninja -DMC3_GAME=remix -DMC3_GEN_DIR=/work/release-gen -DCMAKE_BUILD_TYPE=Release -DMC3_VERSION=${REDUB_VERSION:-0.2.2} -DMC3_BUILD_ID="$source_commit" -DMC3_VULKAN=OFF > /work/cmake-configure.log 2>&1
+cmake -S /work/release-source -B /work/linux-build -G Ninja -DMC3_GAME=remix -DMC3_GEN_DIR=/work/release-gen -DCMAKE_BUILD_TYPE=Release -DMC3_VERSION=${REDUB_VERSION:-0.2.4} -DMC3_BUILD_ID="$source_commit" -DMC3_VULKAN=OFF -DMC3_ALLOW_120=ON > /work/cmake-configure.log 2>&1
 cmake --build /work/linux-build -j8 > /work/linux-build.log 2>&1
 ldd /work/linux-build/mcdub3remix > /work/binary-dependencies.txt
 printf 'BUILD_OK\n'

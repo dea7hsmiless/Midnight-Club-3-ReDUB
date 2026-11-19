@@ -1110,9 +1110,11 @@ void sub_0041B170(void)
     }
     if (on) {
         int gameplay = 0;
-#if defined(_WIN32) || defined(__linux__)
+#if (defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)
         extern int windows_media_gameplay_get(void);
         gameplay = windows_media_gameplay_get();
+#else
+        gameplay = atomic_load(&port_gameplay_active);
 #endif
         {
             uint32_t vblank = (uint32_t)g_mc3_d3d_vblanks;
@@ -2380,6 +2382,21 @@ void sub_00020880(void)
  * 0x4B2D48 (clamped) and 0x4B2D50 (its reciprocal). Only steps of 1/30
  * (races); the title flythrough's 1/60 half-speed showcase is left alone.
  * Replays recorded this way may play back slightly differently. */
+/* Is the player in gameplay (a race) right now? The desktop builds never run
+ * port_gameplay_update() -- it is compiled out with #ifndef _WIN32 -- so
+ * port_gameplay_active stays 0 there and every mode-specific catch-up gate
+ * below would decline for ever. The desktop answer is the media context the
+ * title already reports (the same one FXAA and the music HUD use). */
+static int realtime_gameplay(void)
+{
+#if (defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)
+    extern int windows_media_gameplay_get(void);
+    return windows_media_gameplay_get();
+#else
+    return atomic_load(&port_gameplay_active);
+#endif
+}
+
 static void realtime_step(float real)
 {
     static int on = -1;
@@ -2394,7 +2411,34 @@ static void realtime_step(float real)
             fprintf(stderr, "[TIME] races advance in real time below 30 fps, steps up to %.4f s"
                     " (MC3_REALTIME)\n", cap);
     }
-    if (!on || MEM32(0x00534770u) == 0 || f < 0.030f || f > 0.037f || real <= f * 1.1f)
+    if (!on || MEM32(0x00534770u) == 0 || real <= f * 1.1f)
+    {
+        /* MC3_REALTIME_TRACE=1: why the catch-up declined (a rare print, so a
+         * session can be read without a profiler). */
+        static int dbg = -1;
+        static unsigned dbg_n;
+        if (dbg < 0) {
+            const char *e = getenv("MC3_REALTIME_TRACE");
+            dbg = e && e[0] == '1';
+        }
+        if (dbg && (dbg_n++ % 90u) == 0)
+            fprintf(stderr, "[RT] skip f=%.4f real=%.4f mode=%d gameplay=%d flag=%u on=%d\n",
+                    f, real, mc3_frame_rate_mode(),
+                    atomic_load(&port_gameplay_active), MEM32(0x00534770u), on);
+        return;
+    }
+    /* The 1/30 race step, as before, and the 1/60 step of the 60 fps mode:
+     * without the second range a race that could not hold 60 advanced by
+     * one 1/60 step per drawn frame and ran at 2/3 speed at 40 fps, which
+     * read as the whole game slowing down (2026-11-18). The 120 fps mode
+     * needs the same compensation for its 1/120 step: without it a build
+     * that presents ~80 frames/s advanced 80/120 of real time, measured as
+     * a race clock running at 72.6% (2026-11-18). */
+    if (!(f >= 0.030f && f <= 0.037f)
+        && !(mc3_frame_rate_mode() >= 60 && realtime_gameplay()
+             && f > 0.010f && f < 0.023f)
+        && !(mc3_frame_rate_mode() >= 120 && realtime_gameplay()
+             && f > 0.0070f && f < 0.0112f))
         return;
     d = real < cap ? real : cap;
     MEMF(0x004B2D70u) = d;
@@ -2760,9 +2804,11 @@ void sub_0020B6F0(void)
      * not call into the port layer at all. */
     int gameplay = 0;
     if (frame_rate_mode >= 60) {
-#if defined(_WIN32) || defined(__linux__)
+#if (defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)
         extern int windows_media_gameplay_get(void);
         gameplay = windows_media_gameplay_get();
+#else
+        gameplay = atomic_load(&port_gameplay_active);
 #endif
     }
     if (frame_rate_mode >= 60 && gameplay && MEMF(0x004B2D58u) >= 0.030f &&
@@ -2926,7 +2972,7 @@ extern void sub_00348BE0(void),sub_00348950(void),sub_001395E0(void);
 #if defined(_WIN32)
 #include <windows.h>
 #endif
-static uint32_t port_self,port_list,port_rows[17];
+static uint32_t port_self,port_list,port_rows[32];
 static uint32_t port_list_vtable;
 static int port_open,port_back_down,port_back_release;
 static int port_accept_down;
@@ -3196,7 +3242,7 @@ static void port_text(uint32_t row,const char *text)
 static void port_labels(void)
 {
     if(!port_context_valid())return;
-    for(int i=0;i<17;i++) {char text[96];windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);}
+    for(int i=0;i<23;i++) {char text[96]={0};windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);}
 }
 static uint32_t port_add(uint32_t event,const char *text)
 {
@@ -3231,13 +3277,24 @@ static void port_build(void)
     MEM8(state+0x29C)=0;MEM32(state+0x298)=0;
     /* The Options page holds 16 rows including BACK (4 columns x 4 rows,
      * page 2 is the last page), so the row count must stay below capacity:
-     * 15 settings + BACK at capacity 16. FRAME RATE takes PC MUSIC VOLUME's
-     * slot (the music slider in Audio Options owns that value); RESTORE
-     * GRAPHICS DEFAULTS and PC MUSIC VOLUME return first if a list has room. */
+     * 15 settings + BACK at capacity 16. PHONE MUSIC (id 9) and SONG DISPLAY
+     * (id 11) are the media rows. Per-app volume does not exist on Android,
+     * so id 10 (PC MUSIC VOLUME) is not offered here. */
+#if defined(__ANDROID__)
+    /* 16-slot page: 15 rows + BACK. The always-fullscreen status and the
+     * graphics preset (both also in the Android launcher) give up their slots
+     * to phone music and controller vibration; both of those were previously
+     * labels with no handler. */
+    const int order[]={1,2,3,4,6,7,8,9,10,11,12,13,14,15,16};
+    int settings=15;
+#else
     const int order[]={0,5,2,12,3,4,6,13,14,1,16,7,9,11,15,8,10};
     int capacity=MEM32(port_list+0x230);
     int settings=capacity>=18?17:capacity>=17?16:15;
-    for(int k=0;k<settings;k++){int i=order[k];port_rows[i]=port_add(0x7F00u+i,NULL);}
+#endif
+    /* FRAME RATE is id 16: 0x7F10 already opens Port Options, so it needs its
+     * own event instead of the 0x7F00+id range. */
+    for(int k=0;k<settings;k++){int i=order[k];port_rows[i]=port_add(i==16?0x7F12u:0x7F00u+(uint32_t)i,NULL);}
     port_add(0x7F11u,"BACK");port_labels();
     port_building=0;
 }
@@ -3304,6 +3361,11 @@ void sub_00163830(void)
     if(port_open&&!port_context_valid())port_invalidate();
     if(event==0x7F10) {port_enter();g_eax=0;g_esp+=8;return;}
     if(event==0x7F11) {port_parent();g_eax=0;g_esp+=8;return;}
+    if(port_open && event==0x7F12) {
+        if(port_accept_down){g_eax=0;g_esp+=8;return;}
+        port_accept_down=1;
+        windows_port_setting_change(16);g_eax=0;g_esp+=8;return;
+    }
     if(port_open && event>=0x7F00 && event<0x7F10) {
         if(port_accept_down){g_eax=0;g_esp+=8;return;}
         port_accept_down=1;

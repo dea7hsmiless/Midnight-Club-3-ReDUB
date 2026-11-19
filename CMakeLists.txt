@@ -101,6 +101,7 @@ elseif(UNIX AND NOT APPLE AND NOT ANDROID)
 endif()
 if(ANDROID)
     list(APPEND MC3_SOURCES src/android_host.c)   # folder, settings, log (ADR 0010)
+    list(APPEND MC3_SOURCES src/android_media.c)  # phone music (MediaSession, JNI)
 endif()
 
 if(ANDROID)

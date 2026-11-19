@@ -6,6 +6,7 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using System.Reflection;
 using System.IO.Compression;
@@ -14,8 +15,8 @@ using System.IO.Compression;
 [assembly: AssemblyProduct("ReDUB")]
 [assembly: AssemblyCompany("ReDUB")]
 [assembly: AssemblyCopyright("Fan project; Midnight Club 3 is a trademark of its owners")]
-[assembly: AssemblyVersion("0.2.3.0")]
-[assembly: AssemblyFileVersion("0.2.3.0")]
+[assembly: AssemblyVersion("0.2.4.0")]
+[assembly: AssemblyFileVersion("0.2.4.0")]
 namespace ReDUB {
 public class RedubButton : Control, IButtonControl {
     public bool Primary, Selected;
@@ -56,9 +57,9 @@ public class BrandPanel : Panel {
     protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);var g=e.Graphics;g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;g.SmoothingMode=SmoothingMode.AntiAlias;using(var bg=new LinearGradientBrush(ClientRectangle,Color.FromArgb(31,21,38),Color.FromArgb(8,13,26),75))g.FillRectangle(bg,ClientRectangle);if(hero!=null){float zoom=Math.Max((float)Width/hero.Width,(float)Height/hero.Height);float w=hero.Width*zoom,h=hero.Height*zoom;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.DrawImage(hero,(Width-w)/2,(Height-h)/2,w,h);using(var wash=new LinearGradientBrush(ClientRectangle,Color.FromArgb(80,8,13,26),Color.FromArgb(225,8,13,26),90))g.FillRectangle(wash,ClientRectangle);}var ellipse=new Rectangle(Width/2-300,Height/2-140,600,280);using(var p=new GraphicsPath()){p.AddEllipse(ellipse);using(var glow=new PathGradientBrush(p)){glow.CenterColor=Color.FromArgb(135,93,27,51);glow.SurroundColors=new[]{Color.FromArgb(0,8,13,26)};g.FillPath(glow,p);}}if(logo!=null){float zoom=Math.Min((float)Width*.78f/logo.Width,(float)Height*.65f/logo.Height);float w=logo.Width*zoom,h=logo.Height*zoom;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.DrawImage(logo,(Width-w)/2,(Height-h)/2,w,h);return;}float size=Math.Min(132,Width/5.5f);using(var f=new Font("Segoe UI",size,FontStyle.Bold|FontStyle.Italic)){var measured=g.MeasureString("ReDUB",f);float x=(Width-measured.Width)/2;float y=(Height-measured.Height)/2+8;using(var shadow=new SolidBrush(Color.FromArgb(120,0,0,0)))g.DrawString("ReDUB",f,shadow,x+4,y+6);using(var ink=new SolidBrush(Color.FromArgb(244,246,252)))g.DrawString("ReDUB",f,ink,x,y);using(var red=new SolidBrush(Color.FromArgb(242,65,84)))g.FillRectangle(red,x+16,y+measured.Height-20,measured.Width-20,4);using(var sub=new Font("Segoe UI",12,FontStyle.Bold))using(var ink=new SolidBrush(Color.FromArgb(188,196,213)))g.DrawString("M I D N I G H T   C L U B   3",sub,ink,(Width-280)/2,y-4);}}
 }
 public sealed class Launcher : Form {
-    readonly string root;readonly Label status=new Label();readonly TextBox source=new TextBox();readonly RichTextBox log=new RichTextBox();readonly RedubButton play=new RedubButton {Primary=true};readonly ProgressBar progress=new ProgressBar();readonly Timer refresh=new Timer();readonly Panel content=new Panel();readonly List<RedubButton> navigation=new List<RedubButton>();Process job;string page="Game";string category="Display";bool advancedWheelSettings,advancedGraphicsSettings;
+    readonly string root;readonly Label status=new Label();readonly TextBox source=new TextBox();readonly RichTextBox log=new RichTextBox();readonly RedubButton play=new RedubButton {Primary=true};readonly ProgressBar progress=new ProgressBar();readonly System.Windows.Forms.Timer refresh=new System.Windows.Forms.Timer();readonly Panel content=new Panel();readonly List<RedubButton> navigation=new List<RedubButton>();Process job;string page="Game";string category="Display";bool advancedWheelSettings,advancedGraphicsSettings;volatile bool working;string importStatus="";CancellationTokenSource importCancellation;RedubButton cancelImport,importAction;bool closeAfterImport;
     static readonly Color Bg=Color.FromArgb(8,13,26),Rail=Color.FromArgb(5,9,18),Card=Color.FromArgb(15,23,42),Muted=Color.FromArgb(153,165,188);
-    public Launcher(string directory){root=directory;Text="Midnight Club 3: ReDUB";Size=new Size(1200,800);MinimumSize=new Size(1000,700);StartPosition=FormStartPosition.CenterScreen;BackColor=Bg;ForeColor=Color.FromArgb(235,239,247);Font=new Font("Segoe UI",10);AutoScaleMode=AutoScaleMode.Dpi;
+    public Launcher(string directory){root=directory;Text="Midnight Club 3: ReDUB";Size=new Size(1200,800);MinimumSize=new Size(1000,700);StartPosition=FormStartPosition.CenterScreen;BackColor=Bg;ForeColor=Color.FromArgb(235,239,247);Font=new Font("Segoe UI",10);AutoScaleMode=AutoScaleMode.Dpi;KeyPreview=true;KeyDown+=(s,e)=>{if(working&&e.KeyCode==Keys.Escape){CancelImport();e.Handled=true;}};
         var shell=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=2,RowCount=2,Margin=Padding.Empty,Padding=Padding.Empty};shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,220));shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));shell.RowStyles.Add(new RowStyle(SizeType.Percent,100));shell.RowStyles.Add(new RowStyle(SizeType.Absolute,38));Controls.Add(shell);
         var rail=new Panel {Dock=DockStyle.Fill,BackColor=Rail,Margin=Padding.Empty,Padding=new Padding(16)};shell.Controls.Add(rail,0,0);var mark=BrandPanel.LoadArt("logo.png");
         if(mark!=null){var brand=new PictureBox {Image=mark,SizeMode=PictureBoxSizeMode.Zoom,BackColor=Rail,AccessibleName="Midnight Club 3 ReDUB logo",TabStop=false};brand.SetBounds(16,24,188,84);brand.Disposed+=(sender,e)=>mark.Dispose();rail.Controls.Add(brand);}
@@ -68,7 +69,13 @@ public sealed class Launcher : Form {
         content.Dock=DockStyle.Fill;content.Margin=Padding.Empty;shell.Controls.Add(content,1,0);
         var footer=new Panel {Dock=DockStyle.Fill,BackColor=Color.FromArgb(14,22,39),Margin=Padding.Empty};shell.Controls.Add(footer,0,1);shell.SetColumnSpan(footer,2);status.SetBounds(20,9,930,22);status.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;status.ForeColor=Muted;status.Font=new Font("Segoe UI",9);footer.Controls.Add(status);progress.SetBounds(980,12,165,14);progress.Anchor=AnchorStyles.Right|AnchorStyles.Top;progress.Style=ProgressBarStyle.Marquee;progress.Visible=false;footer.Controls.Add(progress);
         source.BackColor=Card;source.ForeColor=ForeColor;source.BorderStyle=BorderStyle.FixedSingle;source.Font=Font;log.ReadOnly=true;log.BackColor=Rail;log.ForeColor=ForeColor;log.BorderStyle=BorderStyle.None;log.Font=new Font("Consolas",9);
-        play.Click+=(s,e)=>{if(Ready())PlayGame();else if(Renderer(root)=="vulkan"&&File.Exists(PathAt("game-remix/default.xbe")))Run(".portable/Build-Vulkan-Experiment.ps1",DlssMode(root)!="Off"?new[]{"-WithDLSS"}:new string[0]);else ShowInstall();};Append("ReDUB launcher ready. Setup, checks and build output appear here.");Append("Installation folder: "+root);ShowHome();refresh.Interval=1500;refresh.Tick+=(s,e)=>UpdateStatus();refresh.Start();UpdateStatus();FormClosing+=(s,e)=>{if(job!=null&&!job.HasExited){MessageBox.Show(this,"Setup is still running. Leave ReDUB open until it finishes.","Setup in progress");e.Cancel=true;}};
+        play.Click+=(s,e)=>{if(Ready())PlayGame();else if(Renderer(root)=="vulkan"&&File.Exists(PathAt("game-remix/default.xbe")))Run(".portable/Build-Vulkan-Experiment.ps1",DlssMode(root)!="Off"?new[]{"-WithDLSS"}:new string[0]);else ShowInstall();};Append("ReDUB launcher ready. Setup, checks and build output appear here.");Append("Installation folder: "+root);ShowHome();refresh.Interval=1500;refresh.Tick+=(s,e)=>UpdateStatus();refresh.Start();UpdateStatus();FormClosing+=(s,e)=>{
+            if(job!=null&&!job.HasExited){MessageBox.Show(this,"Setup is still running. Leave ReDUB open until it finishes.","Setup in progress");e.Cancel=true;return;}
+            if(!working)return;
+            if(closeAfterImport){e.Cancel=true;return;}
+            if(MessageBox.Show(this,"An import is running. Cancel it and exit?\n\nThe previous game files are left untouched.","Import in progress",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes){e.Cancel=true;return;}
+            closeAfterImport=true;e.Cancel=true;CancelImport();
+        };
     }
     static Label LabelAt(string text,float size,bool bold){return new Label {Text=text,Font=new Font("Segoe UI",size,bold?FontStyle.Bold:FontStyle.Regular),ForeColor=Color.FromArgb(230,235,245),BackColor=Color.Transparent,AutoEllipsis=true};}
     void Nav(Control host,string title,int x,int y,Action action){var b=new RedubButton {Text=title,Tag=title,BackColor=Rail};b.SetBounds(x,y,188,52);b.Click+=(s,e)=>action();host.Controls.Add(b);navigation.Add(b);}
@@ -77,24 +84,36 @@ public sealed class Launcher : Form {
     Panel Standard(string name,string title,string help){Page(name);var p=new Panel {Dock=DockStyle.Fill,Padding=new Padding(36),AutoScroll=true};content.Controls.Add(p);var h=LabelAt(title,24,true);h.SetBounds(36,30,800,48);p.Controls.Add(h);var d=LabelAt(help,10,false);d.ForeColor=Muted;d.SetBounds(38,83,790,48);d.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;p.Controls.Add(d);return p;}
     bool Ready(){return InstallationReady(root);}
     bool GameRunning(){var all=Process.GetProcessesByName("mcdub3remix");bool found=all.Length>0;foreach(var p in all)p.Dispose();return found;}
-    void ShowHome(){Page("Game");var grid=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Padding=Padding.Empty,Margin=Padding.Empty};grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));grid.RowStyles.Add(new RowStyle(SizeType.Absolute,240));content.Controls.Add(grid);grid.Controls.Add(new BrandPanel {Dock=DockStyle.Fill,Margin=Padding.Empty},0,0);
+    void ShowHome(){Page("Game");bool ready=Ready(),runtime=RuntimePresent(root);var grid=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Padding=Padding.Empty,Margin=Padding.Empty};grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));grid.RowStyles.Add(new RowStyle(SizeType.Absolute,240));content.Controls.Add(grid);grid.Controls.Add(new BrandPanel {Dock=DockStyle.Fill,Margin=Padding.Empty},0,0);
         // Separate columns prevent transparent text labels from overlapping
         // the action controls when the window is narrow or DPI is scaled.
         var bottom=new TableLayoutPanel {Dock=DockStyle.Fill,Margin=Padding.Empty,Padding=new Padding(36,0,36,0),ColumnCount=2,RowCount=1};
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,296));bottom.RowStyles.Add(new RowStyle(SizeType.Percent,100));grid.Controls.Add(bottom,0,1);
         var left=new Panel {Dock=DockStyle.Fill,Margin=Padding.Empty,BackColor=Bg};bottom.Controls.Add(left,0,0);
-        var badge=LabelAt(Ready()?"●  INSTALLED  /  WINDOWS x64":"○  NOT INSTALLED",9,true);badge.ForeColor=Ready()?Color.FromArgb(84,210,165):Muted;badge.SetBounds(0,24,360,24);left.Controls.Add(badge);
+        string badgeText=ready?"●  INSTALLED  /  WINDOWS x64":runtime?"○  GAME FILES NEEDED":"○  RUNTIME MISSING";
+        var badge=LabelAt(badgeText,9,true);badge.ForeColor=ready?Color.FromArgb(84,210,165):Muted;badge.SetBounds(0,24,360,24);left.Controls.Add(badge);
         var title=LabelAt("Midnight Club 3: ReDUB",23,true);title.SetBounds(0,58,360,48);left.Controls.Add(title);
         var desc=LabelAt("DUB Edition Remix, rebuilt for PC.",10,false);desc.ForeColor=Muted;desc.SetBounds(0,112,360,30);left.Controls.Add(desc);
         Action sizeLabels=()=>{foreach(Control label in left.Controls)label.Width=Math.Max(1,left.ClientSize.Width-16);float fontSize=left.ClientSize.Width<440?20:23;if(Math.Abs(title.Font.Size-fontSize)>.1f){var oldFont=title.Font;title.Font=new Font("Segoe UI",fontSize,FontStyle.Bold);oldFont.Dispose();}};left.SizeChanged+=(sender,e)=>sizeLabels();left.Layout+=(sender,e)=>sizeLabels();sizeLabels();
-        var right=new Panel {Dock=DockStyle.Fill,Margin=Padding.Empty,BackColor=Bg};bottom.Controls.Add(right,1,0);play.Text=Ready()?"▶   Play":"↓   Install";play.SetBounds(0,22,288,58);right.Controls.Add(play);ButtonAt(right,"Verify setup",0,92,140,()=>Run(".portable/Build.ps1","-Mode","Doctor"));ButtonAt(right,"Repair",148,92,140,()=>ShowInstall());ButtonAt(right,"Game folder",0,146,140,()=>Open(RendererDist(root)));ButtonAt(right,"Add shortcut",148,146,140,()=>Run(".portable/Build-Launcher.ps1","-ShortcutsOnly"));UpdateStatus();}
-    void ShowInstall(){var p=Standard("Install","Install ReDUB","Files and builds stay beside this launcher. Import your own original Xbox DUB Edition Remix disc.");var box=new Panel {BackColor=Card,Location=new Point(36,146),Size=new Size(Math.Max(600,content.Width-72),330),Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right};p.Controls.Add(box);var h=LabelAt(Ready()?"Your installation is ready":"Choose your game source",17,true);h.SetBounds(24,20,700,40);box.Controls.Add(h);var hint=LabelAt(Ready()?"Build / Repair reuses your installed disc files. No import is needed.":"Select an original Xbox Remix ISO or complete extracted folder. PS2 and Switch files are not supported.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,65,720,50);box.Controls.Add(hint);source.SetBounds(24,125,box.Width-48,30);source.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;box.Controls.Add(source);ButtonAt(box,"Choose ISO",24,173,164,()=>{using(var d=new OpenFileDialog {Filter="Xbox disc image (*.iso)|*.iso",Title="Choose Xbox Remix disc"})if(d.ShowDialog(this)==DialogResult.OK)source.Text=d.FileName;});ButtonAt(box,"Choose folder",200,173,164,()=>{using(var d=new FolderBrowserDialog {Description="Extracted Xbox Remix folder"})if(d.ShowDialog(this)==DialogResult.OK)source.Text=d.SelectedPath;});ButtonAt(box,Ready()?"Build / Repair":"Install and build",24,246,270,()=>Build(false),true);
-        var note=LabelAt("The first setup downloads missing tools and builds the port locally.\nUse a writable folder. Save and close the game before installing a build.",10,false);note.ForeColor=Muted;note.SetBounds(38,504,800,70);p.Controls.Add(note);ButtonAt(p,"Rebuild game code",36,600,210,()=>Build(true));ButtonAt(p,"Check prerequisites",260,600,210,()=>Run(".portable/Build.ps1","-Mode","Doctor"));}
-    void ShowSettings(string cat){category=cat;var p=Standard("Settings","Settings",cat=="Launcher"?"Launcher behavior applies the next time you open ReDUB.":"Changes are saved for the next launch. Close the game before changing game settings here.");var categories=new[]{"Display","Graphics","Controls","Music","Diagnostics","Launcher"};for(int i=0;i<categories.Length;i++){string c=categories[i];var b=ButtonAt(p,c,36,145+i*58,160,()=>ShowSettings(c));b.Selected=c==cat;}
+        var right=new Panel {Dock=DockStyle.Fill,Margin=Padding.Empty,BackColor=Bg};bottom.Controls.Add(right,1,0);play.Text=ready?"▶   Play":"Install";play.SetBounds(0,22,288,58);right.Controls.Add(play);ButtonAt(right,"Verify setup",0,92,140,()=>VerifySetup());ButtonAt(right,"Repair",148,92,140,()=>ShowInstall());ButtonAt(right,"Game folder",0,146,140,()=>Open(RendererDist(root)));ButtonAt(right,"Add shortcut",148,146,140,()=>Run(".portable/Build-Launcher.ps1","-ShortcutsOnly"));UpdateStatus();}
+    void ShowInstall(){
+        bool ready=Ready(),runtime=RuntimePresent(root);
+        var p=Standard("Install","Install ReDUB",ready?"Your original Xbox disc files are installed. Play starts the game directly; nothing is compiled.":"Copy your own original Xbox DUB Edition Remix disc into this folder. Nothing is compiled.");
+        var box=new Panel {BackColor=Card,Location=new Point(36,146),Size=new Size(Math.Max(600,content.Width-72),330),Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right};p.Controls.Add(box);
+        var h=LabelAt(ready?"Your game files are ready":runtime?"Choose your game files":"The game runtime is missing",17,true);h.SetBounds(24,20,720,40);box.Controls.Add(h);
+        var hint=LabelAt(ready?"The disc files are in game-remix. Replacing them keeps saves and settings.":runtime?"Select an original Xbox Remix ISO or a folder containing default.xbe. PS2 and Switch files are not supported. Press Esc to cancel an import.":"This release folder has no game executable. Download the full ReDUB Windows zip, or rebuild from source in Settings → Advanced. You can still install game files now.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,65,720,54);box.Controls.Add(hint);
+        source.SetBounds(24,125,box.Width-48,30);source.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;box.Controls.Add(source);
+        ButtonAt(box,"Choose ISO",24,173,164,()=>{using(var d=new OpenFileDialog {Filter="Xbox disc image (*.iso;*.xiso)|*.iso;*.xiso|All files (*.*)|*.*",Title="Choose Xbox Remix disc"})if(d.ShowDialog(this)==DialogResult.OK)source.Text=d.FileName;});
+        ButtonAt(box,"Choose folder",200,173,164,()=>{using(var d=new FolderBrowserDialog {Description="Extracted Xbox Remix folder"})if(d.ShowDialog(this)==DialogResult.OK)source.Text=d.SelectedPath;});
+        var add=ButtonAt(box,ready?"Replace game files":"Install",24,246,270,()=>StartImport(source.Text),true);add.Enabled=!working;importAction=add;var cancel=ButtonAt(box,"Cancel import",310,246,150,()=>CancelImport());cancel.Visible=working;cancel.Enabled=working;cancelImport=cancel;
+        var note=LabelAt("Files are copied into game-remix beside this launcher. No compiler, MSYS2 or download is used.\nUse a writable folder. Save and close the game first.",10,false);note.ForeColor=Muted;note.SetBounds(38,504,800,70);p.Controls.Add(note);
+        ButtonAt(p,"Check game files",36,600,210,()=>VerifySetup());
+    }
+    void ShowSettings(string cat){category=cat;var p=Standard("Settings","Settings",cat=="Launcher"?"Launcher behavior applies the next time you open ReDUB.":"Changes are saved for the next launch. Close the game before changing game settings here.");var categories=new[]{"Display","Graphics","Controls","Music","Diagnostics","Launcher","Advanced"};for(int i=0;i<categories.Length;i++){string c=categories[i];var b=ButtonAt(p,c,36,145+i*58,160,()=>ShowSettings(c));b.Selected=c==cat;}
         var card=new Panel {BackColor=Card,Location=new Point(220,145),Size=new Size(Math.Max(510,content.Width-256),Math.Max(420,content.Height-185)),Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right,AutoScroll=true};p.Controls.Add(card);var heading=LabelAt(cat,17,true);heading.SetBounds(24,20,480,38);card.Controls.Add(heading);int y=84;
-        if(cat=="Display"){Choice(card,ref y,"Window mode","MC3_FULLSCREEN",new[]{"Windowed","Borderless fullscreen","Exclusive fullscreen"},new[]{"0","1","2"},"0");Choice(card,ref y,"Resolution","MC3_RESOLUTION",new[]{"Automatic","1280 × 720","1600 × 900","1920 × 1080","2560 × 1440","3840 × 2160"},new[]{"auto","1280x720","1600x900","1920x1080","2560x1440","3840x2160"},"auto");Choice(card,ref y,"VSync","RECOMP_GL_VSYNC",new[]{"Off","On","Adaptive"},new[]{"0","1","-1"},"0");Choice(card,ref y,"Gamma","MC3_GAMMA",new[]{"0.8","0.9","1.0","1.1","1.2","1.3","1.4"},new[]{"0.8","0.9","1","1.1","1.2","1.3","1.4"},"1");Choice(card,ref y,"Brightness","MC3_BRIGHTNESS",new[]{"80%","85%","90%","95%","100%","105%","110%","115%","120%"},new[]{"0.8","0.85","0.9","0.95","1","1.05","1.1","1.15","1.2"},"1");var displayHint=LabelAt("Resolution sets the window size or exclusive fullscreen display mode.\nBorderless fullscreen uses your desktop resolution. Render scale is separate.",10,false);displayHint.ForeColor=Muted;displayHint.SetBounds(24,y+8,Math.Max(400,card.Width-48),72);displayHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(displayHint);}
+        if(cat=="Display"){Choice(card,ref y,"Window mode","MC3_FULLSCREEN",new[]{"Windowed","Borderless fullscreen","Exclusive fullscreen"},new[]{"0","1","2"},"0");Choice(card,ref y,"Resolution","MC3_RESOLUTION",new[]{"Automatic (desktop)","1280 × 720","1600 × 900","1920 × 1080","2560 × 1440","3840 × 2160"},new[]{"auto","1280x720","1600x900","1920x1080","2560x1440","3840x2160"},"auto");Choice(card,ref y,"VSync","RECOMP_GL_VSYNC",new[]{"Off","On","Adaptive"},new[]{"0","1","-1"},"0");Choice(card,ref y,"Gamma","MC3_GAMMA",new[]{"0.8","0.9","1.0","1.1","1.2","1.3","1.4"},new[]{"0.8","0.9","1","1.1","1.2","1.3","1.4"},"1");Choice(card,ref y,"Brightness","MC3_BRIGHTNESS",new[]{"80%","85%","90%","95%","100%","105%","110%","115%","120%"},new[]{"0.8","0.85","0.9","0.95","1","1.05","1.1","1.15","1.2"},"1");}
         if(cat=="Graphics")RendererChoice(card,ref y);
-        if(cat=="Graphics"){Choice(card,ref y,"Preset","MC3_GRAPHICS_PRESET",new[]{"Custom","Performance","Balanced","Quality"},new[]{"0","1","2","3"},"0");if(Renderer(root)!="vulkan"||DlssMode(root)=="Off")Choice(card,ref y,"Render scale","RECOMP_GL_SCALE",new[]{"1×","1.5×","2×","3×","5×"},new[]{"1","1.5","2","3","5"},"2");Choice(card,ref y,"Frame rate","MC3_FRAME_RATE",new[]{"30 FPS (Xbox)","60 FPS"},new[]{"30","60"},"30");Choice(card,ref y,"HUD texture quality","RECOMP_GL_UI_SCALE",new[]{"1×","2×","3×","5×"},new[]{"1","2","3","5"},"2");if(Renderer(root)!="vulkan"||DlssMode(root)=="Off")Choice(card,ref y,"Anti-aliasing","RECOMP_GL_FXAA",new[]{"Off","FXAA Low","FXAA","FXAA High"},new[]{"0","2","1","3"},"1");Choice(card,ref y,"Texture filtering","RECOMP_GL_ANISO",new[]{"1×","4×","16×"},new[]{"1","4","16"},"16");Choice(card,ref y,"Sharpening","RECOMP_GL_SHARPEN",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0.5");}
+        if(cat=="Graphics"){Choice(card,ref y,"Preset","MC3_GRAPHICS_PRESET",new[]{"Custom","Performance","Balanced","Quality"},new[]{"0","1","2","3"},"0");if(Renderer(root)!="vulkan"||DlssMode(root)=="Off")Choice(card,ref y,"Internal resolution","RECOMP_GL_SCALE",new[]{"1× native (720 × 480)","1.5× native (1080 × 720)","2× native (1440 × 960)","3× native (2160 × 1440)","5× native (3600 × 2400)"},new[]{"1","1.5","2","3","5"},"2");Choice(card,ref y,"Frame generation","RECOMP_FG",new[]{"Off","Crossfade","Motion-compensated"},new[]{"0","1","2"},"0");Choice(card,ref y,"Frame rate","MC3_FRAME_RATE",new[]{"30 FPS (Xbox)","60 FPS","120 FPS (needs a 120 Hz display)"},new[]{"30","60","120"},"30");Choice(card,ref y,"HUD texture quality","RECOMP_GL_UI_SCALE",new[]{"1×","2×","3×","5×"},new[]{"1","2","3","5"},"2");if(Renderer(root)!="vulkan"||DlssMode(root)=="Off")Choice(card,ref y,"Anti-aliasing","RECOMP_GL_FXAA",new[]{"Off","FXAA Low","FXAA","FXAA High"},new[]{"0","2","1","3"},"1");Choice(card,ref y,"Texture filtering","RECOMP_GL_ANISO",new[]{"1×","4×","16×"},new[]{"1","4","16"},"16");Choice(card,ref y,"Sharpening","RECOMP_GL_SHARPEN",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0.5");var scaleHint=LabelAt("Internal resolution multiplies the game's 720 × 480 surface. 3× is 2160 × 1440, 5× is 3600 × 2400 (4K-class detail).",9,false);scaleHint.ForeColor=Muted;scaleHint.SetBounds(24,y+8,Math.Max(400,card.Width-48),40);scaleHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(scaleHint);}
         if(cat=="Graphics"){
             var advanced=ButtonAt(card,advancedGraphicsSettings?"Hide advanced graphics":"Advanced graphics  ›",24,y,280,()=>{advancedGraphicsSettings=!advancedGraphicsSettings;ShowSettings("Graphics");});y+=58;
             if(advancedGraphicsSettings)Choice(card,ref y,"Frame queue","RECOMP_GL_QUEUE_FRAMES",new[]{"1 frame (lower latency)","2 frames (default)"},new[]{"1","2"},"2");
@@ -119,12 +138,19 @@ public sealed class Launcher : Form {
             var controlsHint=LabelAt("Xbox controllers use Windows gamepad support. Wheel compatibility depends on the model and its SDL input mapping. Rumble requires device support; full force-feedback steering is not included.",10,false);controlsHint.ForeColor=Muted;controlsHint.SetBounds(24,y+8,Math.Max(400,card.Width-48),64);controlsHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(controlsHint);
         }
         if(cat=="Music"){Choice(card,ref y,"PC Music while driving","MC3_PC_MUSIC",new[]{"Off","On"},new[]{"0","1"},"0");Choice(card,ref y,"Song display","MC3_PC_MUSIC_HUD",new[]{"Overlay","Radio + fallback"},new[]{"0","1"},"1");Choice(card,ref y,"Player volume","MC3_PC_MUSIC_VOLUME",new[]{"Mute","10%","20%","30%","40%","50%","60%","70%","80%","90%","100%"},new[]{"0","10","20","30","40","50","60","70","80","90","100"},"100");var info=LabelAt("Uses built-in Windows media controls with supported players/services\nsuch as YouTube Music, Spotify and Pandora. No login is needed in ReDUB.\nMusic plays directly from your PC; ReDUB reads track info and controls\nsupported players. D-pad left/right requests track changes while driving.",10,false);info.ForeColor=Muted;info.SetBounds(24,y+10,Math.Max(400,card.Width-48),130);info.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(info);}
-        if(cat=="Diagnostics"){Choice(card,ref y,"FPS / frame time","MC3_FPS_OVERLAY",new[]{"Off","On"},new[]{"0","1"},"0");ButtonAt(card,"Open logs",24,y+12,190,()=>Open("work-remix/logs"));ButtonAt(card,"Check setup",230,y+12,190,()=>Run(".portable/Build.ps1","-Mode","Doctor"));}
+        if(cat=="Diagnostics"){Choice(card,ref y,"FPS / frame time","MC3_FPS_OVERLAY",new[]{"Off","On"},new[]{"0","1"},"0");ButtonAt(card,"Open logs",24,y+12,190,()=>Open("work-remix/logs"));ButtonAt(card,"Check setup",230,y+12,190,()=>VerifySetup());}
         if(cat=="Launcher"){
             var label=LabelAt("Skip launcher on startup",10,false);label.SetBounds(24,y,270,38);card.Controls.Add(label);
             var toggle=ButtonAt(card,BypassEnabled(root)?"On":"Off",Math.Max(245,card.Width-270),y-4,244,()=>{});toggle.Anchor=AnchorStyles.Right|AnchorStyles.Top;
             toggle.Click+=(sender,e)=>{try{SetBypass(root,!BypassEnabled(root));toggle.Text=BypassEnabled(root)?"On":"Off";}catch(Exception ex){MessageBox.Show(this,ex.Message,"Could not save launcher setting");}};
             var hint=LabelAt("When enabled, opening ReDUB starts the installed game directly.\n\nHold Shift while opening ReDUB, or use Open ReDUB Launcher.cmd,\nto return to this launcher. Missing game files always show setup.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,y+70,Math.Max(400,card.Width-48),130);hint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(hint);
+        }
+        if(cat=="Advanced"){
+            var warning=LabelAt("Rebuilding compiles the game port on this PC. It needs MSYS2, about 10 GB of free space and 20+ minutes. Normal setup never compiles anything.",10,false);warning.ForeColor=Color.FromArgb(245,180,120);warning.SetBounds(24,y,Math.Max(400,card.Width-48),72);warning.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(warning);y+=80;
+            ButtonAt(card,"Rebuild from source",24,y,250,()=>ConfirmRebuild(true),true);y+=54;
+            ButtonAt(card,"Repair build",24,y,250,()=>ConfirmRebuild(false));y+=54;
+            ButtonAt(card,"Check prerequisites",24,y,250,()=>Run(".portable/Build.ps1","-Mode","Doctor"));y+=62;
+            var hint=LabelAt("Use Install for normal setup. Rebuild is for a source checkout, a damaged runtime, or renderer development. Game files and saves are kept.",10,false);hint.ForeColor=Muted;hint.SetBounds(24,y,Math.Max(400,card.Width-48),80);hint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(hint);
         }
 
     }
@@ -135,18 +161,10 @@ public sealed class Launcher : Form {
             y+=64;
             var rendererHint=LabelAt("OpenGL and Vulkan share Career profiles. Missing renderer files are built automatically when you choose Play.",9,false);rendererHint.ForeColor=Muted;rendererHint.SetBounds(24,y,Math.Max(400,card.Width-48),40);rendererHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(rendererHint);
             y+=48;
-            var dlssLabel=LabelAt("DLSS Super Resolution",10,false);dlssLabel.SetBounds(24,y,220,38);card.Controls.Add(dlssLabel);
-            var dlssButton=ButtonAt(card,DlssMode(root)!="Off"?"On":"Off",Math.Max(245,card.Width-270),y-4,244,()=>{});dlssButton.Anchor=AnchorStyles.Right|AnchorStyles.Top;dlssButton.Enabled=Renderer(root)=="vulkan";
-            dlssButton.Click+=(sender,e)=>{try{if(GameRunning()){MessageBox.Show(this,"Save and close the game before changing graphics settings.","Game is running");return;}SetDlssMode(root,DlssMode(root)!="Off"?"Off":"Quality");dlssButton.Text=DlssMode(root)!="Off"?"On":"Off";UpdateStatus();ShowSettings("Graphics");}catch(Exception ex){MessageBox.Show(this,ex.Message,"Could not save DLSS mode");}};
-            y+=56;
-            var modeLabel=LabelAt("DLSS mode",10,false);modeLabel.SetBounds(24,y,220,38);card.Controls.Add(modeLabel);
-            int mx=Math.Max(245,card.Width-270);string[] modes={"Quality","Balanced","Performance"};int modeIndex=Array.IndexOf(modes,DlssMode(root));if(modeIndex<0)modeIndex=0;
-            var modeValue=LabelAt(modes[modeIndex],10,true);modeValue.SetBounds(mx+42,y-4,160,40);modeValue.TextAlign=ContentAlignment.MiddleCenter;modeValue.Anchor=AnchorStyles.Right|AnchorStyles.Top;card.Controls.Add(modeValue);
-            Action<int> modeChange=delta=>{try{if(GameRunning()){MessageBox.Show(this,"Save and close the game before changing DLSS mode.","Game is running");return;}modeIndex=(modeIndex+delta+modes.Length)%modes.Length;SetDlssMode(root,modes[modeIndex]);modeValue.Text=modes[modeIndex];UpdateStatus();}catch(Exception ex){MessageBox.Show(this,ex.Message,"Could not save DLSS mode");}};
-            var modeLeft=ButtonAt(card,"‹",mx,y-4,38,()=>modeChange(-1));var modeRight=ButtonAt(card,"›",mx+206,y-4,38,()=>modeChange(1));modeLeft.Anchor=modeRight.Anchor=AnchorStyles.Right|AnchorStyles.Top;modeLeft.Enabled=modeRight.Enabled=Renderer(root)=="vulkan"&&DlssMode(root)!="Off";
-            y+=54;
-            var dlssHint=LabelAt("DLSS mode sets internal resolution and reconstructs edges. Quality favors detail; Balanced and Performance render fewer pixels. Requires an NVIDIA RTX GPU.",9,false);dlssHint.ForeColor=Muted;dlssHint.SetBounds(24,y,Math.Max(400,card.Width-48),40);dlssHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(dlssHint);
-            y+=46;
+            // DLSS was removed from the launcher: the NGX bridge is Vulkan-only and the
+            // Vulkan renderer is experimental (a fraction of OpenGL's frame rate), so the
+            // toggle could only promise something the shipping renderer cannot do. 120 on
+            // OpenGL comes from frame generation instead.
     }
     void Choice(Control host,ref int y,string name,string key,string[] labels,string[] vals,string fallback){
         var title=LabelAt(name,10,false);title.SetBounds(24,y,220,38);host.Controls.Add(title);
@@ -161,24 +179,78 @@ public sealed class Launcher : Form {
     string SettingsPath(){string selected=Path.Combine(RendererDist(root),"mcdub3remix_env.txt");if(File.Exists(selected))return selected;return PathAt("work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt");}
     public string ReadSetting(string key,string fallback){if(!File.Exists(SettingsPath()))return fallback;foreach(var raw in File.ReadAllLines(SettingsPath())){string line=raw.Trim();if(line.StartsWith(key+"=",StringComparison.Ordinal))return line.Substring(key.Length+1).Trim();}return fallback;}
     public void SavePreference(string key,string value){string path=SettingsPath();if(!File.Exists(path))throw new IOException("Install the game before saving settings.");var edits=new Dictionary<string,string>();edits[key]=value;if(key=="MC3_GRAPHICS_PRESET"&&value!="0"){int n=int.Parse(value);edits["RECOMP_GL_SCALE"]=n==1?"1.5":n==3?"3":"2";edits["RECOMP_GL_FXAA"]="1";edits["RECOMP_GL_ANISO"]=n==1?"4":"16";edits["RECOMP_GL_SHARPEN"]=n==1?"0.25":"0.5";edits["RECOMP_GL_VSYNC"]=n==3?"1":"0";}else if(new[]{"RECOMP_GL_SCALE","RECOMP_GL_FXAA","RECOMP_GL_ANISO","RECOMP_GL_SHARPEN","RECOMP_GL_VSYNC"}.Contains(key))edits["MC3_GRAPHICS_PRESET"]="0";var lines=File.ReadAllLines(path).Where(line=>!edits.Keys.Any(k=>line.TrimStart().StartsWith(k+"=",StringComparison.Ordinal))).ToList();foreach(var e in edits)lines.Add(e.Key+"="+e.Value);string backup=path+".launcher-backup";if(!File.Exists(backup))File.Copy(path,backup);string tmp=path+".launcher-tmp";File.WriteAllLines(tmp,lines,new UTF8Encoding(false));File.Replace(tmp,path,null);Append("Saved "+key+". Applies next launch.");}
-    void ShowSupport(){var p=Standard("Support","Support & activity","Local build and setup output. Your game and saves are never uploaded.");ButtonAt(p,"Open log folder",36,140,190,()=>Open("work-remix/logs"));ButtonAt(p,"Check setup",240,140,190,()=>Run(".portable/Build.ps1","-Mode","Doctor"));ButtonAt(p,"Read guide",444,140,190,()=>Open("README.md"));log.SetBounds(36,205,Math.Max(600,content.Width-72),Math.Max(280,content.Height-245));log.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;p.Controls.Add(log);}
+    void ShowSupport(){var p=Standard("Support","Support & activity","Local setup output. Your game and saves are never uploaded.");ButtonAt(p,"Open log folder",36,140,190,()=>Open("work-remix/logs"));ButtonAt(p,"Check setup",240,140,190,()=>VerifySetup());ButtonAt(p,"Read guide",444,140,190,()=>Open("README.md"));log.SetBounds(36,205,Math.Max(600,content.Width-72),Math.Max(280,content.Height-245));log.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;p.Controls.Add(log);}
     void ShowAbout(){var p=Standard("About","Midnight Club 3: ReDUB","A Windows-focused community edition of the original Xbox DUB Edition Remix.");var copy=LabelAt("Built on mcdub3-nx and xboxrecomp.\n\nNative Port Options, independent HUD quality, PC Music integration,\nand targeted controller, menu and GPU stability fixes.\n\nOriginal 30 FPS simulation\n\nNo game data is included. Use your own supported Xbox Remix disc.\nNot affiliated with Rockstar Games, Take-Two or Microsoft.\n\nLauncher design reference: SafeHouse by FridiNaTor1 and contributors.\nReDUB uses its own implementation and branding.",11,false);copy.SetBounds(38,150,790,330);p.Controls.Add(copy);ButtonAt(p,"Features & credits",36,510,230,()=>Open("README.md"));}
     string PathAt(string p){return Path.Combine(root,p.Replace('/',Path.DirectorySeparatorChar));}
-    void UpdateStatus(){bool running=GameRunning(),hasDisc=File.Exists(PathAt("game-remix/default.xbe"));play.Enabled=job==null&&!running;play.Text=running?"Game is running":Ready()||Renderer(root)=="vulkan"&&hasDisc?"▶   Play":"↓   Install";string active=Renderer(root)=="vulkan"?(DlssMode(root)!="Off"?"Vulkan • DLSS "+DlssMode(root):"Vulkan • Native"):"OpenGL • Native";status.Text=job!=null?"Working — setup progress is in Support.":running?"Game is running • Save and close before changing launcher settings or installing builds.":Ready()?"Ready to play • "+active+" • shared Career saves":hasDisc?"Game files found • choose Play to finish setup":"Not installed • Select Install to set up your own Xbox Remix disc.";}
+    void UpdateStatus(){bool running=GameRunning(),hasDisc=File.Exists(PathAt("game-remix/default.xbe")),runtime=RuntimePresent(root);play.Enabled=job==null&&!working&&!running;play.Text=running?"Game is running":Ready()||Renderer(root)=="vulkan"&&hasDisc?"▶   Play":"Install";string active=Renderer(root)=="vulkan"?(DlssMode(root)!="Off"?"Vulkan • DLSS "+DlssMode(root):"Vulkan • Native"):"OpenGL • Native";if(working){status.Text=importStatus.Length>0?importStatus:"Installing game files...";return;}status.Text=job!=null?"Working — setup progress is in Support.":running?"Game is running • Save and close before changing launcher settings or installing builds.":Ready()?"Ready to play • "+active+" • shared Career saves":!runtime?"Game runtime missing • use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.":hasDisc?"Game files found • choose Play to finish setup":"Not installed • choose Install to copy your own Xbox Remix disc.";}
     void Append(string text){if(IsDisposed)return;if(InvokeRequired){BeginInvoke(new Action<string>(Append),text);return;}log.AppendText(text+Environment.NewLine);log.SelectionStart=log.TextLength;log.ScrollToCaret();}
     void PlayGame(){try{StartDirect(root);UpdateStatus();}catch(Exception x){MessageBox.Show(this,x.Message,"ReDUB");}}
-    void Build(bool rebuild){
-        if(Process.GetProcessesByName("mcdub3remix").Length>0){MessageBox.Show(this,"Save and close the game before installing a build.","Game is running");return;}
-        string selected=source.Text.Trim();
-        if(!File.Exists(PathAt("game-remix/default.xbe"))&&selected.Length==0){MessageBox.Show(this,"Choose your own Xbox Remix ISO or extracted folder first.","Choose game files");return;}
-        if(selected.Length>0&&!File.Exists(selected)&&!Directory.Exists(selected))throw new IOException("The selected disc or folder does not exist.");
-        if(Directory.Exists(selected)&&!File.Exists(Path.Combine(selected,"default.xbe")))throw new IOException("The extracted folder must contain default.xbe.");
-        if(selected.Length>0&&!File.Exists(PathAt("game-remix/default.xbe")))Run(".portable/Build.ps1","-Mode",rebuild?"Rebuild":"Build","-Disc",selected);
-        else Run(".portable/Build.ps1","-Mode",rebuild?"Rebuild":"Build");
+    void VerifySetup(){
+        string[] problems=InstallationProblems(root);
+        if(problems.Length==0){Append("Setup verified.");MessageBox.Show(this,"Game files, game executable and controller runtime are present.","Setup verified",MessageBoxButtons.OK,MessageBoxIcon.Information);}
+        else{foreach(string problem in problems)Append("Setup: "+problem);MessageBox.Show(this,string.Join("\n\n",problems),"Setup needs attention",MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+        UpdateStatus();
+    }
+    void ConfirmRebuild(bool rebuild){
+        if(working||job!=null){MessageBox.Show(this,"Wait for the current operation to finish.","ReDUB");return;}
+        if(GameRunning()){MessageBox.Show(this,"Save and close the game before rebuilding.","Game is running");return;}
+        if(!File.Exists(PathAt("game-remix/default.xbe"))){MessageBox.Show(this,"Add your game files first. Rebuild only compiles the game port.","Game files are missing");ShowInstall();return;}
+        string text=rebuild?"Rebuild the game from source?\n\nThis needs MSYS2, about 10 GB of free space and 20+ minutes. It does not change your game files or saves.":"Repair the installed build from source?\n\nThis needs MSYS2, about 10 GB of free space and 20+ minutes. It does not change your game files or saves.";
+        if(MessageBox.Show(this,text,rebuild?"Rebuild from source":"Repair build",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes)return;
+        Run(".portable/Build.ps1","-Mode",rebuild?"Rebuild":"Build");
+    }
+    void StartImport(string selected){
+        if(working)return;
+        if(job!=null){MessageBox.Show(this,"Wait for the current operation to finish.","ReDUB");return;}
+        if(GameRunning()){MessageBox.Show(this,"Save and close the game before installing game files.","Game is running");return;}
+        selected=(selected??"").Trim();
+        if(selected.Length==0){MessageBox.Show(this,"Choose your own Xbox Remix ISO or extracted folder first.","Choose game files");return;}
+        if(!File.Exists(selected)&&!Directory.Exists(selected)){MessageBox.Show(this,"The selected disc or folder does not exist.","Choose game files");return;}
+        bool replace=File.Exists(PathAt("game-remix/default.xbe"));
+        if(replace&&MessageBox.Show(this,"Replace the game files in game-remix?\n\nYour saves and settings are kept. The new files are checked before the old copy is removed.","Replace game files",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes)return;
+        closeAfterImport=false;
+        if(importCancellation!=null){try{importCancellation.Dispose();}catch{}}
+        importCancellation=new CancellationTokenSource();
+        working=true;importStatus="Installing game files... Press Esc to cancel.";if(importAction!=null&&!importAction.IsDisposed)importAction.Enabled=false;if(cancelImport!=null&&!cancelImport.IsDisposed){cancelImport.Visible=true;cancelImport.Enabled=true;}progress.Style=ProgressBarStyle.Marquee;progress.Visible=true;UpdateStatus();
+        string sourcePath=selected;var ui=this;var cancellation=importCancellation;
+        var thread=new Thread(delegate(){
+            string edition=null,error=null;bool cancelled=false;
+            try{edition=ImportGameFiles(root,sourcePath,replace,delegate(long done,long total,string name){if(ui.IsDisposed||!ui.IsHandleCreated)return;try{ui.BeginInvoke(new Action<long,long,string>(ui.UpdateImportProgress),done,total,name);}catch(InvalidOperationException){}},cancellation.Token);}
+            catch(OperationCanceledException){cancelled=true;}
+            catch(Exception ex){error=ex.Message;}
+            if(!ui.IsDisposed&&ui.IsHandleCreated)ui.BeginInvoke(new Action<string,string,bool>(ui.FinishImport),edition,error,cancelled);
+        });thread.IsBackground=true;
+        try{thread.Start();}catch(Exception ex){working=false;try{cancellation.Dispose();}catch{} importCancellation=null;progress.Visible=false;if(importAction!=null&&!importAction.IsDisposed)importAction.Enabled=true;if(cancelImport!=null&&!cancelImport.IsDisposed){cancelImport.Visible=false;cancelImport.Enabled=false;}MessageBox.Show(this,ex.Message,"Install",MessageBoxButtons.OK,MessageBoxIcon.Error);UpdateStatus();}
+    }
+    void CancelImport(){
+        if(!working||importCancellation==null)return;
+        if(cancelImport!=null&&!cancelImport.IsDisposed)cancelImport.Enabled=false;
+        importStatus="Cancelling game file import...";UpdateStatus();
+        try{importCancellation.Cancel();}catch(ObjectDisposedException){}
+    }
+    void UpdateImportProgress(long done,long total,string name){
+        if(total>0){progress.Style=ProgressBarStyle.Continuous;progress.Minimum=0;progress.Maximum=1000;int value=(int)Math.Min(1000.0,done*1000.0/total);progress.Value=Math.Max(0,value);importStatus="Installing game files - "+(int)(done*100.0/total)+"% — "+Path.GetFileName(name);}
+        else importStatus="Installing game files...";
+        status.Text=importStatus;
+    }
+    void FinishImport(string edition,string error,bool cancelled){
+        working=false;progress.Visible=false;progress.Style=ProgressBarStyle.Marquee;progress.Value=0;importStatus="";cancelImport=null;
+        if(importCancellation!=null){try{importCancellation.Dispose();}catch{} importCancellation=null;}
+        if(cancelled){
+            Append("Install cancelled. The previous game files were left untouched.");
+            if(closeAfterImport){closeAfterImport=false;Close();return;}
+            MessageBox.Show(this,"Installing game files was cancelled. The previous game files were left untouched.","Install",MessageBoxButtons.OK,MessageBoxIcon.Information);
+            UpdateStatus();if(page=="Install")ShowInstall();return;
+        }
+        if(error!=null){Append("Install failed: "+error);if(closeAfterImport){closeAfterImport=false;Close();return;}MessageBox.Show(this,error,"Install",MessageBoxButtons.OK,MessageBoxIcon.Error);UpdateStatus();if(page=="Install")ShowInstall();return;}
+        Append("Game files installed"+(edition!=null?" ("+edition+" edition)":"")+".");
+        if(!RuntimePresent(root))Append("The game executable is missing from this release folder. Use the full ReDUB Windows zip, or rebuild from source in Settings → Advanced.");
+        if(closeAfterImport){closeAfterImport=false;Close();return;}
+        UpdateStatus();ShowHome();
     }
     public static string Quote(string value){var b=new StringBuilder("\"");int slashes=0;foreach(char c in value){if(c=='\\'){slashes++;continue;}if(c=='\"'){b.Append('\\',slashes*2+1);b.Append(c);}else{b.Append('\\',slashes);b.Append(c);}slashes=0;}b.Append('\\',slashes*2);return b.Append('"').ToString();}
     void Run(string script,params string[] args){
-        if(job!=null){MessageBox.Show(this,"Wait for the current operation to finish.","ReDUB");return;}
+        if(job!=null||working){MessageBox.Show(this,"Wait for the current operation to finish.","ReDUB");return;}
         var ps=new ProcessStartInfo {FileName=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe"),WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
         ps.Arguments="-NoLogo -NoProfile -ExecutionPolicy Bypass -File "+Quote(PathAt(script));foreach(string a in args)ps.Arguments+=" "+Quote(a);
         if(script!=".portable/Start.ps1")ShowSupport();var p=new Process {StartInfo=ps};job=p;progress.Visible=true;Append("Starting "+Path.GetFileName(script)+"...");UpdateStatus();
@@ -199,6 +271,68 @@ public sealed class Launcher : Form {
     public static string DlssMode(string root){string value=LauncherValue(root,"DlssMode","Off");return new[]{"Off","Quality","Balanced","Performance"}.FirstOrDefault(mode=>mode.Equals(value,StringComparison.OrdinalIgnoreCase))??"Off";}
     public static void SetDlssMode(string root,string mode){if(!new[]{"Off","Quality","Balanced","Performance"}.Contains(mode))throw new ArgumentException("Unknown DLSS mode.");SaveLauncherValue(root,"DlssMode",mode);}
     public static bool InstallationReady(string root){string dist=RendererDist(root);bool ready=File.Exists(Path.Combine(dist,"mcdub3remix.exe"))&&File.Exists(Path.Combine(dist,"SDL2.dll"))&&File.Exists(Path.Combine(root,@"game-remix\default.xbe"));if(ready&&Renderer(root)=="vulkan"&&DlssMode(root)!="Off")ready=File.Exists(Path.Combine(dist,"redub_dlss.dll"))&&File.Exists(Path.Combine(dist,"nvngx_dlss.dll"));return ready;}
+    public static bool RuntimePresent(string root){string dist=Path.Combine(root,@"work-remix\build-windows-x86_64\dist");return File.Exists(Path.Combine(dist,"mcdub3remix.exe"))&&File.Exists(Path.Combine(dist,"SDL2.dll"));}
+    public static string[] InstallationProblems(string root){
+        var problems=new List<string>();
+        string game=Path.Combine(root,@"game-remix"),xbe=Path.Combine(game,"default.xbe");
+        if(!File.Exists(xbe))problems.Add("Game files are missing: "+xbe+". Choose Install.");
+        else{string edition,error;if(!Xdvdfs.TryVerify(game,out edition,out error))problems.Add(error);}
+        string dist=RendererDist(root),exe=Path.Combine(dist,"mcdub3remix.exe"),sdl=Path.Combine(dist,"SDL2.dll");
+        if(!File.Exists(exe))problems.Add("Game executable is missing: "+exe+". Use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.");
+        else if(!File.Exists(sdl))problems.Add("Controller runtime is missing: "+sdl+". Use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.");
+        if(Renderer(root)=="vulkan"&&DlssMode(root)!="Off")foreach(string file in new[]{"redub_dlss.dll","nvngx_dlss.dll"})if(!File.Exists(Path.Combine(dist,file)))problems.Add("DLSS runtime is missing: "+Path.Combine(dist,file)+". Choose Settings → Graphics, then turn DLSS Off or rebuild.");
+        return problems.ToArray();
+    }
+    /* Import is copy-only: an extracted folder is copied and an ISO is read by
+     * the in-house XDVDFS reader. Both land in a staging folder, the XBE is
+     * verified, and only then is the old game-remix replaced. */
+    public static string ImportGameFiles(string root,string source,bool replaceExisting,Action<long,long,string> progress,CancellationToken cancellationToken){
+        string fullSource=Path.GetFullPath(source),game=Path.Combine(root,"game-remix"),staging=Path.Combine(root,"game-remix.importing");
+        string sourcePrefix=fullSource.TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
+        string rootPrefix=Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
+        string gamePrefix=game.TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
+        if(File.Exists(game))throw new IOException("game-remix exists as a file. Remove it or move it away first.");
+        if(!replaceExisting&&File.Exists(Path.Combine(game,"default.xbe")))throw new IOException("Game files are already installed.");
+        if(rootPrefix.StartsWith(sourcePrefix,StringComparison.OrdinalIgnoreCase))throw new IOException("Choose the disc folder, not a folder that contains ReDUB.");
+        if(sourcePrefix.StartsWith(gamePrefix,StringComparison.OrdinalIgnoreCase))throw new IOException("Choose the disc folder, not the installed game-remix folder.");
+        TryDelete(staging);
+        try{
+            if(Directory.Exists(fullSource)){
+                if(!File.Exists(Path.Combine(fullSource,"default.xbe")))throw new IOException("The extracted folder must contain default.xbe.");
+                CopyFolder(fullSource,staging,progress,cancellationToken);
+            }else if(File.Exists(fullSource)){
+                string extension=Path.GetExtension(fullSource);if(!string.Equals(extension,".iso",StringComparison.OrdinalIgnoreCase)&&!string.Equals(extension,".xiso",StringComparison.OrdinalIgnoreCase))throw new IOException("Choose an Xbox disc image (.iso or .xiso) or an extracted folder containing default.xbe.");
+                Xdvdfs.Extract(fullSource,staging,progress,cancellationToken);
+            }else throw new IOException("The selected disc or folder does not exist.");
+            cancellationToken.ThrowIfCancellationRequested();
+            string edition=Xdvdfs.Verify(staging);
+            cancellationToken.ThrowIfCancellationRequested();
+            string old=null;
+            if(Directory.Exists(game)){old=game+".old-"+DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");Directory.Move(game,old);}
+            try{Directory.Move(staging,game);}
+            catch{if(old!=null){try{Directory.Move(old,game);}catch{}}throw;}
+            if(old!=null)try{Directory.Delete(old,true);}catch{}
+            return edition;
+        }catch{TryDelete(staging);throw;}
+    }
+    static void CopyFolder(string source,string destination,Action<long,long,string> progress,CancellationToken cancellationToken){
+        string sourceRoot=source.TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
+        string[] files=Directory.GetFiles(sourceRoot,"*",SearchOption.AllDirectories);
+        long total=0,done=0;foreach(string file in files)total+=new FileInfo(file).Length;
+        Directory.CreateDirectory(destination);
+        foreach(string directory in Directory.GetDirectories(sourceRoot,"*",SearchOption.AllDirectories))Directory.CreateDirectory(Path.Combine(destination,directory.Substring(sourceRoot.Length).TrimStart(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)));
+        byte[] buffer=new byte[1024*1024];
+        foreach(string file in files){
+            cancellationToken.ThrowIfCancellationRequested();
+            string relative=file.Substring(sourceRoot.Length).TrimStart(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar),target=Path.Combine(destination,relative);
+            using(var input=new FileStream(file,FileMode.Open,FileAccess.Read,FileShare.Read,65536,FileOptions.SequentialScan))
+            using(var output=new FileStream(target,FileMode.CreateNew,FileAccess.Write,FileShare.None,65536,FileOptions.SequentialScan)){
+                int got;while((got=input.Read(buffer,0,buffer.Length))>0){cancellationToken.ThrowIfCancellationRequested();output.Write(buffer,0,got);done+=got;if(progress!=null)progress(done,total,relative);}
+            }
+            try{File.SetLastWriteTimeUtc(target,File.GetLastWriteTimeUtc(file));}catch{}
+        }
+    }
+    static void TryDelete(string path){try{if(Directory.Exists(path))Directory.Delete(path,true);}catch{}}
     /* The Vulkan experiment used to be started by a hidden PowerShell script that
      * merged the renderer settings and exported them as environment variables.
      * Do the same here so playing never spawns a shell. */
@@ -218,7 +352,7 @@ public sealed class Launcher : Form {
         foreach(string file in files)foreach(string raw in File.ReadAllLines(file)){int eq=raw.IndexOf('=');if(eq<=0)continue;string key=raw.Substring(0,eq).Trim(),value=raw.Substring(eq+1).Trim();if(keys.Contains(key,StringComparer.OrdinalIgnoreCase))env[key]=value;}
         int mode=Array.IndexOf(new[]{"Off","Quality","Balanced","Performance"},DlssMode(root));if(mode<0)mode=0;
         env["MC3_DLSS"]=mode.ToString();env["MC3_DLSS_PRESENT"]=mode!=0?"1":"0";
-        env["MC3_DLSS_JITTER"]="0";env["MC3_DLSS_EVALUATE"]="0";env["MC3_DLSS_CAPTURE"]="";
+        env["MC3_DLSS_JITTER"]=mode!=0?"1":"0";env["MC3_DLSS_EVALUATE"]=mode!=0?"1":"0";env["MC3_DLSS_CAPTURE"]="";
         if(env["MC3_FULLSCREEN"]!="0"&&env["MC3_FULLSCREEN"]!="1"&&env["MC3_FULLSCREEN"]!="2")env["MC3_FULLSCREEN"]="0";
         if(env["MC3_RESOLUTION"]!="auto"&&!System.Text.RegularExpressions.Regex.IsMatch(env["MC3_RESOLUTION"],@"^\d{3,4}x\d{3,4}$"))env["MC3_RESOLUTION"]="auto";
         var psi=new ProcessStartInfo(Path.Combine(dist,"mcdub3remix.exe")){WorkingDirectory=dist,UseShellExecute=true};
@@ -230,8 +364,34 @@ public sealed class Launcher : Form {
         string dist=RendererDist(root);
         return new ProcessStartInfo(Path.Combine(dist,"mcdub3remix.exe")){WorkingDirectory=dist,UseShellExecute=true};
     }
-    static void StartDirect(string root){var running=Process.GetProcessesByName("mcdub3remix");bool active=running.Length>0;foreach(var p in running)p.Dispose();if(active)return;if(!InstallationReady(root))throw new IOException("The selected renderer is not built. Build it from Settings → Graphics, or choose OpenGL.");Process.Start(LaunchInfo(root));}
+    static void StartDirect(string root){var running=Process.GetProcessesByName("mcdub3remix");bool active=running.Length>0;foreach(var p in running)p.Dispose();if(active)return;if(!InstallationReady(root)){string[] problems=InstallationProblems(root);throw new IOException(problems.Length>0?problems[0]:"The game is not ready. Choose Install.");}Process.Start(LaunchInfo(root));}
     public static bool IsSourceRoot(string path){return Directory.Exists(path)&&File.Exists(Path.Combine(path,@".portable\Build.ps1"))&&File.Exists(Path.Combine(path,"CMakeLists.txt"));}
+    static void CliLog(string root,string message){try{string dir=Path.Combine(root,@"work-remix\logs");Directory.CreateDirectory(dir);File.AppendAllText(Path.Combine(dir,"launcher-cli.log"),DateTime.Now.ToString("s")+" "+message+Environment.NewLine,new UTF8Encoding(false));}catch{}}
+    static int RunCommand(string root,string command,string[] args){
+        try{
+            if(command=="--import"){
+                if(args.Length<2){CliLog(root,"--import needs a folder or .iso path");return 2;}
+                string edition=ImportGameFiles(root,args[1],true,null,CancellationToken.None);
+                CliLog(root,"Imported game files ("+edition+").");return 0;
+            }
+            if(command=="--play"){StartDirect(root);CliLog(root,"Started the game.");return 0;}
+            if(command=="--check"){
+                string[] problems=InstallationProblems(root);
+                if(problems.Length==0){CliLog(root,"Setup OK.");return 0;}
+                foreach(string problem in problems)CliLog(root,"FAIL: "+problem);return 1;
+            }
+            if(command=="--build")return RunBuild(root);
+        }catch(Exception ex){CliLog(root,command+" failed: "+ex.Message);return 1;}
+        CliLog(root,"Unknown command: "+command);return 2;
+    }
+    static int RunBuild(string root){
+        string script=Path.Combine(root,@".portable\Build.ps1");
+        if(!File.Exists(script)){CliLog(root,"Build.ps1 is missing.");return 1;}
+        var ps=new ProcessStartInfo {FileName=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),@"WindowsPowerShell\v1.0\powershell.exe"),WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+        ps.Arguments="-NoLogo -NoProfile -ExecutionPolicy Bypass -File "+Quote(script)+" -Mode Rebuild";
+        var p=new Process {StartInfo=ps};p.OutputDataReceived+=(s,e)=>{if(e.Data!=null)CliLog(root,e.Data);};p.ErrorDataReceived+=(s,e)=>{if(e.Data!=null)CliLog(root,e.Data);};
+        p.Start();p.BeginOutputReadLine();p.BeginErrorReadLine();p.WaitForExit();int code=p.ExitCode;p.Dispose();CliLog(root,"Build exit code "+code+".");return code;
+    }
     static string Sha256(string path){using(var sha=System.Security.Cryptography.SHA256.Create())using(var stream=File.OpenRead(path))return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","").ToLowerInvariant();}
     /* The setup source travels as launcher-source.zip beside the launcher, not
      * inside the executable. A large embedded archive made every security
@@ -278,9 +438,12 @@ public sealed class Launcher : Form {
     [STAThread] public static void Main(string[] args){string root;
         try{root=ResolveRoot();}catch(Exception ex){MessageBox.Show(ex.Message,"ReDUB setup");return;}
         if(args.Length>0&&args[0]=="--self-test"){if(Quote(@"D:\folder with spaces\")!="\"D:\\folder with spaces\\\\\"")Environment.Exit(2);if(!File.Exists(Path.Combine(root,@".portable\Build.ps1")))Environment.Exit(3);Directory.CreateDirectory(Path.Combine(root,@"work-remix\logs"));File.WriteAllText(Path.Combine(root,@"work-remix\logs\launcher-self-test.log"),"PASS: relative project discovery and Windows argument quoting");return;}
+        if(args.Length>0){string command=args[0].ToLowerInvariant();if(command=="--import"||command=="--play"||command=="--check"||command=="--build")Environment.Exit(RunCommand(root,command,args));}
         string startupError=null;
         if(ShouldBypass(BypassEnabled(root),args,(Control.ModifierKeys&Keys.Shift)!=0,InstallationReady(root))){try{StartDirect(root);return;}catch(Exception ex){startupError="Direct launch failed: "+ex.Message;}}
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);var app=new Launcher(root);if(startupError!=null)app.Append(startupError);Application.Run(app);
     }
 }
 }
+
+

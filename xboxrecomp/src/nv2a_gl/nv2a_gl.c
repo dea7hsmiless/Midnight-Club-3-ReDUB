@@ -1604,6 +1604,111 @@ static void tex_hd(GlTex *t)
 
 
 /* Upload h as a new texture; 0 on failure. */
+/* S3TC does not exist in GLES and is missing on some desktop drivers, where
+ * glCompressedTexImage2D fails and the pack used to be switched off entirely
+ * -- the custom logos then never appeared on Android (2026-11-18). Decode the
+ * blocks to RGBA and upload that instead. */
+static void dxt_rgb565(uint16_t c, uint8_t *o)
+{
+    o[0] = (uint8_t)(((c >> 11) & 31) * 255 / 31);
+    o[1] = (uint8_t)(((c >> 5) & 63) * 255 / 63);
+    o[2] = (uint8_t)((c & 31) * 255 / 31);
+}
+
+static void dxt_rgba(const uint8_t *src, int w, int h, int dxt5, uint8_t *dst)
+{
+    int bw = (w + 3) / 4, bh = (h + 3) / 4, bx, by;
+    for (by = 0; by < bh; by++)
+        for (bx = 0; bx < bw; bx++) {
+            const uint8_t *b = src + ((size_t)by * bw + bx) * (dxt5 ? 16u : 8u);
+            uint8_t alpha[16], p[4][4];
+            uint16_t c0, c1;
+            uint32_t idx;
+            int i, x, y, k;
+            if (dxt5) {
+                int a0 = b[0], a1 = b[1];
+                uint64_t bits = 0;
+                for (i = 0; i < 6; i++)
+                    bits |= (uint64_t)b[2 + i] << (8 * i);
+                for (i = 0; i < 16; i++) {
+                    int c = (int)((bits >> (3 * i)) & 7);
+                    if (c == 0)
+                        alpha[i] = (uint8_t)a0;
+                    else if (c == 1)
+                        alpha[i] = (uint8_t)a1;
+                    else if (a0 > a1)
+                        alpha[i] = (uint8_t)(((8 - c) * a0 + (c - 1) * a1) / 7);
+                    else
+                        alpha[i] = (uint8_t)(c == 6 ? 0 : c == 7 ? 255
+                                            : ((6 - c) * a0 + (c - 1) * a1) / 5);
+                }
+                b += 8;
+            }
+            c0 = (uint16_t)(b[0] | (b[1] << 8));
+            c1 = (uint16_t)(b[2] | (b[3] << 8));
+            idx = (uint32_t)b[4] | ((uint32_t)b[5] << 8)
+                | ((uint32_t)b[6] << 16) | ((uint32_t)b[7] << 24);
+            dxt_rgb565(c0, p[0]); p[0][3] = 255;
+            dxt_rgb565(c1, p[1]); p[1][3] = 255;
+            if (c0 > c1 || dxt5) {
+                for (k = 0; k < 3; k++) {
+                    p[2][k] = (uint8_t)((2 * p[0][k] + p[1][k] + 1) / 3);
+                    p[3][k] = (uint8_t)((p[0][k] + 2 * p[1][k] + 1) / 3);
+                }
+                p[2][3] = p[3][3] = 255;
+            } else {
+                for (k = 0; k < 3; k++)
+                    p[2][k] = (uint8_t)((p[0][k] + p[1][k] + 1) / 2);
+                p[2][3] = 255;
+                p[3][0] = p[3][1] = p[3][2] = p[3][3] = 0;
+            }
+            for (y = 0; y < 4; y++)
+                for (x = 0; x < 4; x++) {
+                    int px = bx * 4 + x, py = by * 4 + y, e;
+                    uint8_t *o;
+                    if (px >= w || py >= h)
+                        continue;
+                    e = (int)((idx >> (2 * (y * 4 + x))) & 3);
+                    o = dst + ((size_t)py * w + px) * 4;
+                    o[0] = p[e][0];
+                    o[1] = p[e][1];
+                    o[2] = p[e][2];
+                    o[3] = dxt5 ? alpha[y * 4 + x] : p[e][3];
+                }
+        }
+}
+
+static GLuint hd_upload_rgba(const HdTex *h, uint32_t *bytes)
+{
+    int w = h->lw[0], hh = h->lh[0];
+    uint8_t *rgba;
+    GLuint id = 0;
+    *bytes = 0;
+    if (w <= 0 || hh <= 0 || !h->data[0])
+        return 0;
+    if (!(rgba = malloc((size_t)w * hh * 4)))
+        return 0;
+    dxt_rgba(h->data[0], w, hh, h->alpha != 0, rgba);
+    glGenTextures(1, &id);
+    tex_param_forget(id);
+    glBindTexture(GL_TEXTURE_2D, id);
+    while (glGetError() != GL_NO_ERROR) { }
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, hh, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    if (glGenerateMipmap)
+        glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, glGenerateMipmap ? 30 : 0);
+    tex_bind_forget();
+    free(rgba);
+    if (glGetError() != GL_NO_ERROR) {
+        glDeleteTextures(1, &id);
+        return 0;
+    }
+    *bytes = (uint32_t)((size_t)w * hh * 4);
+    fprintf(stderr, "  [GL] HD pack: %dx%d uploaded as RGBA (no S3TC here)\n", w, hh);
+    return id;
+}
+
 static GLuint hd_upload(const HdTex *h, uint32_t *bytes)
 {
     GLenum fmt = h->alpha ? GL_COMPRESSED_RGBA_S3TC_DXT5_EXT : GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
@@ -1624,7 +1729,7 @@ static GLuint hd_upload(const HdTex *h, uint32_t *bytes)
     tex_bind_forget();
     if (glGetError() != GL_NO_ERROR) {
         glDeleteTextures(1, &id);
-        return 0;
+        return hd_upload_rgba(h, bytes);   /* no S3TC here: RGBA instead */
     }
     return id;
 }
@@ -6578,6 +6683,315 @@ static uint32_t present_width(const GlSurf *s)
 
 /* Present s (sw stored columns drawn) into the window rectangle through
  * FXAA; 0 when it is off (the caller blits). Default framebuffer bound. */
+/* -- Frame generation (RECOMP_FG) --------------------------------------
+ *
+ * RECOMP_FG=1  crossfade of the previous frame with this one (plumbing test)
+ * RECOMP_FG=2  motion-compensated: half-res block match between the history
+ *              frame and the current one, then the history warped along it
+ *
+ * Off by default. The finished frame -- after every overlay, so the HUD is in
+ * it -- is kept in a texture and a second frame is presented before the next
+ * real one, two swaps per game frame. Copying the back buffer keeps this pass
+ * out of the letterbox / 4:3 hold / FXAA / fill logic entirely.
+ *
+ * Fragment shaders only (GL 3.3 core): a compute-shader flow pass would
+ * exclude Mesa's GL 3.3 baseline and macOS's GL 4.1 ceiling. Where the match
+ * is poor (occlusion, new content) the composite falls back to the current
+ * frame instead of warping rubbish, so the failure mode is a repeated frame,
+ * not ghosting.
+ */
+#if !defined(__ANDROID__) && !defined(__SWITCH__)
+static int    s_fg_on = -1, s_fg_ready, s_fg_have, s_fg_index, s_fg_w, s_fg_h;
+static GLuint s_fg_tex[2], s_fg_prog, s_fg_vao, s_fg_vbo;
+static GLuint s_fg_flow_tex, s_fg_flow_fbo, s_fg_flow_prog;
+
+static const char *fg_vs[] = {
+    "#version 330 core\n"
+    "layout(location=0) in vec2 p;\n"
+    "out vec2 uv;\n"
+    "void main(){ uv = p*0.5+0.5; gl_Position = vec4(p, 0.0, 1.0); }\n" };
+
+static const char *fg_mix_fs[] = {
+    "#version 330 core\n"
+    "in vec2 uv;\n"
+    "out vec4 o;\n"
+    "uniform sampler2D a, b;\n"
+    "void main(){ o = mix(texture(a, uv), texture(b, uv), 0.5); }\n" };
+
+/* Half resolution. rg = (motion + 16 px) / 32 px, b = match error. */
+static const char *fg_flow_fs[] = {
+    "#version 330 core\n"
+    "in vec2 uv;\n"
+    "out vec4 o;\n"
+    "uniform sampler2D prev, cur;\n"
+    "uniform vec2 texel;\n"
+    "float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }\n"
+    "void main(){\n"
+    "  float here = lum(texture(cur, uv).rgb);\n"
+    "  float best = 4.0;\n"
+    "  vec2 bv = vec2(0.0);\n"
+    "  for (int y = -2; y <= 2; y++)\n"
+    "    for (int x = -2; x <= 2; x++) {\n"
+    "      vec2 d = vec2(float(x), float(y)) * 2.0 * texel;\n"
+    "      float e = abs(lum(texture(prev, uv - d).rgb) - here);\n"
+    "      if (e < best) { best = e; bv = vec2(float(x), float(y)) * 2.0; }\n"
+    "    }\n"
+    "  o = vec4(bv / 32.0 + 0.5, clamp(best * 4.0, 0.0, 1.0), 1.0);\n"
+    "}\n" };
+
+/* History warped by half the motion, mixed with the current frame. */
+static const char *fg_warp_fs[] = {
+    "#version 330 core\n"
+    "in vec2 uv;\n"
+    "out vec4 o;\n"
+    "uniform sampler2D prev, cur, flow;\n"
+    "uniform vec2 texel;\n"
+    "void main(){\n"
+    "  vec4 f = texture(flow, uv);\n"
+    "  vec2 v = (f.rg - 0.5) * 32.0 * texel;\n"
+    "  vec3 a = texture(prev, uv - 0.5 * v).rgb;\n"
+    "  vec3 b = texture(cur, uv).rgb;\n"
+    "  o = vec4(mix(b, a, 0.5 * (1.0 - f.b)), 1.0);\n"
+    "}\n" };
+
+static GLuint fg_program(const char *const *vs, const char *const *fs, const char *what)
+{
+    GLuint v = compile(GL_VERTEX_SHADER, vs, 1);
+    GLuint f = compile(GL_FRAGMENT_SHADER, fs, 1);
+    GLuint p;
+    GLint ok = 0;
+    if (!v || !f) {
+        if (v) glDeleteShader(v);
+        if (f) glDeleteShader(f);
+        return 0;
+    }
+    p = glCreateProgram();
+    glAttachShader(p, v);
+    glAttachShader(p, f);
+    glLinkProgram(p);
+    glDeleteShader(v);
+    glDeleteShader(f);
+    glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        glDeleteProgram(p);
+        fprintf(stderr, "  [GL] frame generation: %s did not link\n", what);
+        return 0;
+    }
+    return p;
+}
+
+static int fg_init(void)
+{
+    static const float quad[12] = { -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f,
+                                    -1.0f,  1.0f, 1.0f, -1.0f,  1.0f, 1.0f };
+    if (s_fg_on < 0) {
+        const char *e = getenv("RECOMP_FG");
+        s_fg_on = e && e[0] ? atoi(e) : 0;
+        if (s_fg_on < 0 || s_fg_on > 2)
+            s_fg_on = 0;
+        if (s_fg_on) {
+            /* Two swaps per game frame only double the rate on a display that can
+             * show it; on a 60 Hz panel it would halve the game rate instead. */
+            SDL_DisplayMode dm;
+            int hz = SDL_GetCurrentDisplayMode(0, &dm) == 0 ? dm.refresh_rate : 0;
+            const char *force = getenv("RECOMP_FG_FORCE");
+            if (hz > 0 && hz < 100 && !(force && force[0] == '1')) {
+                fprintf(stderr, "  [GL] frame generation needs a 120 Hz display"
+                                " (this one reports %d Hz); left off\n", hz);
+                s_fg_on = 0;
+            } else
+                fprintf(stderr, "  [GL] frame generation: %s (display %d Hz, RECOMP_FG)\n",
+                        s_fg_on >= 2 ? "motion-compensated warp" : "crossfade", hz);
+        }
+    }
+    if (!s_fg_on)
+        return 0;
+    if (s_fg_ready)
+        return 1;
+    s_fg_prog = fg_program(fg_vs, s_fg_on >= 2 ? fg_warp_fs : fg_mix_fs, "blend");
+    if (!s_fg_prog) {
+        s_fg_on = 0;
+        return 0;
+    }
+    glUseProgram(s_fg_prog);
+    s_cur_prog = s_fg_prog;
+    if (s_fg_on >= 2) {
+        glUniform1i(glGetUniformLocation(s_fg_prog, "prev"), 0);
+        glUniform1i(glGetUniformLocation(s_fg_prog, "cur"), 1);
+        glUniform1i(glGetUniformLocation(s_fg_prog, "flow"), 2);
+        s_fg_flow_prog = fg_program(fg_vs, fg_flow_fs, "flow");
+        if (s_fg_flow_prog) {
+            glUseProgram(s_fg_flow_prog);
+            glUniform1i(glGetUniformLocation(s_fg_flow_prog, "prev"), 0);
+            glUniform1i(glGetUniformLocation(s_fg_flow_prog, "cur"), 1);
+        } else {
+            fprintf(stderr, "  [GL] frame generation: no flow pass, crossfade instead\n");
+            s_fg_on = 1;
+        }
+    } else {
+        glUniform1i(glGetUniformLocation(s_fg_prog, "a"), 0);
+        glUniform1i(glGetUniformLocation(s_fg_prog, "b"), 1);
+    }
+    glGenVertexArrays(1, &s_fg_vao);
+    glGenBuffers(1, &s_fg_vbo);
+    glBindVertexArray(s_fg_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, s_fg_vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)sizeof quad, quad, GL_STREAM_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
+    glBindVertexArray(0);
+    s_fg_ready = 1;
+    return 1;
+}
+
+static void fg_size(int w, int h)
+{
+    int i, hw = (w + 1) / 2, hh = (h + 1) / 2;
+    if (s_fg_w == w && s_fg_h == h)
+        return;
+    if (!s_fg_tex[0])
+        glGenTextures(2, s_fg_tex);
+    for (i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        tex_param_forget(s_fg_tex[i]);
+    }
+    if (s_fg_on >= 2) {
+        if (!s_fg_flow_tex)
+            glGenTextures(1, &s_fg_flow_tex);
+        if (!s_fg_flow_fbo)
+            glGenFramebuffers(1, &s_fg_flow_fbo);
+        glBindTexture(GL_TEXTURE_2D, s_fg_flow_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, hw, hh, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        tex_param_forget(s_fg_flow_tex);
+        glBindFramebuffer(GL_FRAMEBUFFER, s_fg_flow_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_fg_flow_tex, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            fprintf(stderr, "  [GL] frame generation: flow target incomplete, crossfade instead\n");
+            s_fg_on = 1;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    s_fg_w = w;
+    s_fg_h = h;
+    s_fg_have = 0;
+    s_fg_index = 0;
+}
+
+/* The frame just drawn, ready to be interpolated from next time. */
+static void fg_capture(void)
+{
+    int w = 0, h = 0;
+    if (!fg_init())
+        return;
+    SDL_GL_GetDrawableSize(s_win, &w, &h);
+    if (w <= 0 || h <= 0)
+        return;
+    fg_size(w, h);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
+    tex_param_forget(s_fg_tex[s_fg_index]);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+    s_fg_have = 1;
+}
+
+static void fg_draw(int prev_unit_tex)
+{
+    glBindVertexArray(s_fg_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+    (void)prev_unit_tex;
+}
+
+static void fg_set_texel(GLuint prog)
+{
+    float t2[2];
+    t2[0] = 1.0f / (float)s_fg_w;
+    t2[1] = 1.0f / (float)s_fg_h;
+    glUniform2fv(glGetUniformLocation(prog, "texel"), 1, t2);
+}
+
+/* Present the in-between frame. Returns 1 when something was drawn. */
+static int fg_second(void)
+{
+    if (s_fg_on < 1 || !s_fg_ready || !s_fg_have)
+        return 0;
+    if (s_fg_on >= 2 && s_fg_flow_prog) {
+        /* 1: half-res block match between history and the current frame */
+        glBindFramebuffer(GL_FRAMEBUFFER, s_fg_flow_fbo);
+        glViewport(0, 0, (s_fg_w + 1) / 2, (s_fg_h + 1) / 2);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
+        glColorMask(1, 1, 1, 1);
+        glUseProgram(s_fg_flow_prog);
+        s_cur_prog = s_fg_flow_prog;
+        fg_set_texel(s_fg_flow_prog);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index ^ 1]);
+        tex_param_forget(s_fg_tex[s_fg_index ^ 1]);
+        glActiveTexture(GL_TEXTURE0 + 1);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
+        tex_param_forget(s_fg_tex[s_fg_index]);
+        glActiveTexture(GL_TEXTURE0);
+        fg_draw(0);
+
+        /* 2: composite to the window */
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, s_fg_w, s_fg_h);
+        glUseProgram(s_fg_prog);
+        s_cur_prog = s_fg_prog;
+        fg_set_texel(s_fg_prog);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index ^ 1]);
+        tex_param_forget(s_fg_tex[s_fg_index ^ 1]);
+        glActiveTexture(GL_TEXTURE0 + 1);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
+        tex_param_forget(s_fg_tex[s_fg_index]);
+        glActiveTexture(GL_TEXTURE0 + 2);
+        glBindTexture(GL_TEXTURE_2D, s_fg_flow_tex);
+        tex_param_forget(s_fg_flow_tex);
+        glActiveTexture(GL_TEXTURE0);
+        fg_draw(0);
+    } else {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, s_fg_w, s_fg_h);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
+        glColorMask(1, 1, 1, 1);
+        glUseProgram(s_fg_prog);
+        s_cur_prog = s_fg_prog;
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index ^ 1]);
+        tex_param_forget(s_fg_tex[s_fg_index ^ 1]);
+        glActiveTexture(GL_TEXTURE0 + 1);
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
+        tex_param_forget(s_fg_tex[s_fg_index]);
+        glActiveTexture(GL_TEXTURE0);
+        fg_draw(0);
+    }
+    s_fg_index ^= 1;
+    tex_bind_forget();
+    return 1;
+}
+#else
+static void fg_capture(void) { }
+static int  fg_second(void) { return 0; }
+#endif
+
 static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
 {
     float rcp[2], mx[2], full[4], crop[4], band[2];
@@ -7091,7 +7505,10 @@ swap:
         }
     }
 #endif
+    fg_capture();                    /* the frame just drawn, overlays included */
     SDL_GL_SwapWindow(s_win);
+    if (fg_second())                 /* RECOMP_FG: one generated frame */
+        SDL_GL_SwapWindow(s_win);
     gq_frame_end();
     s_mg_fb_draw = s_mg_fb_read = 0xFFFFFFFFu;   /* whatever the swap did */
     pf_mark(PF_SWAP);

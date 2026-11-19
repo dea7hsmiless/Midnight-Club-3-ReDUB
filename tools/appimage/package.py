@@ -6,6 +6,7 @@ Run inside the release build container after build-release.sh.
 import hashlib,json,os,re,shutil,subprocess
 from pathlib import Path
 W=Path('/work'); A=W/'AppDir'; P=W/'packaging'
+VERSION=os.environ.get('REDUB_VERSION','0.2.4')
 assert str(A)=='/work/AppDir'
 if A.exists():shutil.rmtree(A)
 for d in ['usr/bin','usr/lib','usr/share/applications','usr/share/metainfo','usr/share/doc/redub','usr/share/licenses/redub']:(A/d).mkdir(parents=True,exist_ok=True)
@@ -15,6 +16,7 @@ def copy(src,dst):
 copy(W/'linux-build/mcdub3remix',A/'usr/bin/mcdub3remix')
 subprocess.run(['cc',str(P/'redub-message.c'),'-o',str(A/'usr/bin/redub-message')]+run('pkg-config','--cflags','--libs','sdl2').split(),check=True)
 for f in ['AppRun','redub.png']:copy(P/f,A/f)
+(A/'version').write_text(VERSION+'\n')
 copy(P/'io.github.dea7hsmiless.ReDUB.desktop',A/'usr/share/applications/io.github.dea7hsmiless.ReDUB.desktop')
 copy(P/'io.github.dea7hsmiless.ReDUB.metainfo.xml',A/'usr/share/metainfo/io.github.dea7hsmiless.ReDUB.appdata.xml')
 copy(P/'io.github.dea7hsmiless.ReDUB.desktop',A/'io.github.dea7hsmiless.ReDUB.desktop')
@@ -66,7 +68,7 @@ for f in list((A/'usr/bin').iterdir())+list((A/'usr/lib').iterdir()):
 (A/'AppRun').chmod(0o755)
 shutil.copytree('/usr/share/common-licenses',A/'usr/share/licenses/redub/common',dirs_exist_ok=True)
 source_commit=os.environ.get('REDUB_SOURCE_COMMIT') or ((W/'source-commit.txt').read_text().strip() if (W/'source-commit.txt').exists() else 'unknown')
-manifest={'source_commit':source_commit,'base_commit':'741a35facc54530b73f45ec87208015b756b3e84','version':'0.2.2','baseline':'Ubuntu 24.04 x86_64 / glibc 2.39','bundled_libraries':bundled,'host_libraries':host,'display_backend':'X11 / XWayland (native Wayland unsupported)','patches':['src/games/remix/recomp_manual.c: Port Options mixed-case entry and title','src/linux_settings.c: MC3_SETTINGS_FILE override','xboxrecomp/src/kernel/kernel_path.c: Linux Partition1 title metadata uses user save profile'],'bundled_logo_textures':{name:hashlib.sha256((A/'hd/textures'/name).read_bytes()).hexdigest() for name in logo_names},'renderer':'OpenGL; experimental 60/120 FPS changes excluded'}
+manifest={'source_commit':source_commit,'base_commit':'741a35facc54530b73f45ec87208015b756b3e84','version':VERSION,'baseline':'Ubuntu 24.04 x86_64 / glibc 2.39','bundled_libraries':bundled,'host_libraries':host,'display_backend':'X11 / XWayland (native Wayland unsupported)','patches':['src/games/remix/recomp_manual.c: Port Options mixed-case entry and title','src/linux_settings.c: MC3_SETTINGS_FILE override','xboxrecomp/src/kernel/kernel_path.c: Linux Partition1 title metadata uses user save profile'],'bundled_logo_textures':{name:hashlib.sha256((A/'hd/textures'/name).read_bytes()).hexdigest() for name in logo_names},'renderer':'OpenGL; 30 FPS default, 60 FPS opt-in (restart to apply); 120 FPS excluded'}
 for dest in [A/'usr/share/doc/redub/build-manifest.json',W/'build-manifest.json']:dest.write_text(json.dumps(manifest,indent=2)+'\n')
 subprocess.run(['desktop-file-validate',str(A/'io.github.dea7hsmiless.ReDUB.desktop')],check=True)
 # appstream may emit non-blocking recommendations. A validation failure remains fatal.
