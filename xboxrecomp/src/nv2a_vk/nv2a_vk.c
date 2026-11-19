@@ -3142,8 +3142,87 @@ static int pend_append(const Nv2aRawBatch *b, int changed)
     return 1;
 }
 
+/* ---- Temporal draw-matching instrumentation (DLSS gate) ----------------
+ * Counts how many recorded draws can be identified again in the following
+ * frame. That ratio decides whether per-draw motion vectors are worth
+ * building: nothing here renders differently or changes the native path.
+ * MC3_DLSS_EVALUATE=1 turns it on alongside the existing trace. */
+#define TKEY_SLOTS 4096u
+static uint64_t s_tkey_list[2][TKEY_SLOTS], s_tset[2][TKEY_SLOTS];
+static uint32_t s_tkey_n[2], s_tkey_cur;
+
+static uint64_t tkey_of(const Nv2aRawBatch *b)
+{
+    /* Only stable identity goes in: prim, counts, the render targets and the
+     * first indices. vp_prog_gen and texture addresses are regenerated often
+     * enough that including them made every key unique (measured: 0/1245). */
+    uint64_t h = 1469598103934665603ull;
+    const uint32_t v[6] = { b->prim, b->vertex_count, b->index_count,
+                            b->color_va, b->zeta_va, b->attr_present };
+    int i;
+    for (i = 0; i < 6; i++) { h ^= v[i]; h *= 1099511628211ull; }
+    for (i = 0; i < 3 && b->indices && (uint32_t)i < b->index_count; i++) {
+        h ^= b->indices[i];
+        h *= 1099511628211ull;
+    }
+    return h ? h : 1ull;
+}
+
+static void tkey_put(uint64_t *set, uint64_t k)
+{
+    uint32_t i = (uint32_t)(k * 2654435761u) & (TKEY_SLOTS - 1u), n = 0;
+    while (set[i] && n++ < TKEY_SLOTS) {
+        if (set[i] == k) return;
+        i = (i + 1) & (TKEY_SLOTS - 1u);
+    }
+    if (n < TKEY_SLOTS) set[i] = k;
+}
+
+static int tkey_has(const uint64_t *set, uint64_t k)
+{
+    uint32_t i = (uint32_t)(k * 2654435761u) & (TKEY_SLOTS - 1u), n = 0;
+    while (set[i] && n++ < TKEY_SLOTS) {
+        if (set[i] == k) return 1;
+        i = (i + 1) & (TKEY_SLOTS - 1u);
+    }
+    return 0;
+}
+
+static void temporal_note_draw(const Nv2aRawBatch *b)
+{
+    uint64_t k;
+    uint32_t cur;
+    if (!s_temporal_on)
+        return;
+    cur = s_tkey_cur;
+    k = tkey_of(b);
+    if (s_tkey_n[cur] >= TKEY_SLOTS - 1u)
+        return;
+    if (tkey_has(s_tset[cur], k))
+        return;                              /* the same draw twice is not a new one */
+    tkey_put(s_tset[cur], k);
+    s_tkey_list[cur][s_tkey_n[cur]++] = k;
+    s_temporal_draws++;
+}
+
+/* Frame boundary: how many of this frame's draws existed in the previous one. */
+static void temporal_frame_match(void)
+{
+    uint32_t i, cur = s_tkey_cur, prev = cur ^ 1u, hits = 0;
+    if (!s_temporal_on)
+        return;
+    for (i = 0; i < s_tkey_n[cur]; i++)
+        if (tkey_has(s_tset[prev], s_tkey_list[cur][i]))
+            hits++;
+    s_temporal_matches += hits;
+    s_tkey_cur = prev;                        /* this frame becomes "previous" */
+    s_tkey_n[s_tkey_cur] = 0;
+    memset(s_tset[s_tkey_cur], 0, sizeof s_tset[s_tkey_cur]);
+}
+
 static void vk_draw_raw(const Nv2aRawBatch *b)
 {
+    temporal_note_draw(b);
     VkSurf *s, *sampled[4];
     VkDepthBuf *d;
     VkProg *p;
@@ -3600,6 +3679,7 @@ static void vk_flip(void)
         return;
     pend_flush();
     s_frame++;
+    temporal_frame_match();
     if(s_temporal_on&&s_frame%300==0){
         LOGE("temporal geometry: %u/%u eligible draws matched unique previous-frame geometry; native presentation\n",s_temporal_matches,s_temporal_draws);
         s_temporal_matches=s_temporal_draws=0;
