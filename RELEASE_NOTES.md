@@ -2,59 +2,65 @@
 
 ## v0.2.4 - 2026-11-18
 
-**Setup copies your disc and plays. A normal install never compiles.**
+### Frame rate
 
-### Install (no compiler)
+- **30 FPS remains the default**, the title's own cadence. Nothing changes for anyone who
+  does not touch the setting.
+- **60 FPS and 120 FPS are opt-in** (launcher -> Settings -> Graphics -> Frame rate, or
+  in-game Port Options, which cycles 30 -> 60 -> 120 on this build).
+- **120 needs three things:** a Windows build with `MC3_ALLOW_120` (all of them now), the
+  setting on 120, and a display actually running at 120 Hz or higher. A CPU that can carry
+  120 steps per second makes it native; below that the game keeps real time and presents
+  what it can.
+- **60 FPS keeps real time.** The simulation now compensates when a race cannot hold its
+  cadence instead of advancing at `fps/target` speed. Measured: 19.85 s of race clock in
+  20.10 s of wall time (98.8 %). Before the fix: 70.5 %.
+- **Frame generation** (launcher -> Graphics -> Frame generation, default **Off**):
+  - `Crossfade` - plumbing test, visible double exposure in motion.
+  - `Motion-compensated` - half-res block match between history and the current frame, the
+    history warped by half the motion, mix weight scaled by match confidence so a failed
+    match repeats a frame instead of ghosting.
+  - Costs about 0.5 ms per frame. The HUD is captured after every overlay and never
+    interpolated.
+  - **Requires a 120 Hz display.** On anything slower it refuses to run rather than halve
+    the game rate; `RECOMP_FG_FORCE=1` overrides for testing.
+  - Measured at the title on a 60 Hz machine with the override: rendering 28.5 fps,
+    presenting 57.0 fps - exactly two presented frames per rendered frame.
 
-- The launcher's install page is now **Install ReDUB**. Choose an original Xbox Remix ISO/XISO or an extracted folder; the disc is copied into `game-remix/` beside the launcher.
-- ISOs are read by a new in-house XDVDFS reader in the launcher. It verifies `default.xbe` against the supported region7/EUR/USA Remix editions before keeping the files. No third-party extractor is bundled.
-- Import stages in `game-remix.importing`, checks the disc, then swaps it in. A failed or cancelled import leaves the previous game files, saves and settings alone. Replacing game files asks first.
-- Import shows progress; **Cancel import** or Esc stops it without touching the existing game files. Closing the launcher mid-import offers to cancel and exit.
-- The release zip already contains the game executable and its runtime. Play starts it directly; MSYS2, CMake and internet downloads are not used for normal setup.
+### Hardware for 120 (full table in SPECS-120.md)
 
-### Advanced
+- **Minimum, 120 via frame generation:** 120 Hz display, CPU that holds 60 fps (Ryzen 5 3600
+  / i5-10400 class), GPU with ~10 ms of headroom (GTX 1660 Super / RX 5600 XT class).
+- **Recommended, native 120:** 120 Hz display, single-thread ~25-30 % faster than a Ryzen 5
+  5600 (7600 / 7800X3D / 13600K / 13700K class). GPU is not the limit.
+- **Ceiling is 120.** No 144 or 240 mode.
+- Why it is CPU-bound: 9.2 ms per frame in guest code and pushbuffer decode against an 8.3 ms
+  budget at 120, with only 1.9 ms of GL work. Lowering resolution does not help.
 
-- Build/Repair moved to **Settings -> Advanced -> Rebuild from source**, with the MSYS2, about 10 GB and 20+ minute warning. Repair build and prerequisite checks live there too.
-- `Build.ps1 -Mode Import` copies an extracted folder and stops before MSYS2. Doctor no longer treats MSYS2 as required for a shipped install.
-- Launcher command line: `--import <folder-or-iso>`, `--check`, `--play`, `--build` (advanced). Logs go to `work-remix/logs/launcher-cli.log`.
+### Renderer
 
-### Linux
+- **OpenGL is the renderer.** DLSS was removed from the launcher: the NGX bridge is
+  Vulkan-only, and the Vulkan renderer runs at 5-20 fps against OpenGL's 60-95 on the same
+  race, so the control could only promise something the shipping renderer cannot do.
+- The Vulkan experiment remains in the source for investigation; it is not part of the
+  release and is not selectable for play.
 
-- `ReDUB-0.2.4-x86_64.AppImage` and `ReDUB-0.2.4-x86_64.tar.gz` are built from the same source in a pinned Ubuntu container. The tarball is a plain AppDir for systems that cannot run an AppImage.
-- AppRun accepts `--game-dir`, `--portable DIR`, `--save-dir`, `--settings`, `--hd`, `--fullscreen`, `--resolution`, `--scale`, `--frame-rate`, `--diagnose`, `--version`, `--help` and `--` passthrough. XDG paths stay the default; portable mode is opt-in.
-- The package version comes from the repository version rather than a hardcoded AppImage number.
+### Known limitations
 
-### iOS (unsigned sideload; beta validation)
+- 120 and frame generation are **unverified on a 120 Hz display** - the reference machine is
+  60 Hz. Correctness, cost, pacing and HUD handling are verified; smoothness is not.
+- Frame generation's flow search covers about +/-4 px per frame; faster camera motion falls
+  back to a repeated frame rather than warping.
+- The in-game Port Options row for frame generation is launcher-only.
+- Android and iOS packages carry their own mobile work (phone music in the radio, mix gain,
+  rumble row) and are otherwise unchanged by the PC work.
 
-- `ReDUB-0.2.4-iOS-mobile-unsigned.ipa` is the 0.2.4 build for `com.ladastra.mcdub3remix` (iOS 16+, arm64, landscape). Unsigned: sign it with your own certificate. It replaces an earlier 0.2.4 install; Documents and saves are kept.
-- One IPA carries everything: the garage render-target feedback fix (a stage that samples the surface being drawn into now uses a `glCopyTexSubImage2D` snapshot; `RECOMP_GL_FEEDBACK=0` restores the old behavior) and the 60 FPS mode. There is no separate garagefix package in 0.2.4.
-- A feedback stage that used `glReadPixels` plus CPU strip replication on sampled-surface changes now copies on the GPU to a scratch texture and blits the last column/row/corner back, removing a per-frame synchronisation cost.
-- The 60 FPS race step now compensates in real time when a frame is late; the earlier build ran the simulation at two-thirds speed at about 40 FPS, which read as the whole game slowing down.
-- Tilt: corrected landscape sensor axes, a steadier default range, stronger smoothing and a small dead zone by default (the phone is held in both hands and cannot be re-centred by thumb). Pedal layouts and touch haptics as on Android.
-- The same custom boot/menu logo set is bundled in the IPA, plus the PC renderer fixes: the minimap scissor seam (fractional horizontal scale left a one-pixel line) and the HUD upscale shader's alpha (transparent HUD edges no longer ring into faint square or line fringes).
-- iOS remains outside the Git tree for this release; `ReDUB-iOS-0.2.4-source.zip` is attached so the IPA can be rebuilt. The side-by-side beta IPA is not included.
-- Verification: 16 XDVDFS reader tests and `verify_packages.py` pass. The garage fix was confirmed on device in the earlier 0.2.4 build; this 60 FPS IPA has not been on a device yet.
-### Android (new; sideload APK, project signing key)
+### Not in this release
 
-- `ReDUB-0.2.4-Android-universal.apk` carries arm64-v8a, armeabi-v7a and x86_64 in one APK. Android 13+ and OpenGL ES 3.1+; sideload only, signed with the project's own key (certificate SHA-256 `ecd472d0d6cb4d676e5f4e5d583649d20e69eacbe8d46c8f916a40c13cec0272`).
-- The launcher follows the iOS launcher: rail of pages (Game / Install / Settings / Support / About), hero art and logo, the same palette, and the same 35 settings rows in the same groups with expandable sections and graphics presets. Values are written to the app's `mcdub3remix_env.txt`, the file in-game Port Options writes, so launcher and game agree.
-- **Install from an ISO on the device.** The Install page takes an original Xbox Remix ISO through Android's file picker and extracts it with an in-house XDVDFS reader. Extraction stages in `game-iso.importing`, verifies `default.xbe`, then swaps into `game-iso`; the previous install is backed up and restored if the swap fails, so a failed import cannot damage a working install or its saves. An extracted `default.xbe` folder is still accepted.
-- The custom ReDUB boot/menu logo set is bundled and extracted on first run; a user copy beside the game folder still wins. The logos now actually appear on OpenGL ES: replacement textures used to be uploaded as S3TC, which ES does not have, so the renderer disabled the whole pack; they are decoded to RGBA and uploaded uncompressed when the compressed upload is refused.
-- Tilt steering with recentring at race start (stick / tilt / stick + tilt, response, dead zone, tilt range, invert), touch haptics, controller rumble, and an on-screen pad that hides itself when a controller connects.
-- 60 FPS mode as on PC: one flip retirement per vblank in gameplay, menus and pause at 30, the race step halved to 1/60 only while driving, with real-time catch-up so a late frame cannot slow the game down.
-- The Android app keeps its own version key (`ANDROID_VERSION=0.1.0`); the runtime, settings and saves are the same project as the PC packages.
-
-### Known issues
-
-- iOS: a few-hundred-millisecond hitch can still occur at the race -> menu transition (the game loads `flash/transition.xbck` and runs a worker thread; renderer instrumentation shows it is not GPU work). Builds with `MC3_PERF>0` now log which side owns the time.
-- iOS: occasional 51-59 FPS dips rather than a perfectly locked 60.
-- Android: logo replacement, haptics and tilt feel still need on-device confirmation. BlueStacks 5 (Android 13) runs the launcher and completes an ISO import, but the game itself does not boot there (it spins after loading its asset files); the Android SDK emulator with -gpu host does render it. Neither is a phone.
-- Android: no store distribution; sideload only, and Play Protect will ask about it.
-
-### Packaging
-
-- Windows zip: launcher, setup source and the prebuilt game in `work-remix/build-windows-x86_64/dist/`.
-- Existing 0.2.3 Windows/Linux saves, settings and game files remain compatible.
+- Vulkan performance work (renderer-scale).
+- DLSS at all (removed while its renderer is not viable).
+- A working per-draw motion attachment (no stable draw identity across frames; measured
+  0 matches with two different keys).
 
 ## v0.2.3 - 2026-11-17
 
