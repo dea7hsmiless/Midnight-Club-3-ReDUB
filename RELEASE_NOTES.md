@@ -26,10 +26,14 @@
 
 ### iOS (unsigned sideload; beta validation)
 
-- `mcdub3remix-0.2.4-garagefix-unsigned.ipa` is the official-bundle-id 0.2.4 build (`com.ladastra.mcdub3remix`) with the garage render-target feedback fix: a stage that samples the surface being drawn into now uses a `glCopyTexSubImage2D` snapshot. `RECOMP_GL_FEEDBACK=0` restores the old behavior. Unsigned sideload only.
-- User-confirmed on device: the garage graphics glitch is gone. 16 XDVDFS reader tests and `verify_packages.py` pass. Because this uses the official bundle id, it installs alongside a previous `.beta` build rather than replacing it; Documents and saves are separate.
+- `ReDUB-0.2.4-iOS-mobile-unsigned.ipa` is the 0.2.4 build for `com.ladastra.mcdub3remix` (iOS 16+, arm64, landscape). Unsigned: sign it with your own certificate. It replaces an earlier 0.2.4 install; Documents and saves are kept.
+- One IPA carries everything: the garage render-target feedback fix (a stage that samples the surface being drawn into now uses a `glCopyTexSubImage2D` snapshot; `RECOMP_GL_FEEDBACK=0` restores the old behavior) and the 60 FPS mode. There is no separate garagefix package in 0.2.4.
+- A feedback stage that used `glReadPixels` plus CPU strip replication on sampled-surface changes now copies on the GPU to a scratch texture and blits the last column/row/corner back, removing a per-frame synchronisation cost.
+- The 60 FPS race step now compensates in real time when a frame is late; the earlier build ran the simulation at two-thirds speed at about 40 FPS, which read as the whole game slowing down.
+- Tilt: corrected landscape sensor axes, a steadier default range, stronger smoothing and a small dead zone by default (the phone is held in both hands and cannot be re-centred by thumb). Pedal layouts and touch haptics as on Android.
+- The same custom boot/menu logo set is bundled in the IPA, plus the PC renderer fixes: the minimap scissor seam (fractional horizontal scale left a one-pixel line) and the HUD upscale shader's alpha (transparent HUD edges no longer ring into faint square or line fringes).
 - iOS remains outside the Git tree for this release; `ReDUB-iOS-0.2.4-source.zip` is attached so the IPA can be rebuilt. The side-by-side beta IPA is not included.
-
+- Verification: 16 XDVDFS reader tests and `verify_packages.py` pass. The garage fix was confirmed on device in the earlier 0.2.4 build; this 60 FPS IPA has not been on a device yet.
 ### Android (new; sideload APK, project signing key)
 
 - `ReDUB-0.2.4-Android-universal.apk` carries arm64-v8a, armeabi-v7a and x86_64 in one APK. Android 13+ and OpenGL ES 3.1+; sideload only, signed with the project's own key (certificate SHA-256 `ecd472d0d6cb4d676e5f4e5d583649d20e69eacbe8d46c8f916a40c13cec0272`).
@@ -39,15 +43,6 @@
 - Tilt steering with recentring at race start (stick / tilt / stick + tilt, response, dead zone, tilt range, invert), touch haptics, controller rumble, and an on-screen pad that hides itself when a controller connects.
 - 60 FPS mode as on PC: one flip retirement per vblank in gameplay, menus and pause at 30, the race step halved to 1/60 only while driving, with real-time catch-up so a late frame cannot slow the game down.
 - The Android app keeps its own version key (`ANDROID_VERSION=0.1.0`); the runtime, settings and saves are the same project as the PC packages.
-
-### iOS — 60 FPS build (unsigned sideload; replaces the 0.2.4 install)
-
-- `ReDUB-0.2.4-iOS-mobile-unsigned.ipa` holds 60 FPS on device. A feedback stage that used `glReadPixels` plus CPU strip replication on sampled-surface changes now copies on the GPU to a scratch texture and blits the last column/row/corner back, removing a per-frame synchronisation cost.
-- The 60 FPS race step now compensates in real time when a frame is late; the earlier build ran the simulation at two-thirds speed at about 40 FPS, which read as the whole game slowing down.
-- Tilt: corrected landscape sensor axes, a steadier default range, stronger smoothing and a small dead zone by default (the phone is held in both hands and cannot be re-centred by thumb). Pedal layouts and touch haptics as on Android.
-- The same custom boot/menu logo set is bundled in the IPA.
-- Renderer fixes from PC: the minimap scissor seam (fractional horizontal scale left a one-pixel line) and the HUD upscale shader's alpha (transparent HUD edges no longer ring into faint square or line fringes).
-- Same bundle id as the garagefix IPA, so it **replaces** that install; Documents and saves are kept. Unsigned — sign with your own certificate. The garagefix IPA remains the conservative choice for a garage-only install.
 
 ### Known issues
 
