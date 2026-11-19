@@ -68,6 +68,7 @@ static void load_settings(void)
         value=eq+1;
         end=value+strcspn(value,"\r\n");*end=0;
         while(*value==' '||*value=='\t')value++;
+        {size_t n=strlen(value);if(n>=2&&(value[0]=='"'||value[0]=='\'')&&value[n-1]==value[0]){value[n-1]=0;value++;}}
         if(*p&&*value)setenv(p,value,1);
     }
     fclose(f);

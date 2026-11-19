@@ -106,6 +106,15 @@ static void load_settings(const char *file)
         *name_end = 0;
         value = eq + 1;
         while (*value == ' ' || *value == '\t') value++;
+        /* INI writers sometimes quote the value; a matching pair is dropped so
+         * KEY = "60" and KEY = 60 set the same thing. */
+        {
+            size_t n = strlen(value);
+            if (n >= 2 && (value[0] == '"' || value[0] == '\'') && value[n - 1] == value[0]) {
+                value[n - 1] = 0;
+                value++;
+            }
+        }
         if (*s && !was_set_outside(s))
             _putenv_s(s, value);
     }
