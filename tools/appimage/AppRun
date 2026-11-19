@@ -58,7 +58,7 @@ Where data goes (portable by default, beside the AppImage):
 Video and frame rate (same values as the launcher and Port Options):
   --fullscreen 0|1|2    0 windowed, 1 exclusive fullscreen, 2 borderless (restart)
   --resolution auto|WxH window size or display mode (restart)
-  --scale N             render scale: 1, 1.5, 2, 3, 5 (restart)
+  --scale N             internal resolution: 1, 1.5, 2, 3, 5 x native (restart)
   --frame-rate 30|60|120 30 is the default; 60 and 120 need a restart (120 needs
                         a 120 Hz display)
   --frame-gen off|crossfade|motion
@@ -131,7 +131,7 @@ while [ "$#" -gt 0 ]; do
             shift 2 ;;
         --scale)
             need_value "$@"
-            case "$2" in 1|1.5|2|3|5) RECOMP_GL_SCALE=$2 ;; *) fail '--scale takes 1, 1.5, 2, 3 or 5.' ;; esac
+            case "$2" in 1|1.5|2|3|5) RECOMP_GL_SCALE=$2 ;; *) fail '--scale takes 1, 1.5, 2, 3 or 5 (internal resolution, x native).' ;; esac
             shift 2 ;;
         --frame-rate)
             need_value "$@"
