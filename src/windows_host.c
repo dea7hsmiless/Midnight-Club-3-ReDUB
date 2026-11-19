@@ -93,15 +93,21 @@ static void load_settings(const char *file)
     if (!(f = fopen(path, "r")))
         return;
     while (fgets(line, sizeof line, f)) {
-        char *s = line, *eq, *e;
+        char *s = line, *eq, *e, *name_end, *value;
         while (*s == ' ' || *s == '\t') s++;
         if (*s == '#' || !(eq = strchr(s, '=')))
             continue;
-        for (e = s + strlen(s); e > eq && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' '); e--) { }
+        for (e = s + strlen(s); e > eq && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t'); e--) { }
         *e = 0;
-        *eq = 0;
+        /* "KEY = value" is what INI writers produce; trim both sides so it
+         * sets the same variable as "KEY=value". */
+        name_end = eq;
+        while (name_end > s && (name_end[-1] == ' ' || name_end[-1] == '\t')) name_end--;
+        *name_end = 0;
+        value = eq + 1;
+        while (*value == ' ' || *value == '\t') value++;
         if (*s && !was_set_outside(s))
-            _putenv_s(s, eq + 1);
+            _putenv_s(s, value);
     }
     fclose(f);
 }

@@ -53,7 +53,8 @@ static int save_settings(const char **keys,const char **values,int count)
     in=fopen(path,"rb");
     if(in){while(fgets(line,sizeof line,in)){
         char *p=line;int skip=0;while(*p==' '||*p=='\t')p++;
-        for(int i=0;i<count;i++)if(!strncmp(p,keys[i],strlen(keys[i]))&&p[strlen(keys[i])]=='=')skip=1;
+        /* Match "KEY=" and "KEY = " so a rewritten key never duplicates. */
+        for(int i=0;i<count;i++)if(!strncmp(p,keys[i],strlen(keys[i]))){const char *q=p+strlen(keys[i]);while(*q==' '||*q=='\t')q++;if(*q=='='){skip=1;break;}}
         if(!skip){size_t len=strlen(line);fputs(line,out);if(len)last=(unsigned char)line[len-1];}
     }if(ferror(in)){fclose(in);fclose(out);goto fail;}fclose(in);}
     /* Add a separator only for a preserved final line without a newline.

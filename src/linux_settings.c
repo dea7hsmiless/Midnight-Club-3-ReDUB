@@ -59,11 +59,16 @@ static void load_settings(void)
     char path[PATH_MAX],line[2048];FILE *f;
     settings_path(path);f=fopen(path,"rb");if(!f)return;
     while(fgets(line,sizeof line,f)){
-        char *p=line,*eq,*end;
+        char *p=line,*eq,*end,*name_end,*value;
         while(*p==' '||*p=='\t')p++;
         if(!*p||*p=='#'||*p==';'||!(eq=strchr(p,'=')))continue;
-        *eq++=0;end=eq+strcspn(eq,"\r\n");*end=0;
-        if(*p&&*eq)setenv(p,eq,1);
+        name_end=eq;
+        while(name_end>p&&(name_end[-1]==' '||name_end[-1]=='\t'))name_end--;
+        *name_end=0;
+        value=eq+1;
+        end=value+strcspn(value,"\r\n");*end=0;
+        while(*value==' '||*value=='\t')value++;
+        if(*p&&*value)setenv(p,value,1);
     }
     fclose(f);
 }
@@ -76,7 +81,7 @@ static int save_settings(const char **keys,const char **values,int count)
     in=fopen(path,"rb");
     if(in){while(fgets(line,sizeof line,in)){
         char *p=line;int skip=0;while(*p==' '||*p=='\t')p++;
-        for(int i=0;i<count;i++)if(!strncmp(p,keys[i],strlen(keys[i]))&&p[strlen(keys[i])]=='=')skip=1;
+        for(int i=0;i<count;i++)if(!strncmp(p,keys[i],strlen(keys[i]))){const char *q=p+strlen(keys[i]);while(*q==' '||*q=='\t')q++;if(*q=='='){skip=1;break;}}
         if(!skip){size_t n=strlen(line);fputs(line,out);if(n)last=(unsigned char)line[n-1];}
     }if(ferror(in)){fclose(in);fclose(out);unlink(tmp);return 0;}fclose(in);}
     if(last!='\n')fputs("\n",out);
