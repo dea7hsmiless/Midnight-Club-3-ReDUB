@@ -125,6 +125,11 @@ int hd_pack_init(void)
     if (s_on)
         fprintf(stderr, "  [GL] HD pack %s: %zu replacement textures%s\n", s_dir, s_nhave,
                 s_dump ? ", dumping every texture to dump/ (RECOMP_GL_TEX_DUMP)" : "");
+    else
+        /* Say so plainly: a pack that is present but unused is otherwise
+         * indistinguishable from one the user never copied. */
+        fprintf(stderr, "  [GL] HD pack %s: not used (%zu replacement textures)\n",
+                s_dir, s_nhave);
     return s_on;
 }
 

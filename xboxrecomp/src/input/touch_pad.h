@@ -18,6 +18,10 @@ int  xbox_touchpad_shown(void);
 /* The overlay for a sw x sh screen, RGBA (straight alpha), top row first:
  * -1 hidden, 0 unchanged since the last call, 1 changed (upload again). */
 int  xbox_touchpad_image(int sw, int sh, const uint32_t **rgba, int *w, int *h);
+/* In-game Port Options actions. */
+void xbox_touchpad_recenter_tilt(void);
+void xbox_touchpad_test_haptics(void);
+void xbox_touchpad_reload(void);
 
 #ifdef __cplusplus
 }

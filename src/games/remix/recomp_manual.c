@@ -1110,7 +1110,7 @@ void sub_0041B170(void)
     }
     if (on) {
         int gameplay = 0;
-#if defined(_WIN32) || defined(__linux__)
+#if (defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)
         extern int windows_media_gameplay_get(void);
         gameplay = windows_media_gameplay_get();
 #else
@@ -2396,7 +2396,15 @@ static void realtime_step(float real)
             fprintf(stderr, "[TIME] races advance in real time below 30 fps, steps up to %.4f s"
                     " (MC3_REALTIME)\n", cap);
     }
-    if (!on || MEM32(0x00534770u) == 0 || f < 0.030f || f > 0.037f || real <= f * 1.1f)
+    if (!on || MEM32(0x00534770u) == 0 || real <= f * 1.1f)
+        return;
+    /* The 1/30 race step, as before, and the 1/60 step of the 60 fps mode:
+     * without the second range a race that could not hold 60 advanced by
+     * one 1/60 step per drawn frame and ran at 2/3 speed at 40 fps, which
+     * read as the whole game slowing down (2026-11-18). */
+    if (!(f >= 0.030f && f <= 0.037f)
+        && !(mc3_frame_rate_mode() >= 60 && atomic_load(&port_gameplay_active)
+             && f > 0.010f && f < 0.023f))
         return;
     d = real < cap ? real : cap;
     MEMF(0x004B2D70u) = d;
@@ -2762,7 +2770,7 @@ void sub_0020B6F0(void)
      * not call into the port layer at all. */
     int gameplay = 0;
     if (frame_rate_mode >= 60) {
-#if defined(_WIN32) || defined(__linux__)
+#if (defined(_WIN32) || defined(__linux__)) && !defined(__ANDROID__)
         extern int windows_media_gameplay_get(void);
         gameplay = windows_media_gameplay_get();
 #else
@@ -2930,7 +2938,7 @@ extern void sub_00348BE0(void),sub_00348950(void),sub_001395E0(void);
 #if defined(_WIN32)
 #include <windows.h>
 #endif
-static uint32_t port_self,port_list,port_rows[17];
+static uint32_t port_self,port_list,port_rows[32];
 static uint32_t port_list_vtable;
 static int port_open,port_back_down,port_back_release;
 static int port_accept_down;
@@ -3200,7 +3208,7 @@ static void port_text(uint32_t row,const char *text)
 static void port_labels(void)
 {
     if(!port_context_valid())return;
-    for(int i=0;i<17;i++) {char text[96];windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);}
+    for(int i=0;i<23;i++) {char text[96]={0};windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);}
 }
 static uint32_t port_add(uint32_t event,const char *text)
 {
