@@ -4,3 +4,7 @@
 
 # AppImage entry point is a POSIX shell script without a suffix.
 tools/appimage/AppRun text eol=lf
+
+# The AppImage/package scripts and desktop metadata run inside Linux containers:
+# CRLF breaks desktop-file-validate and shell shebangs. Keep this directory LF.
+tools/appimage/** text eol=lf
