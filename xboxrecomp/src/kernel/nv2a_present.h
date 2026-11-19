@@ -1,4 +1,4 @@
-/* nv2a_present.h -- where the title's picture goes on the host screen.
+﻿/* nv2a_present.h -- where the title's picture goes on the host screen.
  *
  * Shared by nv2a_gl and nv2a_vk so both present alike.
  *
@@ -11,7 +11,9 @@
  * 720 drawn), so MC3 came out at 1.6:1 with 48 unused columns on the right.
  * lw is therefore the drawn width (GlSurf/VkSurf vw), not the pitch.
  *
- * RECOMP_GL_ASPECT=fill stretches to the whole window instead (any shape).
+ * RECOMP_GL_ASPECT=fill stretches to the whole window instead (any shape);
+ * RECOMP_GL_ASPECT=4:3 keeps the title's own 4:3 shape instead of widening
+ * it to 16:9. Unset keeps the widescreen behaviour above.
  */
 #ifndef NV2A_PRESENT_H
 #define NV2A_PRESENT_H
@@ -21,22 +23,30 @@
 
 int xbox_video_widescreen(void);
 
+/* 0 = widescreen (16:9) as above, 1 = stretch to the whole window,
+ * 2 = the title's 4:3 shape. Read once from RECOMP_GL_ASPECT. */
+static inline int nv2a_aspect_mode(void)
+{
+    static int mode = -1;
+    if (mode < 0) {
+        const char *e = getenv("RECOMP_GL_ASPECT");
+        mode = e && !strcmp(e, "fill") ? 1 : e && !strcmp(e, "4:3") ? 2 : 0;
+    }
+    return mode;
+}
+
 /* The picture's rectangle on a ww x wh screen, for a logical (title-pixel,
  * anti-aliasing removed) picture of lw x lh: x, y, width, height. */
 static inline void nv2a_present_rect(float lw, float lh, int ww, int wh, int r[4])
 {
-    static int fill = -1;
+    int mode = nv2a_aspect_mode();
     float scale;
 
-    if (fill < 0) {
-        const char *e = getenv("RECOMP_GL_ASPECT");
-        fill = e && !strcmp(e, "fill");
-    }
-    if (fill || lw <= 0.0f || lh <= 0.0f) {
+    if (mode == 1 || lw <= 0.0f || lh <= 0.0f) {
         r[0] = 0; r[1] = 0; r[2] = ww; r[3] = wh;
         return;
     }
-    if (xbox_video_widescreen() && lw * 9.0f < lh * 16.0f - 1.0f)
+    if (mode == 0 && xbox_video_widescreen() && lw * 9.0f < lh * 16.0f - 1.0f)
         lw = lh * 16.0f / 9.0f;
     scale = (float)ww / lw < (float)wh / lh ? (float)ww / lw : (float)wh / lh;
     r[2] = (int)(lw * scale);

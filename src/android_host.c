@@ -1,4 +1,4 @@
-/*
+﻿/*
  * android_host.c -- Android boot glue (ADR 0010), the counterpart of
  * switch_nx.c on the Switch.
  *
@@ -41,6 +41,10 @@
 #ifndef MC3_PACKAGE_EDITION
 #  define MC3_PACKAGE_EDITION "usa"
 #endif
+
+extern void xbox_touchpad_reload(void);
+extern void xbox_touchpad_recenter_tilt(void);
+extern void xbox_touchpad_test_haptics(void);
 
 static char s_dir[512];
 static int  s_pipe[2] = { -1, -1 };
@@ -493,7 +497,7 @@ void windows_port_setting_change(int id)
         android_save_int("RECOMP_GL_ANISO", 16);
         android_env_set("RECOMP_GL_SHARPEN", "0.5");
         android_save_int("RECOMP_GL_VSYNC", 0);
-        android_save_int("MC3_GRAPHICS_PRESET", 2);
+        android_env_set("MC3_GRAPHICS_PRESET", "default");
         android_save_int("MC3_FPS_OVERLAY", 0);
         android_env_set("MC3_GAMMA", "1.0");
         android_env_set("MC3_BRIGHTNESS", "1.00");
@@ -528,10 +532,50 @@ void windows_port_setting_change(int id)
         }
         fprintf(stderr, "[PORT] frame rate %d saved (restart to apply)\n", s_frame_rate);
         break;
+    case 17:
+        xbox_touchpad_recenter_tilt();
+        break;
+    case 18:
+        xbox_touchpad_test_haptics();
+        break;
+    case 19: {
+        const char *cur = getenv("RECOMP_TOUCH_STEER");
+        const char *next = (!cur || !*cur || !strcmp(cur, "stick")) ? "tilt"
+                         : !strcmp(cur, "tilt") ? "both" : "stick";
+        if (android_env_set("RECOMP_TOUCH_STEER", next))
+            xbox_touchpad_reload();
+        break;
+    }
+    case 20: {
+        static const char *values[] = { "1", "1.35", "1.7", "2" };
+        const char *cur = getenv("RECOMP_TOUCH_STEER_SENS");
+        int i, n = 0;
+        for (i = 0; i < 4; i++)
+            if (cur && !strcmp(cur, values[i]))
+                n = i;
+        n = (n + 1) % 4;
+        if (android_env_set("RECOMP_TOUCH_STEER_SENS", values[n]))
+            xbox_touchpad_reload();
+        break;
+    }
+    case 21: {
+        int on = !(getenv("RECOMP_TOUCH_TILT_INVERT") &&
+                   getenv("RECOMP_TOUCH_TILT_INVERT")[0] != '0');
+        android_save_int("RECOMP_TOUCH_TILT_INVERT", on);
+        xbox_touchpad_reload();
+        break;
+    }
+    case 22: {
+        int on = !(getenv("RECOMP_TOUCH_HAPTICS") &&
+                   getenv("RECOMP_TOUCH_HAPTICS")[0] != '0');
+        android_save_int("RECOMP_TOUCH_HAPTICS", on);
+        xbox_touchpad_reload();
+        break;
+    }
     }
     if (id >= 1 && id <= 6) {
         s_preset = 0;
-        android_save_int("MC3_GRAPHICS_PRESET", 0);
+        android_env_set("MC3_GRAPHICS_PRESET", "custom");
     }
 }
 
@@ -573,6 +617,31 @@ void windows_port_setting_label(int id, char *out, size_t size)
         snprintf(out, size, "CONTROLLER VIBRATION: ON");
     if (id == 16)
         snprintf(out, size, "FRAME RATE: %d FPS (RESTART)", s_frame_rate);
+    if (id == 17)
+        snprintf(out, size, "RECENTER TILT");
+    if (id == 18)
+        snprintf(out, size, "TEST HAPTICS");
+    if (id == 19) {
+        const char *m = getenv("RECOMP_TOUCH_STEER");
+        snprintf(out, size, "STEERING: %s",
+                 !m || !*m || !strcmp(m, "stick") ? "STICK"
+                 : !strcmp(m, "tilt") ? "TILT" : "STICK + TILT");
+    }
+    if (id == 20) {
+        const char *s = getenv("RECOMP_TOUCH_STEER_SENS");
+        snprintf(out, size, "STEERING RESPONSE: %s",
+                 !s || !strcmp(s, "1") ? "NORMAL"
+                 : !strcmp(s, "1.35") ? "QUICK"
+                 : !strcmp(s, "1.7") ? "SHARP" : "VERY SHARP");
+    }
+    if (id == 21)
+        snprintf(out, size, "INVERT TILT: %s",
+                 getenv("RECOMP_TOUCH_TILT_INVERT") &&
+                 getenv("RECOMP_TOUCH_TILT_INVERT")[0] != '0' ? "ON" : "OFF");
+    if (id == 22)
+        snprintf(out, size, "TOUCH HAPTICS: %s",
+                 getenv("RECOMP_TOUCH_HAPTICS") &&
+                 getenv("RECOMP_TOUCH_HAPTICS")[0] != '0' ? "ON" : "OFF");
 }
 
 void windows_port_settings_attach(SDL_Window *win)
@@ -616,7 +685,7 @@ void windows_port_settings_attach(SDL_Window *win)
         if (s_brightness > 8) s_brightness = 8;
     }
     if ((v = getenv("MC3_GRAPHICS_PRESET")) != NULL) {
-        s_preset = atoi(v);
+        s_preset = !strcmp(v,"default")?2:!strcmp(v,"performance")?1:!strcmp(v,"quality")?3:atoi(v);
         if (s_preset < 0 || s_preset > 3)
             s_preset = 0;
     }

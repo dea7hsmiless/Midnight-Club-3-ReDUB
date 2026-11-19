@@ -68,11 +68,12 @@ def makeIcon = tasks.register('mc3Icon') {
         def xml = new File(iconRes, 'mipmap-anydpi-v26/ic_launcher.xml')
         iconRes.deleteDir()
         fg.parentFile.mkdirs()
-        def proc = ['bash', '-c',
-                    '. tools/env.sh && mc3_app_env && art=$(mc3_app_artwork "$1") && [ -n "$art" ] '
-                    + '&& py=$(mc3_pillow_python) && [ -n "$py" ] '
-                    + '&& "$py" tools/app_icon.py android "$art" "$2"', 'mc3Icon',
-                    edition, fg.path].execute(["GAME=${game}"] + System.getenv().collect { k, v -> "$k=$v" }, repo)
+        // Direct Python invocation works on Windows too (no Bash/MSYS
+        // environment or personal artwork path needed for the Remix icon).
+        def art = game == 'remix' ? new File(repo, 'launcher/art/android-icon.png')
+                                  : new File(repo, envVar('APP_ICON', 'launcher/art/hero.jpg'))
+        def proc = ['python', new File(repo,'tools/app_icon.py').path,
+                    'android', art.path, fg.path].execute(null, repo)
         proc.waitForProcessOutput(System.out, System.err)
         if (proc.exitValue() == 0 && fg.exists()) {
             xml.parentFile.mkdirs()
