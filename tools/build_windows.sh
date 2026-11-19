@@ -70,9 +70,9 @@ elif [ ! -f "$ICON" ] || [ "$ART" -nt "$ICON" ]; then
     [ -n "$ICON_OK" ] || { echo "  (no icon: no Python with Pillow)"; ICON=""; }
 fi
 ARGS+=(-DMC3_WIN_ICON="$ICON" -DMC3_VERSION="${APP_VERSION:-dev}")
-# Optional: the experimental 120 Hz mode (CMakeLists.txt MC3_ALLOW_120). Windows
+# On by default for Windows releases; MC3_ALLOW_120=0 turns it off. Windows
 # only by decision -- the Linux and macOS builds must not set this.
-if [ "${MC3_ALLOW_120:-0}" = "1" ]; then
+if [ "${MC3_ALLOW_120:-1}" = "1" ]; then
     ARGS+=(-DMC3_ALLOW_120=ON)
 fi
 # Extra CFLAGS for measurement builds (e.g. MC3_C_FLAGS=-DRECOMP_FRAME_RATE_TEST).

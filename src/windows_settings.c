@@ -40,6 +40,18 @@ int windows_port_pc_music_get(void){return atomic_load(&pc_music);}
 int windows_port_rumble_get(void){return atomic_load(&rumble_strength);}
 float windows_port_sharpen_get(void){return atomic_load(&sharp)*0.25f;}
 int windows_port_fxaa_get(void){return atomic_load(&fxaa);}
+/* Refresh rate the desktop is running at: the default cadence picks itself
+ * from it, so a 120 Hz display gets 120 without anyone editing the env file. */
+static int display_hz(void)
+{
+    DEVMODEA dm;
+    memset(&dm, 0, sizeof dm);
+    dm.dmSize = (WORD)sizeof dm;
+    if (!EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm))
+        return 0;
+    return (int)dm.dmDisplayFrequency;
+}
+
 int windows_port_overlay_get(void){return atomic_load(&overlay);}
 int windows_port_vsync_get(void) { return atomic_load(&swap_interval); }
 /* Preserve comments and unrelated settings; replace all active copies of a key.
@@ -116,7 +128,14 @@ static void change_on_main(void *p)
     else if(id==12){int n=(hud_index+1)%4;if(save_setting("RECOMP_GL_UI_SCALE",hud_values[n]))hud_index=n;return;}
     else if(id==13){int n=(gamma_index+1)%7;char v[16];snprintf(v,sizeof v,"%.1f",0.8+n*0.1);if(save_setting("MC3_GAMMA",v))gamma_index=n;return;}
     else if(id==14){int n=(brightness_index+1)%9;char v[16];snprintf(v,sizeof v,"%.2f",0.8+n*0.05);if(save_setting("MC3_BRIGHTNESS",v))brightness_index=n;return;}
-    else if(id==16){int n=atomic_load(&frame_rate)>=60?30:60;char v[8];snprintf(v,sizeof v,"%d",n);if(save_setting("MC3_FRAME_RATE",v)){atomic_store(&frame_rate,n);fprintf(stderr,"[PORT] frame rate %d saved (restart to apply)\n",n);}return;}
+    else if(id==16){
+        int cur=atomic_load(&frame_rate), n;
+#ifdef MC3_ALLOW_120
+        n = cur >= 120 ? 30 : cur >= 60 ? 120 : 60;
+#else
+        n = cur >= 60 ? 30 : 60;
+#endif
+        char v[8];snprintf(v,sizeof v,"%d",n);if(save_setting("MC3_FRAME_RATE",v)){atomic_store(&frame_rate,n);fprintf(stderr,"[PORT] frame rate %d saved (restart to apply)\n",n);}return;}
     else if(id==15){int at=4;for(int i=0;i<9;i++)if(rumble_values[i]==rumble_strength){at=i;break;}int n=rumble_values[(at+1)%9];char v[8];snprintf(v,sizeof v,"%d",n);if(save_setting("MC3_RUMBLE_STRENGTH",v)){atomic_store(&rumble_strength,n);xbox_InputSetRumbleStrength(n);}return;}
     if(id>=1&&id<=6){preset=0;save_setting("MC3_GRAPHICS_PRESET","0");}
 }
@@ -178,7 +197,20 @@ void windows_port_settings_attach(SDL_Window *win)
     v=getenv("MC3_FPS_OVERLAY");overlay=v&&atoi(v)!=0;
     v=getenv("MC3_GRAPHICS_PRESET");preset=v?atoi(v):0;if(preset<0||preset>3)preset=0;
     v=getenv("MC3_FRAME_RATE");if(!v||!v[0])v=getenv("MC3_FRAME_RATE_TEST_FPS");
-    atomic_store(&frame_rate,v&&atoi(v)>=60?60:30);
+    {
+        /* Native 120 is the default where the display can show it, 60 otherwise.
+         * MC3_ALLOW_120 builds accept all three cadences; other builds clamp. */
+        int hz = display_hz();
+        int n = (v && atoi(v) > 0) ? atoi(v) : (hz >= 100 ? 120 : 60);
+#ifdef MC3_ALLOW_120
+        if (n != 30 && n != 60 && n != 120) n = 60;
+#else
+        n = n >= 60 ? 60 : 30;
+#endif
+        atomic_store(&frame_rate, n);
+        fprintf(stderr, "[PORT] frame rate %d (display %d Hz%s)\n", n, hz,
+                v ? ", from settings" : ", chosen from refresh");
+    }
     v=getenv("MC3_PC_MUSIC");pc_music=v&&atoi(v)!=0;windows_media_set(pc_music);
     v=getenv("MC3_PC_MUSIC_RESTORE_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)music_restore=n;}
     v=getenv("MC3_PC_MUSIC_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)windows_media_volume_set(n);}
