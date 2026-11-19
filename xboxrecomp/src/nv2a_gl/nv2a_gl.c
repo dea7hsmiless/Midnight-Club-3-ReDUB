@@ -6789,9 +6789,20 @@ static int fg_init(void)
         s_fg_on = e && e[0] ? atoi(e) : 0;
         if (s_fg_on < 0 || s_fg_on > 2)
             s_fg_on = 0;
-        if (s_fg_on)
-            fprintf(stderr, "  [GL] frame generation: %s (RECOMP_FG)\n",
-                    s_fg_on >= 2 ? "motion-compensated warp" : "crossfade");
+        if (s_fg_on) {
+            /* Two swaps per game frame only double the rate on a display that can
+             * show it; on a 60 Hz panel it would halve the game rate instead. */
+            SDL_DisplayMode dm;
+            int hz = SDL_GetCurrentDisplayMode(0, &dm) == 0 ? dm.refresh_rate : 0;
+            const char *force = getenv("RECOMP_FG_FORCE");
+            if (hz > 0 && hz < 100 && !(force && force[0] == '1')) {
+                fprintf(stderr, "  [GL] frame generation needs a 120 Hz display"
+                                " (this one reports %d Hz); left off\n", hz);
+                s_fg_on = 0;
+            } else
+                fprintf(stderr, "  [GL] frame generation: %s (display %d Hz, RECOMP_FG)\n",
+                        s_fg_on >= 2 ? "motion-compensated warp" : "crossfade", hz);
+        }
     }
     if (!s_fg_on)
         return 0;

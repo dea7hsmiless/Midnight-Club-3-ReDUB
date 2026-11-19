@@ -40,18 +40,6 @@ int windows_port_pc_music_get(void){return atomic_load(&pc_music);}
 int windows_port_rumble_get(void){return atomic_load(&rumble_strength);}
 float windows_port_sharpen_get(void){return atomic_load(&sharp)*0.25f;}
 int windows_port_fxaa_get(void){return atomic_load(&fxaa);}
-/* Refresh rate the desktop is running at: the default cadence picks itself
- * from it, so a 120 Hz display gets 120 without anyone editing the env file. */
-static int display_hz(void)
-{
-    DEVMODEA dm;
-    memset(&dm, 0, sizeof dm);
-    dm.dmSize = (WORD)sizeof dm;
-    if (!EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm))
-        return 0;
-    return (int)dm.dmDisplayFrequency;
-}
-
 int windows_port_overlay_get(void){return atomic_load(&overlay);}
 int windows_port_vsync_get(void) { return atomic_load(&swap_interval); }
 /* Preserve comments and unrelated settings; replace all active copies of a key.
@@ -198,18 +186,15 @@ void windows_port_settings_attach(SDL_Window *win)
     v=getenv("MC3_GRAPHICS_PRESET");preset=v?atoi(v):0;if(preset<0||preset>3)preset=0;
     v=getenv("MC3_FRAME_RATE");if(!v||!v[0])v=getenv("MC3_FRAME_RATE_TEST_FPS");
     {
-        /* Native 120 is the default where the display can show it, 60 otherwise.
-         * MC3_ALLOW_120 builds accept all three cadences; other builds clamp. */
-        int hz = display_hz();
-        int n = (v && atoi(v) > 0) ? atoi(v) : (hz >= 100 ? 120 : 60);
+        /* 30 is the title's own cadence and stays the default; 60 and (in a
+         * MC3_ALLOW_120 build) 120 are opt-in. */
+        int n = (v && atoi(v) > 0) ? atoi(v) : 30;
 #ifdef MC3_ALLOW_120
-        if (n != 30 && n != 60 && n != 120) n = 60;
+        if (n != 30 && n != 60 && n != 120) n = 30;
 #else
         n = n >= 60 ? 60 : 30;
 #endif
         atomic_store(&frame_rate, n);
-        fprintf(stderr, "[PORT] frame rate %d (display %d Hz%s)\n", n, hz,
-                v ? ", from settings" : ", chosen from refresh");
     }
     v=getenv("MC3_PC_MUSIC");pc_music=v&&atoi(v)!=0;windows_media_set(pc_music);
     v=getenv("MC3_PC_MUSIC_RESTORE_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)music_restore=n;}
