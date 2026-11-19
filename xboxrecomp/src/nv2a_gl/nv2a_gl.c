@@ -6683,6 +6683,164 @@ static uint32_t present_width(const GlSurf *s)
 
 /* Present s (sw stored columns drawn) into the window rectangle through
  * FXAA; 0 when it is off (the caller blits). Default framebuffer bound. */
+/* ── Frame generation scaffolding (RECOMP_FG=1) ───────────────────────
+ *
+ * Off by default. The finished frame -- scene plus every overlay, because
+ * this copies after port_overlay_draw -- is kept in a texture and a second,
+ * interpolated frame is presented before the next real one. This first cut
+ * interpolates by crossfading the previous frame with the current one: it
+ * proves the plumbing, the HUD handling and the real cost per frame, and it
+ * is replaced by a motion-compensated warp once the pass is trusted.
+ *
+ * Why copy the back buffer instead of rendering the present into a texture:
+ * the letterbox, the 4:3 hold, FXAA and the fills all live in the present
+ * block, and copying after them keeps this pass out of that logic entirely.
+ *
+ * Cost: one GPU copy plus one full-screen blend. Measured on the reference
+ * machine, GL work was 1.9 ms of an 11 ms frame, so there is room.
+ */
+#if !defined(__ANDROID__) && !defined(__SWITCH__)
+static int    s_fg_on = -1, s_fg_ready, s_fg_have, s_fg_index, s_fg_w, s_fg_h;
+static GLuint s_fg_tex[2], s_fg_prog, s_fg_vao, s_fg_vbo;
+
+static int fg_init(void)
+{
+    static const char *vs[] = {
+        "#version 330 core\n"
+        "layout(location=0) in vec2 p;\n"
+        "out vec2 uv;\n"
+        "void main(){ uv = p*0.5+0.5; gl_Position = vec4(p, 0.0, 1.0); }\n" };
+    static const char *fs[] = {
+        "#version 330 core\n"
+        "in vec2 uv;\n"
+        "out vec4 o;\n"
+        "uniform sampler2D a, b;\n"
+        "void main(){ o = mix(texture(a, uv), texture(b, uv), 0.5); }\n" };
+    static const float quad[12] = { -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f,
+                                    -1.0f,  1.0f, 1.0f, -1.0f,  1.0f, 1.0f };
+    GLuint v, f, p;
+    GLint ok = 0;
+    if (s_fg_on < 0) {
+        const char *e = getenv("RECOMP_FG");
+        s_fg_on = e && e[0] == '1';
+        if (s_fg_on)
+            fprintf(stderr, "  [GL] frame generation: crossfade scaffolding (RECOMP_FG)\n");
+    }
+    if (!s_fg_on)
+        return 0;
+    if (s_fg_ready)
+        return 1;
+    v = compile(GL_VERTEX_SHADER, vs, 1);
+    f = compile(GL_FRAGMENT_SHADER, fs, 1);
+    if (!v || !f) {
+        if (v) glDeleteShader(v);
+        if (f) glDeleteShader(f);
+        s_fg_on = 0;
+        return 0;
+    }
+    p = glCreateProgram();
+    glAttachShader(p, v);
+    glAttachShader(p, f);
+    glLinkProgram(p);
+    glDeleteShader(v);
+    glDeleteShader(f);
+    glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        glDeleteProgram(p);
+        fprintf(stderr, "  [GL] frame generation: blend program did not link\n");
+        s_fg_on = 0;
+        return 0;
+    }
+    glUseProgram(p);
+    glUniform1i(glGetUniformLocation(p, "a"), 0);
+    glUniform1i(glGetUniformLocation(p, "b"), 1);
+    s_fg_prog = p;
+    s_cur_prog = p;
+    glGenVertexArrays(1, &s_fg_vao);
+    glGenBuffers(1, &s_fg_vbo);
+    glBindVertexArray(s_fg_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, s_fg_vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)sizeof quad, quad, GL_STREAM_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
+    glBindVertexArray(0);
+    s_fg_ready = 1;
+    return 1;
+}
+
+static void fg_size(int w, int h)
+{
+    int i;
+    if (s_fg_w == w && s_fg_h == h)
+        return;
+    if (!s_fg_tex[0])
+        glGenTextures(2, s_fg_tex);
+    for (i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, s_fg_tex[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        tex_param_forget(s_fg_tex[i]);
+    }
+    s_fg_w = w;
+    s_fg_h = h;
+    s_fg_have = 0;
+    s_fg_index = 0;
+}
+
+/* The frame just drawn, ready to be interpolated from next time. */
+static void fg_capture(void)
+{
+    int w = 0, h = 0;
+    if (!fg_init())
+        return;
+    SDL_GL_GetDrawableSize(s_win, &w, &h);
+    if (w <= 0 || h <= 0)
+        return;
+    fg_size(w, h);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
+    tex_param_forget(s_fg_tex[s_fg_index]);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
+    s_fg_have = 1;
+}
+
+/* Present the in-between frame. Returns 1 when something was drawn. */
+static int fg_second(void)
+{
+    if (s_fg_on != 1 || !s_fg_ready || !s_fg_have)
+        return 0;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, s_fg_w, s_fg_h);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glColorMask(1, 1, 1, 1);
+    glUseProgram(s_fg_prog);
+    s_cur_prog = s_fg_prog;
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index ^ 1]);
+    tex_param_forget(s_fg_tex[s_fg_index ^ 1]);
+    glActiveTexture(GL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
+    tex_param_forget(s_fg_tex[s_fg_index]);
+    glActiveTexture(GL_TEXTURE0);
+    glBindVertexArray(s_fg_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+    s_fg_index ^= 1;
+    tex_bind_forget();
+    return 1;
+}
+#else
+static void fg_capture(void) { }
+static int  fg_second(void) { return 0; }
+#endif
+
 static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
 {
     float rcp[2], mx[2], full[4], crop[4], band[2];
@@ -7196,7 +7354,10 @@ swap:
         }
     }
 #endif
+    fg_capture();                    /* the frame just drawn, overlays included */
     SDL_GL_SwapWindow(s_win);
+    if (fg_second())                 /* RECOMP_FG: one generated frame */
+        SDL_GL_SwapWindow(s_win);
     gq_frame_end();
     s_mg_fb_draw = s_mg_fb_read = 0xFFFFFFFFu;   /* whatever the swap did */
     pf_mark(PF_SWAP);
