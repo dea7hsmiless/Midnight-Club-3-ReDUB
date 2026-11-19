@@ -3277,12 +3277,21 @@ static void port_build(void)
     MEM8(state+0x29C)=0;MEM32(state+0x298)=0;
     /* The Options page holds 16 rows including BACK (4 columns x 4 rows,
      * page 2 is the last page), so the row count must stay below capacity:
-     * 15 settings + BACK at capacity 16. FRAME RATE takes PC MUSIC VOLUME's
-     * slot (the music slider in Audio Options owns that value); RESTORE
-     * GRAPHICS DEFAULTS and PC MUSIC VOLUME return first if a list has room. */
+     * 15 settings + BACK at capacity 16. PHONE MUSIC (id 9) and SONG DISPLAY
+     * (id 11) are the media rows. Per-app volume does not exist on Android,
+     * so id 10 (PC MUSIC VOLUME) is not offered here. */
+#if defined(__ANDROID__)
+    /* 16-slot page: 15 rows + BACK. The always-fullscreen status and the
+     * graphics preset (both also in the Android launcher) give up their slots
+     * to phone music and controller vibration; both of those were previously
+     * labels with no handler. */
+    const int order[]={1,2,3,4,6,7,8,9,10,11,12,13,14,15,16};
+    int settings=15;
+#else
     const int order[]={0,5,2,12,3,4,6,13,14,1,16,7,9,11,15,8,10};
     int capacity=MEM32(port_list+0x230);
     int settings=capacity>=18?17:capacity>=17?16:15;
+#endif
     /* FRAME RATE is id 16: 0x7F10 already opens Port Options, so it needs its
      * own event instead of the 0x7F00+id range. */
     for(int k=0;k<settings;k++){int i=order[k];port_rows[i]=port_add(i==16?0x7F12u:0x7F00u+(uint32_t)i,NULL);}

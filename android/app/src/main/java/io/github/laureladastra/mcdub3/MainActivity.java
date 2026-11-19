@@ -86,6 +86,28 @@ public class MainActivity extends SDLActivity {
         return true;
     }
 
+    /* Notification access, for the phone-music bridge (android_media.c). An
+     * enabled NotificationListenerService is what lets
+     * MediaSessionManager.getActiveSessions() return other apps' players. */
+    public static boolean hasNotificationAccess() {
+        if (mSingleton == null)
+            return false;
+        String enabled = Settings.Secure.getString(
+            mSingleton.getContentResolver(), "enabled_notification_listeners");
+        return enabled != null && enabled.contains(mSingleton.getPackageName());
+    }
+
+    public static boolean openNotificationAccess() {
+        if (mSingleton == null)
+            return false;
+        try {
+            mSingleton.startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /* A keyboard's keys go to SDL as keys. SDL takes any device that also
      * reports a d-pad for a joystick -- the emulator's keyboard and many real
      * ones do -- and its arrows then became a pad's d-pad, not the arrows

@@ -28,6 +28,7 @@
 #include <jni.h>
 #include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,10 +46,12 @@
 extern void xbox_touchpad_reload(void);
 extern void xbox_touchpad_recenter_tilt(void);
 extern void xbox_touchpad_test_haptics(void);
-
+extern void xbox_InputSetRumbleStrength(int percent);
 static char s_dir[512];
 static int  s_pipe[2] = { -1, -1 };
 static FILE *s_log;
+
+static void android_media_settings_init(void);   /* below */
 
 /* stdout and stderr, line by line, into the log file and logcat. */
 static void *log_pump(void *arg)
@@ -253,6 +256,7 @@ void android_boot(void)
         if ((l = getenv("MC3_LAUNCHER_TOUCH_INVERT")) != NULL && *l)
             setenv("RECOMP_TOUCH_TILT_INVERT", l, 1);
     }
+    android_media_settings_init();
     for (;;) {
         const char *g = getenv("MC3_GAME_DIR");
         static const SDL_MessageBoxButtonData buttons[] = {
@@ -301,69 +305,63 @@ void android_boot(void)
     }
 }
 
-/* The shared renderer carries the desktop music HUD and the F1 settings
- * window. Android has no Windows media session, so those hooks stay off.
- * The in-game Port Options rows below use a small env-backed store: changes
- * apply immediately where the renderer reads a getter, and the RESTART rows
- * persist for the next launch. */
-int windows_media_get(wchar_t *out, int count)
-{
-    (void)out;
-    (void)count;
-    return 0;
-}
+/* The shared renderer carries the desktop music HUD. The real bridge is
+ * android_media.c (MediaSessionManager); this side owns the Port Options
+ * state and persists it in the same env file as the other settings. */
+static atomic_int s_pc_music, s_music_hud = 1;
+static int s_music_restore = 100;
 
-int windows_media_banner_get(wchar_t *out, int count)
-{
-    (void)out;
-    (void)count;
-    return 0;
-}
-
-int windows_media_gameplay_get(void)
-{
-    return 0;
-}
-
-void windows_media_context(int context)
-{
-    (void)context;
-}
-
-void windows_media_native_hud(int active)
-{
-    (void)active;
-}
-
-void windows_media_route_commit(const wchar_t *text, int native)
-{
-    (void)text;
-    (void)native;
-}
-
-void windows_media_skip(int next)
-{
-    (void)next;
-}
+static void android_save_int(const char *key, int value);   /* below */
+extern void windows_media_set(int enabled);
+extern int android_media_has_access(void);
+extern void android_media_open_access(void);
+extern void mc3_media_set_gain(int step);
 
 int windows_port_pc_music_get(void)
 {
-    return 0;
+    return atomic_load(&s_pc_music);
 }
 
 int windows_port_music_hud_get(void)
 {
-    return 0;
+    return atomic_load(&s_music_hud);
 }
 
 void windows_port_music_backup(float volume)
 {
-    (void)volume;
+    int n = (int)(volume * 100.0f + 0.5f);
+    if (n >= 0 && n <= 100) {
+        s_music_restore = n;
+        android_save_int("MC3_PC_MUSIC_RESTORE_VOLUME", n);
+    }
 }
 
 float windows_port_music_restore(void)
 {
-    return 1.0f;
+    return s_music_restore / 100.0f;
+}
+
+/* Called from android_boot once the env file is applied: the media bridge
+ * must know the choice before the first frame, and the log records whether
+ * notification access (the one permission the API needs) is granted. */
+static void android_media_settings_init(void)
+{
+    const char *v;
+    if ((v = getenv("MC3_PC_MUSIC")) != NULL)
+        atomic_store(&s_pc_music, atoi(v) != 0);
+    if ((v = getenv("MC3_PC_MUSIC_HUD")) != NULL)
+        atomic_store(&s_music_hud, atoi(v) != 0);
+    if ((v = getenv("MC3_PC_MUSIC_RESTORE_VOLUME")) != NULL) {
+        int n = atoi(v);
+        if (n >= 0 && n <= 100)
+            s_music_restore = n;
+    }
+    if ((v = getenv("MC3_GAME_GAIN")) != NULL)
+        mc3_media_set_gain(atoi(v));
+    windows_media_set(atomic_load(&s_pc_music));
+    fprintf(stderr, "[MEDIA] phone music %s (notification access %s)\n",
+            atomic_load(&s_pc_music) ? "on" : "off",
+            android_media_has_access() ? "granted" : "not granted");
 }
 
 static const char *android_scales[] = { "1", "1.5", "2", "3", "5" };
@@ -502,6 +500,40 @@ void windows_port_setting_change(int id)
         android_env_set("MC3_GAMMA", "1.0");
         android_env_set("MC3_BRIGHTNESS", "1.00");
         break;
+    case 9: {
+        int n = !atomic_load(&s_pc_music);
+        if (android_env_set("MC3_PC_MUSIC", n ? "1" : "0")) {
+            atomic_store(&s_pc_music, n);
+            windows_media_set(n);
+            if (n && !android_media_has_access())
+                android_media_open_access();
+            fprintf(stderr, "[MEDIA] phone music %s\n", n ? "on" : "off");
+        }
+        break;
+    }
+    case 10: {  /* game audio level while phone music plays */
+        static const int steps[] = { 0, 1, 2 };
+        const char *v = getenv("MC3_GAME_GAIN");
+        int cur = v && *v ? atoi(v) : 0, i, n;
+        for (i = 0; i < 3 && steps[i] != cur; i++) { }
+        n = steps[(i + 1) % 3];
+        {
+            char text[8];
+            snprintf(text, sizeof text, "%d", n);
+            if (android_env_set("MC3_GAME_GAIN", text)) {
+                mc3_media_set_gain(n);
+                setenv("MC3_GAME_GAIN", text, 1);
+                fprintf(stderr, "[MEDIA] game audio with music: step %d\n", n);
+            }
+        }
+        break;
+    }
+    case 11: {
+        int n = !atomic_load(&s_music_hud);
+        if (android_env_set("MC3_PC_MUSIC_HUD", n ? "1" : "0"))
+            atomic_store(&s_music_hud, n);
+        break;
+    }
     case 12:
         s_hud = (s_hud + 1) % 4;
         android_env_set("RECOMP_GL_UI_SCALE", android_hud_scales[s_hud]);
@@ -572,6 +604,22 @@ void windows_port_setting_change(int id)
         xbox_touchpad_reload();
         break;
     }
+    case 15: {  /* controller vibration strength; the input layer re-reads it */
+        static const int st[] = { 0, 50, 75, 100, 125, 150 };
+        const char *v = getenv("MC3_RUMBLE_STRENGTH");
+        int cur = v && *v ? atoi(v) : 100, i, n;
+        for (i = 0; i < 6 && st[i] != cur; i++) { }
+        n = st[(i + 1) % 6];
+        {
+            char text[8];
+            snprintf(text, sizeof text, "%d", n);
+            if (android_env_set("MC3_RUMBLE_STRENGTH", text)) {
+                setenv("MC3_RUMBLE_STRENGTH", text, 1);
+                xbox_InputSetRumbleStrength(n);
+            }
+        }
+        break;
+    }
     }
     if (id >= 1 && id <= 6) {
         s_preset = 0;
@@ -582,9 +630,6 @@ void windows_port_setting_change(int id)
 void windows_port_setting_label(int id, char *out, size_t size)
 {
     static const char *aa_names[] = { "OFF", "FXAA", "FXAA LOW", "FXAA HIGH" };
-    static const char *preset_names[] = { "CUSTOM", "PERFORMANCE", "BALANCED", "QUALITY" };
-    if (id == 0)
-        snprintf(out, size, "FULLSCREEN: ON");
     if (id == 1)
         snprintf(out, size, "VSYNC: %s", s_vsync < 0 ? "ADAPTIVE" : s_vsync ? "ON" : "OFF");
     if (id == 2)
@@ -593,28 +638,36 @@ void windows_port_setting_label(int id, char *out, size_t size)
         snprintf(out, size, "ANTI-ALIASING: %s", aa_names[s_fxaa >= 0 && s_fxaa <= 3 ? s_fxaa : 1]);
     if (id == 4)
         snprintf(out, size, "FILTERING: %dX (RESTART)", s_aniso);
-    if (id == 5)
-        snprintf(out, size, "PRESET: %s (RESTART)", preset_names[s_preset]);
     if (id == 6)
         snprintf(out, size, "SHARPENING: %d%%", s_sharpen * 25);
     if (id == 7)
         snprintf(out, size, "FPS OVERLAY: %s", s_overlay ? "ON" : "OFF");
     if (id == 8)
         snprintf(out, size, "RESTORE GRAPHICS DEFAULTS");
-    if (id == 9)
-        snprintf(out, size, "PC MUSIC: DESKTOP ONLY");
-    if (id == 10)
-        snprintf(out, size, "PC MUSIC VOLUME: DESKTOP ONLY");
+    if (id == 9) {
+        int on = atomic_load(&s_pc_music), access = android_media_has_access();
+        snprintf(out, size, "PHONE MUSIC (DRIVING): %s%s", on ? "ON" : "OFF",
+                 !access ? (on ? " (NO ACCESS)" : " (NEEDS ACCESS)") : "");
+    }
+    if (id == 10) {
+        static const char *names[] = { "NORMAL", "QUIETER", "QUIET" };
+        const char *v = getenv("MC3_GAME_GAIN");
+        int g = v && *v ? atoi(v) : 0;
+        snprintf(out, size, "GAME AUDIO WITH MUSIC: %s", names[g >= 0 && g <= 2 ? g : 0]);
+    }
     if (id == 11)
-        snprintf(out, size, "SONG DISPLAY: RADIO");
+        snprintf(out, size, "SONG DISPLAY: %s", atomic_load(&s_music_hud) ? "RADIO" : "OFF");
     if (id == 12)
         snprintf(out, size, "HUD TEXTURES: %sX (RESTART)", android_hud_scales[s_hud]);
     if (id == 13)
         snprintf(out, size, "GAMMA: %.1f", windows_port_gamma_get());
     if (id == 14)
         snprintf(out, size, "BRIGHTNESS: %d%%", 80 + s_brightness * 5);
-    if (id == 15)
-        snprintf(out, size, "CONTROLLER VIBRATION: ON");
+    if (id == 15) {
+        const char *v = getenv("MC3_RUMBLE_STRENGTH");
+        int n = v && *v ? atoi(v) : 100;
+        snprintf(out, size, "CONTROLLER VIBRATION: %d%%", n);
+    }
     if (id == 16)
         snprintf(out, size, "FRAME RATE: %d FPS (RESTART)", s_frame_rate);
     if (id == 17)
