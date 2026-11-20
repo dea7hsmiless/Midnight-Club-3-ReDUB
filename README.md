@@ -6,7 +6,7 @@ Original Xbox code translated to native C, with OpenGL and Vulkan renderers, DLS
 
 <p align="center"><a href="https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/tree/main">Source</a> · <a href="https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases">Releases</a> · <a href="BUILDING-WINDOWS.md">Build from source</a></p>
 
-<p align="center"><a href="https://recomplauncher.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a></p>
+<p align="center"><a href="https://recomplauncher.com"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/press/badge-light.svg"><img alt="Get it on RecompLauncher" src="assets/press/badge-dark.svg" height="48"></picture></a></p>
 
 # Midnight Club 3: ReDUB
 
@@ -15,6 +15,20 @@ A Windows-focused community edition of **Midnight Club 3: DUB Edition Remix**, b
 ReDUB combines a portable setup launcher, native in-game Port Options, graphics adjustments, Xbox controller support, and optional PC music integration.
 
 **Bring your own original Xbox Remix game files. No disc image, game assets, soundtrack, or saves are included.** This project is unofficial and is not affiliated with Rockstar Games, Take-Two, or Microsoft.
+
+## Screenshots
+
+All six are ReDUB running its own converted code — no emulator, and no capture from another version of the game. The HUD, minimap, speedometer and race markers are the game's own, drawn through the recompiled renderer.
+
+| | |
+| --- | --- |
+| ![Intro cutscene on a night street](screenshots/01-cutscene-arrival.jpg) | ![Rival crew outside the pawn shop](screenshots/02-cutscene-rivals.jpg) |
+| **Intro cutscene** — the game's own in-engine cinematics. | **Rival crews** — character models, tattoos and cloth shading. |
+| ![Race start staging with the flag girl](screenshots/03-race-start.jpg) | ![Countdown lights at the start line](screenshots/04-countdown.jpg) |
+| **Race start** — the start-line staging sequence. | **Countdown** — HUD, race markers and minimap live. |
+| ![Mid-race pursuit past Hank's Hotel](screenshots/05-pursuit.jpg) | ![Downtown night race under neon](screenshots/06-downtown.jpg) |
+| **Mid-race** — traffic, opponents and the racing line. | **Downtown** — neon signage, street lighting and reflections. |
+
 
 ## Which game files do I need?
 

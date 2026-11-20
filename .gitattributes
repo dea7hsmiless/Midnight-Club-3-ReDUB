@@ -5,6 +5,10 @@
 # AppImage entry point is a POSIX shell script without a suffix.
 tools/appimage/AppRun text eol=lf
 
+# SVG badges are vendored from the RecompLauncher press kit. Keep them exactly
+# as shipped so a diff against the press kit stays meaningful.
+*.svg text eol=lf
+
 # The AppImage/package scripts and desktop metadata run inside Linux containers:
 # CRLF breaks desktop-file-validate and shell shebangs. Keep this directory LF.
 tools/appimage/** text eol=lf
