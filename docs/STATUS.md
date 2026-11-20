@@ -9,15 +9,23 @@ Tag `v0.2.4a` = `3a64190`; published 2026-11-20. Adds RecompLauncher support (Wi
 Linux), the `KEY = value` settings reader, and Redump disc matching. Full release, so it is the
 GitHub "latest" and what RecompLauncher installs.
 
+**Windows zip replaced 2026-11-19** without moving the tag (`236266f`): published 0.2.4a drew the
+Graphics-page internal-resolution hint over the "Advanced graphics" button, because the hint
+reserved no vertical space and the button was placed at the same `y`. The outline cut through the
+text and its label was hidden, leaving Frame queue unreachable. Windows only — the Android, iOS
+and Linux front ends have no such page. `launcher-source.zip` was rebuilt too, so "Rebuild from
+source" does not reproduce the bug.
+
 | Asset | Bytes | SHA-256 |
 |---|---|---|
-| `ReDUB-0.2.4-Windows-x86_64.zip` | 81,060,490 | `e9abdea5538df9a55cf178f247de7e2e558ed35d29f3a69d16e2a412cd97a62f` |
+| `ReDUB-0.2.4-Windows-x86_64.zip` | 81,061,686 | `9f4f94aefa6dd1540cd8e540c912e3f035e8e0eebc7d69d51bc892268b0abb97` |
 | `ReDUB-0.2.4-x86_64.AppImage` | 22,145,528 | `f0080f18da540f878df3e300c061f34402c35eaffc9c918c326798b71b1c8aab` |
 | `ReDUB-0.2.4-x86_64.tar.gz` | 23,850,799 | `557ace2f4b4f959fbf231f374ac5fb981143bd7b29d7e2412cbeca74dd4e7ffb` |
 
-Launcher `3d56207303fc683269712f894c7ada1e0103d2df2c4052bbe767ed3d6f3584ae` (111,104 B);
-game exe `cd1e3a7e24ea98d666c39b58c0d6698c0a40f88fb9aff3ac34146c30a649d6c7` (34,111,488 B).
-Android and iOS assets are the unchanged 0.2.4 files.
+Launcher `0785afa43ae7dfff184f683af7cbdaabfec2bb6c2a32c7c129df856a611cfc1f` (111,104 B, was
+`3d562073…`); `launcher-source.zip` `2164edee…` (17,425,575 B);
+game exe `cd1e3a7e24ea98d666c39b58c0d6698c0a40f88fb9aff3ac34146c30a649d6c7` (34,111,488 B,
+unchanged). Android and iOS assets are the unchanged 0.2.4 files.
 
 **v0.2.4** — https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases/tag/v0.2.4
 Tag `v0.2.4` = `d00c579`; published 2026-11-19. Branch `release/0.2.4` is merged into `main`.
@@ -56,10 +64,12 @@ eight assets were replaced before publishing, and the published digests match `S
 
 ## Open items
 
-1. **SecureAge false positive** — launcher `c32713e3…` (110,592 B, unsigned .NET). Submission
-   draft at `Desktop\ReDUB-0.2.4-release\SECUREAGE-SUBMISSION.md`; the detection name, engine
-   version and timestamp still need filling in from the quarantine log. Submit at
-   secureage.com/contact-us. The published zip has not had a fresh VT scan.
+1. **SecureAge false positive** — resubmit the launcher from the re-uploaded 0.2.4a zip,
+   `0785afa4…` (111,104 B, unsigned .NET). Earlier submissions covered `c32713e3…` (0.2.4) and
+   `3d562073…` (first 0.2.4a upload). Draft at
+   `Desktop\ReDUB-0.2.4-release\SECUREAGE-SUBMISSION.md`; the detection name, engine version and
+   timestamp still need filling in from the quarantine log. Submit at secureage.com/contact-us.
+   No 0.2.4a package has had a VirusTotal scan.
 2. **iOS garage artifacts** — v32 diagnostics exist. Needs a device screenshot and the trace
    run (launcher → Settings → Diagnostics → Renderer + Texgen + Feedback).
    Audit notes: `Desktop\ReDUB-iOS-graphics-audit-handoff.md`.
@@ -77,8 +87,8 @@ eight assets were replaced before publishing, and the published digests match `S
 
 | File | VirusTotal |
 |---|---|
-| Windows zip `cbcdcaf5…` | not scanned |
-| AppImage `46bc6fdf…` | not scanned |
-| launcher `c32713e3…` | not scanned (0.2.3 launcher was 1/71, whitelist engine) |
+| Windows zip `9f4f94ae…` | not scanned |
+| AppImage `f0080f18…` | not scanned |
+| launcher `0785afa4…` | not scanned (0.2.3 launcher was 1/71, whitelist engine) |
 | Android APK `907e2c42…` | not scanned |
 | iOS IPA `8a036e13…` | not scanned |
