@@ -79,12 +79,15 @@ Landed so far (built and run on Windows, 2026-11-19):
    race renders **two live viewports, each with its own HUD and camera**.
    Screenshot: `Desktop\ReDUB-0.2.5-work\test\shots\split-live.png`. The store
    claim is now true on this machine.
-6. **System Link (M2) — in progress.** `xboxrecomp/src/net/xnet_hle.c` (host
-   UDP) and 21 thunks in `recomp_manual.c`, all behind `MC3_NETPLAY=1`. Verified:
-   the HLE comes up, the main menu reports "Not Signed In" instead of
-   "Sign-In Failed", and Networking -> System Link -> Create Match -> Host Game
-   reaches the game's own **LOBBY** (4 player slots). Not yet: a second instance
-   joining (needs a profile on both).
+6. **System Link (M2) — validated 2026-11-19.** `xboxrecomp/src/net/xnet_hle.c`
+   (host UDP) and 21 thunks in `recomp_manual.c`, all behind `MC3_NETPLAY=1`.
+   Two instances on one machine (`RECOMP_NET_ADDR=127.0.0.1` / `127.0.0.2`,
+   peers pointing at each other): the host creates a match, the second
+   instance's **Join Game lists it** (Players 1/4), joining shows "Player 1
+   joined game." on both lobbies, and starting the race puts **both players in
+   the same San Diego cruise with name tags**. Screenshots:
+   `test\shots\net8.png`, `jb2.png`, `ja5.png`, `ja6.png`, `jb4.png`.
+   Next: a real LAN, then the same over a VPN (no server needed).
 7. **Linux ISO import — implemented 2026-11-19.** Native reader
    `xboxrecomp/tools/xiso/xdvdfs_extract.c` (port of `Xdvdfs.cs`), bundled as
    `usr/bin/redub-xdvdfs`; `AppRun --import` / `--game-dir <iso>` unpacks into
@@ -94,12 +97,11 @@ Landed so far (built and run on Windows, 2026-11-19):
 
 Still to do:
 
-8. **System Link join.** Two instances, two profiles: host on
-   `RECOMP_NET_ADDR=127.0.0.1` / peer `127.0.0.2`, join on the second, then
-   start a race; then a real LAN and a VPN. Both instances come up and the HLE
-   initialises; the blocker is the second save dir having no profile (it lands
-   on Create Profile) and posted keys not driving a second window reliably.
-   `test\key2.ps1` targets a PID if that helps.
+8. **System Link on real hardware.** Two PCs on a LAN, then the same across a
+   VPN (no server needed). The local two-instance test passes end to end;
+   what remains is addressing (`RECOMP_NET_ADDR` = the machine's LAN address,
+   `RECOMP_NET_PEERS` = the other machine) and a firewall rule for UDP
+   `20000 + guest port` (20000-21000 covers MC3).
 9. **Online (M3)** — System Link over a VPN first (no code), then rooms.
 10. **Free roam (M4)** — last, on M2/M3, with the engine caps in
     `upstream-mc3web\docs\online-limits.md`.
