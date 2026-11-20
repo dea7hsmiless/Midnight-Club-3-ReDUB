@@ -174,7 +174,7 @@ public sealed class Launcher : Form {
         var right=ButtonAt(host,"›",x+206,y-4,38,()=>change(1));right.Anchor=AnchorStyles.Right|AnchorStyles.Top;right.AccessibleName="Increase "+name;
         y+=62;
     }
-    string SettingsPath(){string selected=Path.Combine(RendererDist(root),"mcdub3remix_env.txt");if(File.Exists(selected))return selected;return PathAt("work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt");}
+    string SettingsPath(){string dir=RendererDist(root),selected=Path.Combine(dir,"mcdub3remix_env.txt");if(!File.Exists(selected)){string example=Path.Combine(dir,"mcdub3remix_env.example.txt");if(File.Exists(example)){try{File.Copy(example,selected);}catch{}}}if(File.Exists(selected))return selected;return PathAt("work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt");}
     public string ReadSetting(string key,string fallback){if(!File.Exists(SettingsPath()))return fallback;foreach(var raw in File.ReadAllLines(SettingsPath())){string line=raw.Trim();if(line.StartsWith(key+"=",StringComparison.Ordinal))return line.Substring(key.Length+1).Trim();}return fallback;}
     public void SavePreference(string key,string value){string path=SettingsPath();if(!File.Exists(path))throw new IOException("Install the game before saving settings.");var edits=new Dictionary<string,string>();edits[key]=value;if(key=="MC3_GRAPHICS_PRESET"&&value!="0"){int n=int.Parse(value);edits["RECOMP_GL_SCALE"]=n==1?"1.5":n==3?"3":"2";edits["RECOMP_GL_FXAA"]="1";edits["RECOMP_GL_ANISO"]=n==1?"4":"16";edits["RECOMP_GL_SHARPEN"]=n==1?"0.25":"0.5";edits["RECOMP_GL_VSYNC"]=n==3?"1":"0";}else if(new[]{"RECOMP_GL_SCALE","RECOMP_GL_FXAA","RECOMP_GL_ANISO","RECOMP_GL_SHARPEN","RECOMP_GL_VSYNC"}.Contains(key))edits["MC3_GRAPHICS_PRESET"]="0";var lines=File.ReadAllLines(path).Where(line=>!edits.Keys.Any(k=>line.TrimStart().StartsWith(k+"=",StringComparison.Ordinal))).ToList();foreach(var e in edits)lines.Add(e.Key+"="+e.Value);string backup=path+".launcher-backup";if(!File.Exists(backup))File.Copy(path,backup);string tmp=path+".launcher-tmp";File.WriteAllLines(tmp,lines,new UTF8Encoding(false));File.Replace(tmp,path,null);Append("Saved "+key+". Applies next launch.");}
     void ShowSupport(){var p=Standard("Support","Support & activity","Local setup output. Your game and saves are never uploaded.");ButtonAt(p,"Open log folder",36,140,190,()=>Open("work-remix/logs"));ButtonAt(p,"Check setup",240,140,190,()=>VerifySetup());ButtonAt(p,"Read guide",444,140,190,()=>Open("README.md"));log.SetBounds(36,205,Math.Max(600,content.Width-72),Math.Max(280,content.Height-245));log.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;p.Controls.Add(log);}
@@ -331,7 +331,21 @@ public sealed class Launcher : Form {
         string dist=RendererDist(root);
         return new ProcessStartInfo(Path.Combine(dist,"mcdub3remix.exe")){WorkingDirectory=dist,UseShellExecute=true};
     }
-    static void StartDirect(string root){var running=Process.GetProcessesByName("mcdub3remix");bool active=running.Length>0;foreach(var p in running)p.Dispose();if(active)return;if(!InstallationReady(root)){string[] problems=InstallationProblems(root);throw new IOException(problems.Length>0?problems[0]:"The game is not ready. Choose Install.");}Process.Start(LaunchInfo(root));}
+    static void StartDirect(string root){
+        var running=Process.GetProcessesByName("mcdub3remix");bool active=running.Length>0;foreach(var p in running)p.Dispose();if(active)return;
+        if(!InstallationReady(root)){string[] problems=InstallationProblems(root);throw new IOException(problems.Length>0?problems[0]:"The game is not ready. Choose Install.");}
+        /* The game is a window program: started on its own its output goes
+         * nowhere, so a crash report sent from RecompLauncher arrives with no
+         * log. cmd holds the redirect to work-remix/logs/latest.log, and stays
+         * alive after this launcher exits, so the file outlives us. */
+        string dist=RendererDist(root),log=RunLogPath(root);
+        try{if(File.Exists(log))File.Copy(log,log+".previous",true);}catch{}
+        var psi=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"cmd.exe")){
+            Arguments="/s /c \"\""+Path.Combine(dist,"mcdub3remix.exe")+"\" > \""+log+"\" 2>&1\"",
+            WorkingDirectory=dist,UseShellExecute=false,CreateNoWindow=true};
+        Process.Start(psi);
+    }
+    static string RunLogPath(string root){string dir=Path.Combine(root,@"work-remix\logs");Directory.CreateDirectory(dir);return Path.Combine(dir,"latest.log");}
     public static bool IsSourceRoot(string path){return Directory.Exists(path)&&File.Exists(Path.Combine(path,@".portable\Build.ps1"))&&File.Exists(Path.Combine(path,"CMakeLists.txt"));}
     static void CliLog(string root,string message){try{string dir=Path.Combine(root,@"work-remix\logs");Directory.CreateDirectory(dir);File.AppendAllText(Path.Combine(dir,"launcher-cli.log"),DateTime.Now.ToString("s")+" "+message+Environment.NewLine,new UTF8Encoding(false));}catch{}}
     static int RunCommand(string root,string command,string[] args){

@@ -248,6 +248,10 @@ int usb_gamepad_control(int dev, const UsbSetup *setup, uint8_t *out, int max)
  * seconds. A title sitting on a "press Start" screen needs an edge, not a
  * level, so this pulses rather than latching -- and it repeats because the
  * moment the title starts reading input is not knowable from here.
+ * RECOMP_PAD2_PRESS does the same on pad 2 (which must also be "plugged in":
+ * a RECOMP_PAD2_SCRIPT entry does that), and both take an optional fourth
+ * field, a delay in ms before the pulses start -- so automation for the
+ * menus can finish before the pulsing begins.
  *
  * Bit values are the Xbox digital button mask: 0x01/02/04/08 dpad
  * up/down/left/right, 0x10 Start, 0x20 Back, 0x40/0x80 thumb clicks.
@@ -255,39 +259,48 @@ int usb_gamepad_control(int dev, const UsbSetup *setup, uint8_t *out, int max)
  * This is a bring-up probe and nothing else. It is off unless the variable
  * is set, and a real pad on the host is always the better input.
  */
-static uint8_t synthetic_buttons(void)
+static uint8_t synthetic_buttons(int dev)
 {
-    static int      configured = -1;
-    static unsigned mask, period_ms, hold_ms;
-    static unsigned long t0;
+    static int      configured[USB_GAMEPADS] = { -1, -1 };
+    static unsigned mask[USB_GAMEPADS], period_ms[USB_GAMEPADS], hold_ms[USB_GAMEPADS];
+    static unsigned delay_ms[USB_GAMEPADS];
+    static unsigned long t0[USB_GAMEPADS];
     unsigned long now, phase;
 
-    if (configured < 0) {
-        const char *spec = getenv("RECOMP_PAD_PRESS");
-        configured = 0;
+    if (dev < 0 || dev >= USB_GAMEPADS)
+        return 0;
+    if (configured[dev] < 0) {
+        const char *spec = getenv(dev ? "RECOMP_PAD2_PRESS" : "RECOMP_PAD_PRESS");
+        configured[dev] = 0;
         if (spec && *spec) {
             char *end;
-            mask = (unsigned)strtoul(spec, &end, 0) & 0xFFu;
-            period_ms = (*end == ',') ? (unsigned)strtoul(end + 1, &end, 0)
-                                      : 2000u;
-            hold_ms   = (*end == ',') ? (unsigned)strtoul(end + 1, &end, 0)
-                                      : 250u;
-            if (!period_ms) period_ms = 2000u;
-            if (!hold_ms || hold_ms >= period_ms) hold_ms = period_ms / 4u;
-            if (mask) {
-                configured = 1;
-                t0 = (unsigned long)GetTickCount();
-                fprintf(stderr, "  PAD: synthesising button mask 0x%02X for "
-                        "%u ms every %u ms\n", mask, hold_ms, period_ms);
+            mask[dev] = (unsigned)strtoul(spec, &end, 0) & 0xFFu;
+            period_ms[dev] = (*end == ',') ? (unsigned)strtoul(end + 1, &end, 0)
+                                           : 2000u;
+            hold_ms[dev]   = (*end == ',') ? (unsigned)strtoul(end + 1, &end, 0)
+                                           : 250u;
+            delay_ms[dev]  = (*end == ',') ? (unsigned)strtoul(end + 1, &end, 0)
+                                           : 0u;
+            if (!period_ms[dev]) period_ms[dev] = 2000u;
+            if (!hold_ms[dev] || hold_ms[dev] >= period_ms[dev])
+                hold_ms[dev] = period_ms[dev] / 4u;
+            if (mask[dev]) {
+                configured[dev] = 1;
+                t0[dev] = (unsigned long)GetTickCount();
+                fprintf(stderr, "  PAD%d: synthesising button mask 0x%02X for "
+                        "%u ms every %u ms%s\n", dev + 1, mask[dev], hold_ms[dev],
+                        period_ms[dev], delay_ms[dev] ? ", after a delay" : "");
                 fflush(stderr);
             }
         }
     }
-    if (!configured)
+    if (!configured[dev])
         return 0;
     now = (unsigned long)GetTickCount();
-    phase = (now - t0) % period_ms;
-    return (uint8_t)((phase < hold_ms) ? mask : 0u);
+    if (now - t0[dev] < delay_ms[dev])
+        return 0;
+    phase = (now - t0[dev] - delay_ms[dev]) % period_ms[dev];
+    return (uint8_t)((phase < hold_ms[dev]) ? mask[dev] : 0u);
 }
 
 /* RECOMP_PAD_SCRIPT: a timed sequence of presses, for driving a title
@@ -439,7 +452,7 @@ int usb_gamepad_report(int dev, uint8_t *out, int max)
 {
     XBOX_INPUT_STATE state;
     const XBOX_GAMEPAD *g;
-    uint8_t synth = dev ? 0 : synthetic_buttons();
+    uint8_t synth = synthetic_buttons(dev);
     int i;
 
     if (max < 20)

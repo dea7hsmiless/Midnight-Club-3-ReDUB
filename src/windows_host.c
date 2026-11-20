@@ -234,6 +234,22 @@ static void pick_game_dir(void)
     _putenv_s("MC3_GAME_DIR", pick);
 }
 
+/* First run (or an install whose folder was replaced): the shipped example
+ * becomes the player's settings file. It is never shipped itself, so an
+ * update cannot overwrite it; this only fills the gap once. */
+static void seed_player_settings(void)
+{
+    char env[MAX_PATH], example[MAX_PATH];
+    snprintf(env, sizeof env, "%s\\" MC3_APP "_env.txt", s_exe_dir);
+    if (GetFileAttributesA(env) != INVALID_FILE_ATTRIBUTES)
+        return;
+    snprintf(example, sizeof example, "%s\\" MC3_APP "_env.example.txt", s_exe_dir);
+    if (GetFileAttributesA(example) == INVALID_FILE_ATTRIBUTES)
+        return;
+    if (CopyFileA(example, env, FALSE))
+        fprintf(stderr, "settings: created %s from the example\n", env);
+}
+
 void windows_boot(void)
 {
     static const char *const save[] = { "..\\..\\save", NULL };
@@ -244,6 +260,7 @@ void windows_boot(void)
     log_to_file_if_alone();
     remember_environment();
     load_settings(MC3_APP "_defaults.txt");
+    seed_player_settings();
     load_settings(MC3_APP "_env.txt");
     pick_game_dir();
     find_dir("MC3_SAVE_DIR", save);

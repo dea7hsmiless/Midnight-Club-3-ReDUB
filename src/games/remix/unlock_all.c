@@ -48,10 +48,66 @@ static int unlock_all_on(void)
     return on;
 }
 
+/* MC3_UNLOCK_REPORT=1 (diagnostic, off by default): once the front end has
+ * its rules object, ask the game's own vehicle-purchase check
+ * (sub_00289D80, thiscall (car name), ret 4) for every showroom car and say
+ * how many it calls buyable. Same probe mc3-web's online_cars_unlocked()
+ * uses, so the count is the game's answer, not ours. Runs once. */
+void sub_00289D80(void);
+static int ua_ram(uint32_t p, uint32_t n)
+{
+    return n <= 0x04000000u && ((p >= 0x10000u && p <= 0x04000000u - n) ||
+                                (p >= 0x80000000u && p <= 0x84000000u - n));
+}
+
+static void unlock_all_report(void)
+{
+    static int on = -1, done;
+    static unsigned tries;
+    uint32_t mgr, prog, rules, n, i, ok = 0, saved[8];
+
+    if (on < 0) {
+        const char *e = getenv("MC3_UNLOCK_REPORT");
+        on = e && e[0] == '1';
+        if (on)
+            fprintf(stderr, "[MODS] unlock report on (MC3_UNLOCK_REPORT): counting showroom cars"
+                    " the game calls buyable\n");
+    }
+    if (!on || done || tries >= 60)
+        return;
+    /* [0x557F0C] = career manager, +0xC = progress, +0xC = rules; the
+     * showroom's [0x557EB4] cars, CarCfg i at 0x541700 + i*0x108. */
+    mgr = MEM32(0x00557F0Cu);
+    if (!ua_ram(mgr, 0x10) || !ua_ram(prog = MEM32(mgr + 0xCu), 0x10) ||
+        !ua_ram(rules = MEM32(prog + 0xCu), 0x10) || !ua_ram(MEM32(0x00557EB0u), 0x40))
+        return;                                 /* not up yet: try again next frame */
+    if (++tries < 30)                           /* give the front end a moment */
+        return;
+    n = MEM16(0x00557EB4u);
+    if (n > 127u)
+        n = 127u;
+    saved[0] = g_eax; saved[1] = g_ecx; saved[2] = g_edx; saved[3] = g_ebx;
+    saved[4] = g_esp; saved[5] = g_ebp; saved[6] = g_esi; saved[7] = g_edi;
+    for (i = 0; i < n; i++) {
+        g_esp = (saved[4] - 0x200u) & ~0xFu;
+        g_esp -= 4; MEM32(g_esp) = 0x00541700u + i * 0x108u + 0xE3u;
+        g_esp -= 4; MEM32(g_esp) = 0;           /* return address */
+        g_ecx = rules;
+        sub_00289D80();
+        ok += (g_eax & 0xFFu) != 0;
+    }
+    g_eax = saved[0]; g_ecx = saved[1]; g_edx = saved[2]; g_ebx = saved[3];
+    g_esp = saved[4]; g_ebp = saved[5]; g_esi = saved[6]; g_edi = saved[7];
+    done = 1;
+    fprintf(stderr, "[MODS] showroom report: %u of %u cars read as buyable by the game's own"
+            " check\n", ok, n);
+}
+
 /* Called before each game frame: set what is off, and say it once. */
 static void unlock_all_pass(void)
 {
     static int said;
+    unlock_all_report();    /* MC3_UNLOCK_REPORT: independent of the toggle */
     if (!unlock_all_on())
         return;
     if (MEM8(UA_RACES) != 1)   MEM8(UA_RACES) = 1;

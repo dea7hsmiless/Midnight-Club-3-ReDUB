@@ -74,18 +74,29 @@ Landed so far (built and run on Windows, 2026-11-19):
 Still to do:
 
 5. **Split-screen validation (M0).** Two pads, the game's own mode. Store claim
-   is not true until this passes.
+   is not true until this passes. Progress 2026-11-19: the Arcade setup offers
+   `PLAYERS: 1/2` and with a second pad present it lists `P2 STOCK`; both start
+   prompts appear and the flow reaches **PLAYER 2 PRESS START**. The split render
+   itself has not been seen: no second physical pad was available, and the
+   synthetic pad-2 press (`RECOMP_PAD2_PRESS`) did not satisfy that prompt. Needs
+   a real controller, or a look at why pad 2's synthetic reports are not read
+   there.
 6. **Linux ISO import.** Port `Xdvdfs.cs` to a native helper, unpack into
    `redub-data/game-remix`, add a `prepare` step, then `iso_or_folder` in the
-   Linux manifest. Until then `AppRun` should answer an ISO with "this is a
-   disc image; extract it" (two lines, bundled with the rebuild).
+   Linux manifest. Until then `AppRun` answers an ISO with "this is a disc
+   image; extract it" — **done** (0.2.4a, `tools/appimage/AppRun:110`).
 7. **README platform split.** Windows takes an ISO or folder; Linux a folder.
-8. **Stop shipping `mcdub3remix_env.txt`.** It sits inside the release, so an
-   update replaces player settings. Ship `_defaults.txt` only and let the game
-   create the env file.
-9. **Windows run log.** `launcher-cli.log` records CLI actions only; the game's
-   output is lost when it is started directly, so RecompLauncher reports arrive
-   empty.
+   **Done** (README, "Your own game files").
+8. **Stop shipping `mcdub3remix_env.txt`.** **Done 2026-11-19:** the build
+   ships `mcdub3remix_env.example.txt` and never the player's file; the game
+   copies the example to `_env.txt` on first run (`windows_host.c`
+   `seed_player_settings`), and the launcher does the same before saving.
+   Verified: a clean dist with no env file creates one and keeps its settings.
+   `MC3_KEEP_ENV=1` restores a developer's copy for local runs.
+9. **Windows run log.** **Done 2026-11-19:** `StartDirect` launches the game
+   through `cmd /s /c "...exe" > work-remix/logs/latest.log 2>&1` (the previous
+   run is kept as `latest.log.previous`), so a RecompLauncher crash report has
+   the game's output. `launcher-cli.log` still records CLI actions.
 10. **System Link (M2)** then **online (M3)** and **free roam (M4)** per the
     roadmap. `RECOMP_NET_LINK=0` still reports "no cable"; the hook map in
     `DIFF-FINDINGS.md` is the starting point.

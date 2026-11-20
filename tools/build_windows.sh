@@ -99,7 +99,13 @@ ninja -C "$BUILD" -j"${JOBS:-$(mc3_default_jobs)}" ${TARGET:-}
 DIST="$BUILD/dist"
 [ -f "$DIST/${MC3_APP}_env.txt" ] && cp "$DIST/${MC3_APP}_env.txt" "$BUILD/${MC3_APP}_env.txt.keep"
 rm -rf "$DIST"; mkdir -p "$DIST"
-[ -f "$BUILD/${MC3_APP}_env.txt.keep" ] && mv "$BUILD/${MC3_APP}_env.txt.keep" "$DIST/${MC3_APP}_env.txt"
+# The player's settings file (${MC3_APP}_env.txt) is never part of a build: an
+# update unzips over the folder, so shipping it would replace what the player
+# set. The example is shipped, and the game copies it to the real file on the
+# first run. MC3_KEEP_ENV=1 puts this machine's copy back, for local runs.
+if [ "${MC3_KEEP_ENV:-0}" = 1 ] && [ -f "$BUILD/${MC3_APP}_env.txt.keep" ]; then
+    cp "$BUILD/${MC3_APP}_env.txt.keep" "$DIST/${MC3_APP}_env.txt"
+fi
 cp "$BUILD/$MC3_APP.exe" "$DIST/"
 "$PY" "$MC3_REPO/tools/windows/copy_dlls.py" "$DIST/$MC3_APP.exe" "${DLL_DIRS[@]}" "$DIST"
 
@@ -116,8 +122,8 @@ else
 fi
 
 # Settings, later wins: mcdub3_defaults.txt (this build's SCALE / SETTINGS,
-# rewritten every build), then mcdub3_env.txt (the player's: kept across
-# builds, made once from the documented template, every option commented).
+# rewritten every build), then mcdub3_env.txt (the player's: never shipped,
+# made from the documented example on the first run, every option commented).
 {
     echo "# Defaults of this build (make build SCALE=... UI_SCALE=... SETTINGS=...)."
     echo "# Rewritten by every build: change settings in ${MC3_APP}_env.txt instead."
@@ -126,8 +132,8 @@ fi
     [ -n "${EDITION:-}" ] && echo "EDITION=$EDITION"   # the disc in game-<edition>\ (windows_host.c)
     for kv in ${SETTINGS:-}; do echo "$kv"; done
 } | sed 's/$/\r/' > "$DIST/${MC3_APP}_defaults.txt"
-if [ ! -f "$DIST/${MC3_APP}_env.txt" ]; then
-    sed 's/$/\r/' "$MC3_REPO/switch/mcdub3_env.example.txt" > "$DIST/${MC3_APP}_env.txt"
+if [ ! -f "$DIST/${MC3_APP}_env.example.txt" ]; then
+    sed 's/$/\r/' "$MC3_REPO/switch/mcdub3_env.example.txt" > "$DIST/${MC3_APP}_env.example.txt"
 fi
 
 # The launcher, optional (the exe finds the disc and saves itself,
