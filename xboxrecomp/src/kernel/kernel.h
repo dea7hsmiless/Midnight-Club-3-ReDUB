@@ -575,6 +575,11 @@ const wchar_t *xbox_LastHostPath(void);
 
 BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, DWORD buf_size);
 
+/* Optional observer of every Xbox path the title asks for, called after a
+ * symlink resolves and before translation. mc3_autostart_on() uses it to
+ * tell the front end's screens apart (src/autostart.c). */
+extern void (*xbox_path_hook)(const char *xbox_path);
+
 /* ============================================================================
  * Pool Allocator (kernel_pool.c)
  * ============================================================================ */

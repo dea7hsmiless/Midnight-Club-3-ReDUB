@@ -408,6 +408,12 @@ int usb_gamepad_connected(int dev)
 }
 
 static volatile uint8_t s_held_digital[USB_GAMEPADS], s_held_analog[USB_GAMEPADS];
+static volatile uint8_t s_host_input[USB_GAMEPADS];
+
+int usb_gamepad_host_input(int dev)
+{
+    return dev >= 0 && dev < USB_GAMEPADS && s_host_input[dev];
+}
 
 void usb_gamepad_set_held(int dev, uint8_t digital, uint8_t analog)
 {
@@ -479,6 +485,7 @@ int usb_gamepad_report(int dev, uint8_t *out, int max)
     }
 
     if (xbox_InputGetState((DWORD)dev, &state) != 0) {
+        s_host_input[dev] = 0;
         out[2] = synth;
         pad_script(dev, &out[2], &out[4]);
         apply_held(dev, out);
@@ -486,6 +493,14 @@ int usb_gamepad_report(int dev, uint8_t *out, int max)
     }
 
     g = &state.Gamepad;
+    {
+        int on = g->wButtons != 0
+              || abs(g->sThumbLX) > 12000 || abs(g->sThumbLY) > 12000
+              || abs(g->sThumbRX) > 12000 || abs(g->sThumbRY) > 12000;
+        for (i = 0; i < 8; i++)
+            on |= g->bAnalogButtons[i] > XBOX_ANALOG_BUTTON_THRESHOLD;
+        s_host_input[dev] = (uint8_t)on;
+    }
     out[2] = (uint8_t)((g->wButtons & 0xFF) | synth);
     out[3] = (uint8_t)((g->wButtons >> 8) & 0xFF);
     for (i = 0; i < 8; i++)

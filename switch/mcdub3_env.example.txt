@@ -142,6 +142,14 @@
 # Unattended runs only: press A+Start while the intro movies play.
 #MC3_SKIP_MOVIES=0
 
+# Start in Arcade, Cruise without pressing through the menus (needs a profile;
+# any input of yours stops it).
+#MC3_AUTOSTART=cruise
+
+# Mods: every car, part, rim, paint and driving ability is available, and every
+# race and city is open. Career saves and money are untouched. Restart to apply.
+#MC3_UNLOCK_ALL=0
+
 # ============================================================================
 # Performance
 # ============================================================================

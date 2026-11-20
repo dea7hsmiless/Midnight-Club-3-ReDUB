@@ -158,6 +158,36 @@
         { "label": "On", "set": { "MC3_PC_MUSIC": "1" } }
       ],
       "defaults": { "MC3_PC_MUSIC": "0" }
+    },
+    {
+      "id": "unlock_all",
+      "label": "Unlock everything",
+      "help": "Every car, part, rim, paint and driving ability is available, and every race and city is open. Your career save and money are untouched. Restart to apply.",
+      "choices": [
+        { "label": "Off", "set": { "MC3_UNLOCK_ALL": "0" } },
+        { "label": "On", "set": { "MC3_UNLOCK_ALL": "1" } }
+      ],
+      "defaults": { "MC3_UNLOCK_ALL": "0" }
+    },
+    {
+      "id": "autostart_cruise",
+      "label": "Start in Arcade Cruise",
+      "help": "The game enters Arcade, Cruise on its own, pressing only what its menus allow. Any input of yours stops it; it needs an existing profile. Restart to apply.",
+      "choices": [
+        { "label": "Off", "set": { "MC3_AUTOSTART": "0" } },
+        { "label": "Cruise", "set": { "MC3_AUTOSTART": "cruise" } }
+      ],
+      "defaults": { "MC3_AUTOSTART": "0" }
+    },
+    {
+      "id": "skip_movies",
+      "label": "Skip intro movies",
+      "help": "Presses through the boot movies. The Rockstar logos still play in full. Restart to apply.",
+      "choices": [
+        { "label": "Off", "set": { "MC3_SKIP_MOVIES": "0" } },
+        { "label": "On", "set": { "MC3_SKIP_MOVIES": "1" } }
+      ],
+      "defaults": { "MC3_SKIP_MOVIES": "0" }
     }
   ],
   "actions": [

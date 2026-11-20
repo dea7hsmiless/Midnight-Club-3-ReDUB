@@ -86,6 +86,7 @@ file(GLOB MC3_GEN_SOURCES CONFIGURE_DEPENDS "${MC3_GEN_DIR}/*.c")
 
 set(MC3_SOURCES
     src/main.c
+    src/autostart.c
     ${MC3_MANUAL_C}
     src/ac97_nabm.c
     src/difftest.c

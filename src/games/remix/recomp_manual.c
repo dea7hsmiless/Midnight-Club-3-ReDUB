@@ -602,11 +602,29 @@ static void esp_check(const char *name, uint32_t esp0, uint32_t want)
     if (on && g_esp - esp0 != want && said++ < 20)
         fprintf(stderr, "[ABI] %s returned esp %+d, want %+u\n", name, (int)(g_esp - esp0), want);
 }
+/* MC3_SKIP_MOVIES=hard (see movie_skipped below): the movie being skipped.
+ * Its BinkDoFrame, BinkCopyToBuffer, BinkNextFrame and BinkWait return at
+ * once (nothing decoded, the game's cleared texture stays black) with the
+ * frame number at the last frame, so the movie loop (sub_003638A0) reports
+ * the end (3) and the game closes it and goes on as after a whole movie. */
+static uint32_t s_hard_hbink;
+static int hard_skip(unsigned args)
+{
+    uint32_t h = MEM32(g_esp + 4);
+    if (!s_hard_hbink || h != s_hard_hbink)
+        return 0;
+    MEM32(h + 0x0C) = MEM32(h + 0x08);          /* FrameNum = Frames */
+    g_eax = 0;
+    g_esp += 4 + 4 * args;                      /* stdcall: return address + arguments */
+    return 1;
+}
+
 extern void sub_003AD2C0_gen(void);
 void sub_003AD2C0(void)
 {
     double t0;
     uint32_t e0 = g_esp;
+    if (hard_skip(1)) return;
     if (!bt_on()) { sub_003AD2C0_gen(); esp_check("BinkDoFrame", e0, 8); return; }
     t0 = bt_now();
     if (s_bt_mark[BT_REST]) s_bt_sum[BT_REST] += t0 - s_bt_mark[BT_REST];
@@ -628,6 +646,7 @@ void sub_003AD280(void)
 {
     uint32_t hbink = MEM32(g_esp + 4), dest = MEM32(g_esp + 8), pitch = MEM32(g_esp + 12);
     uint32_t height = MEM32(g_esp + 16), x = MEM32(g_esp + 20), y = MEM32(g_esp + 24);
+    if (hard_skip(7)) return;
     if (bt_on() && s_bt_mark[BT_LOCK]) {
         s_bt_sum[BT_LOCK] += bt_now() - s_bt_mark[BT_LOCK];
         s_bt_mark[BT_LOCK] = 0;
@@ -652,6 +671,7 @@ extern void sub_003AD8D0_gen(void);
 void sub_003AD8D0(void)
 {
     uint32_t e0 = g_esp;
+    if (hard_skip(1)) return;
     bt_time(BT_NEXT, sub_003AD8D0_gen);
     esp_check("BinkNextFrame", e0, 8);
 }
@@ -662,6 +682,7 @@ void sub_003ACDF0(void)
 {
     double now;
     uint32_t e0 = g_esp;
+    if (hard_skip(1)) return;
     if (!bt_on()) { sub_003ACDF0_gen(); esp_check("BinkWait", e0, 8); return; }
     now = bt_now();
     if (!s_bt_wait_start) s_bt_wait_start = now;
@@ -694,12 +715,15 @@ extern int  mc3_bink_native_audio_active(void);
 
 /* MC3_SKIP_MOVIES: for unattended runs (headless, recordings) where nobody
  * is there to press Enter. Off by default: in a window, press it yourself.
- * A comma list of file names without the folder ("mc3intro.bik"), or 1 =
- * the boot intro (rockstar, sdlogo, mc3intro). While such a movie is open,
- * pad 1 pulses A + Start (3 frames held, 3 released: fresh presses) -- input
- * like a player's, through the title's own handling, so only what the game
- * lets you skip is skipped: the Rockstar and Rockstar San Diego logos play
- * in full (as on an Xbox), mc3intro is cut short. */
+ * A comma list of file names without the folder ("mc3intro.bik"), 1 = the
+ * boot intro (rockstar, sdlogo, mc3intro), or hard = the same with nothing
+ * decoded at all (hard_skip above). While such a movie is open, pad 1 pulses
+ * A + Start (3 frames held, 3 released: fresh presses) -- input like a
+ * player's, through the title's own handling, so only what the game lets you
+ * skip is skipped: with 1 the Rockstar and Rockstar San Diego logos play in
+ * full (as on an Xbox) and mc3intro is cut short. MC3_AUTOSTART implies 1,
+ * since nobody is there to press through the intro either. */
+extern int mc3_autostart_on(void);              /* src/autostart.c */
 extern void usb_gamepad_set_held(int dev, uint8_t digital, uint8_t analog);
 #define PAD_START 0x10u                         /* digital mask */
 #define PAD_A     0x01u                         /* analog mask */
@@ -710,9 +734,14 @@ static int movie_skipped(const char *path)
 {
     const char *list = getenv("MC3_SKIP_MOVIES"), *base = path, *p;
     size_t n;
+    int hard = 0;
 
+    if ((!list || !*list) && mc3_autostart_on())
+        list = "1";                             /* MC3_AUTOSTART skips the intro too */
     if (!list || !*list || !strcmp(list, "0"))
         return 0;
+    if (!strcmp(list, "hard"))
+        hard = 1, list = "1";
     if (!strcmp(list, "1"))
         list = "rockstar.bik,sdlogo.bik,mc3intro.bik";
     for (p = path; *p; p++)
@@ -723,7 +752,7 @@ static int movie_skipped(const char *path)
         const char *e = strchr(p, ',');
         size_t len = e ? (size_t)(e - p) : strlen(p);
         if (len == n && !strncasecmp(p, base, n))
-            return 1;
+            return 1 + hard;
         p += len + (e ? 1 : 0);
     }
     return 0;
@@ -735,16 +764,21 @@ void sub_003AB590(void)
 {
     char name[260] = "";
     uint32_t name_va = MEM32(g_esp + 4);
+    int skip;
 
     if (name_va)
         strncpy(name, (const char *)XBOX_PTR(name_va), sizeof name - 1);
-    if (name[0] && movie_skipped(name)) {
-        sub_003AB590_gen();
+    skip = name[0] ? movie_skipped(name) : 0;
+    sub_003AB590_gen();
+    if (skip == 2 && g_eax) {
+        s_hard_hbink = g_eax;
+        fprintf(stderr, "[BINK] skipping %s (MC3_SKIP_MOVIES=hard)\n", name);
+        return;
+    }
+    if (skip) {
         s_skip_hbink = g_eax;
         s_skip_frames = 0;
         fprintf(stderr, "[BINK] pressing A+Start through %s (MC3_SKIP_MOVIES)\n", name);
-    } else {
-        sub_003AB590_gen();
     }
     if (name[0] && g_eax)
         mc3_bink_native_open(g_eax, name);
@@ -754,6 +788,10 @@ void sub_003AB590(void)
 extern void sub_003ADA70_gen(void);
 void sub_003ADA70(void)
 {
+    if (s_hard_hbink && MEM32(g_esp + 4) == s_hard_hbink) {
+        fprintf(stderr, "[BINK] skipped, no frame played\n");
+        s_hard_hbink = 0;
+    }
     if (s_skip_hbink && MEM32(g_esp + 4) == s_skip_hbink) {
         usb_gamepad_set_held(0, 0, 0);
         fprintf(stderr, "[BINK] skipped after %u frames\n", s_skip_frames);
@@ -2269,9 +2307,11 @@ void sub_00020E40(void)
     sub_00020E40_gen();
 }
 extern void sub_00020EC0_gen(void);
+static uint32_t s_state_obj;                    /* the front end's state object, for MC3_AUTOSTART */
 void sub_00020EC0(void)
 {
     uint32_t obj = g_ecx, before = MEM32(obj + 4);
+    s_state_obj = obj;
     sub_00020EC0_gen();
     if (state_trace_on() && MEM32(obj + 4) != before)
         fprintf(stderr, "[STATE] %u -> %u\n", before, MEM32(obj + 4));
@@ -2772,6 +2812,7 @@ void sub_00222F00(void)
 }
 
 extern void sub_0020B6F0_gen(void);
+static void unlock_all_pass(void);      /* unlock_all.c, included at the end */
 void sub_0020B6F0(void)
 {
     static int on = -1;
@@ -2818,7 +2859,12 @@ void sub_0020B6F0(void)
 #else
         MEMF(0x004B2D58u) = 1.0f / 60.0f;
 #endif
+    unlock_all_pass();      /* MC3_UNLOCK_ALL: before the game reads its flags */
     sub_0020B6F0_gen();
+    if (s_state_obj) {      /* states 2 and 3: a race or cruise (sub_0001EDB0) */
+        extern void mc3_autostart_frame(int in_game, int downs_to_arcade);
+        mc3_autostart_frame(MEM32(s_state_obj + 4) == 2 || MEM32(s_state_obj + 4) == 3, 2);
+    }
     {
         static int time_trace = -1;
         if (time_trace < 0) {
@@ -3399,4 +3445,17 @@ void sub_0018D590(void)
     }
     sub_0018D590_gen();
     if(port_open) {PortRegs r=port_save();port_labels();port_restore(r);}
+}
+
+/* Mods: MC3_UNLOCK_ALL, the game's own unlock flags (unlock_all.c). */
+#include "unlock_all.c"
+
+/* sub_0028B4E0 is the game's generic "is this unlocked?" check; the reward
+ * paints are asked for by name. Defined here (not in unlock_all.c) because
+ * the lift scanner only reads this file. */
+extern void sub_0028B4E0_gen(void);
+void sub_0028B4E0(void)
+{
+    if (!unlock_all_paint())
+        sub_0028B4E0_gen();
 }

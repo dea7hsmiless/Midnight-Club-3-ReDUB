@@ -821,6 +821,11 @@ static int game_main(void)
     xbox_WatchdogStart();   /* inert unless RECOMP_WATCHDOG_SECS is set */
     perf_report_start();    /* inert unless MC3_PERF is set */
     hang_watch_start();     /* inert unless MC3_HANG_SECS is set */
+    {   /* MC3_AUTOSTART=cruise: the path hook before the guest runs, so the
+         * boot movies and the title's first screens are seen (autostart.c). */
+        extern int mc3_autostart_on(void);
+        mc3_autostart_on();
+    }
 #if !defined(__SWITCH__)
     {   /* SDL game controllers (a DualSense, an Xbox pad) as pads 1-4, with
          * the keyboard on top of pad 1; plugged in later, picked up within

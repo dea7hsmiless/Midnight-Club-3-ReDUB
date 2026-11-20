@@ -48,6 +48,12 @@ int usb_gamepad_report(int dev, uint8_t *out, int max);
  * title's own input handling. 0, 0 releases. */
 void usb_gamepad_set_held(int dev, uint8_t digital, uint8_t analog);
 
+/* Whether the last report of pad `dev` had input from the player: a host
+ * pad or the keyboard (a button, a trigger or a stick off centre), not the
+ * held buttons above nor the scripts. Lets title code that presses for the
+ * player stop when the player takes over (src/autostart.c). */
+int usb_gamepad_host_input(int dev);
+
 /* An output report from the host: the 6-byte rumble report
  * (id 0, length 6, left and right motor speeds as little-endian words),
  * from interrupt endpoint 2 or a class SET_REPORT. Forwarded to the host

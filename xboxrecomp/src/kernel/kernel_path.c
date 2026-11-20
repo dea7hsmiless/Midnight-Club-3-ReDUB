@@ -17,6 +17,8 @@
 #include <string.h>
 #include <ctype.h>
 
+void (*xbox_path_hook)(const char *xbox_path);
+
 /*
  * Helper: check if an ANSI string starts with a prefix (case-insensitive).
  * Returns the number of chars consumed from the prefix, or 0 if no match.
@@ -442,6 +444,8 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
         if (resolve_symlink(xbox_path, linked, sizeof(linked)))
             return xbox_translate_path(linked, host_path_buf, buf_size);
     }
+    if (xbox_path_hook)
+        xbox_path_hook(xbox_path);
 
     if (xbox_partition_device_path(xbox_path, host_path_buf, buf_size)) {
         fprintf(stderr, "  [PATH] %s -> partition image\n", xbox_path);
@@ -700,6 +704,8 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
         if (resolve_symlink(xbox_path, linked, sizeof(linked)))
             return xbox_translate_path(linked, host_path_buf, buf_size);
     }
+    if (xbox_path_hook)
+        xbox_path_hook(xbox_path);
 
     /* The request as the title made it; the [FILE] line after the open pairs
      * with it, the same as on the Win32 backend. */

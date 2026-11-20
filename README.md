@@ -187,7 +187,7 @@ Use `-NoInstall` to stage a game build while playing. Save and close before inst
 
 ## Credits and licensing
 
-ReDUB builds on [laureladastra/mcdub3-nx](https://github.com/laureladastra/mcdub3-nx), [sp00nznet/xboxrecomp](https://github.com/sp00nznet/xboxrecomp), and their contributors. SafeHouse inspired the launcher layout; ReDUB has its own implementation. SDL, FFmpeg, and other dependencies retain their licenses/notices. See repository license files and upstream documentation.
+ReDUB builds on [laureladastra/mcdub3-nx](https://github.com/laureladastra/mcdub3-nx), [sp00nznet/xboxrecomp](https://github.com/sp00nznet/xboxrecomp), and their contributors. Autostart and the "unlock everything" mod are adapted from [mc3-web by Leandro Dettmer](https://github.com/LeandroDettmer/mc3-web) (MIT); the notice is in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). SafeHouse inspired the launcher layout; ReDUB has its own implementation. SDL, FFmpeg, and other dependencies retain their licenses/notices. See repository license files and upstream documentation.
 
 Game names, trademarks, executable code, soundtrack, and original artwork belong to their rights holders. Artwork provenance is documented separately; inclusion does not grant redistribution rights for third-party material. The source-code license does not license game data or texture packs.
 

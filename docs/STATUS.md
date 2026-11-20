@@ -47,29 +47,50 @@ eight assets were replaced before publishing, and the published digests match `S
 
 ## Planned for 0.2.5
 
-1. **Linux ISO import.** The AppImage has never read a disc image (verified: `AppRun` is
-   byte-identical to 0.2.4's and no C code ever had an XDVDFS reader). To match Windows: bundle
-   an extractor in the AppImage, unpack into `redub-data/game-remix`, add a Linux `prepare` step
-   that prints `progress` lines, then set `iso_or_folder` in the Linux manifest. Port
-   `Xdvdfs.cs` or reuse `xboxrecomp/tools/xiso/xdvdfs.py`.
-2. **Say what an ISO is on Linux.** Until that lands, `AppRun` should answer an ISO given to
-   `--game-dir` with "this is a disc image; extract it" instead of the generic `default.xbe`
-   message. Two lines, bundled with the rebuild above.
-3. **README platform split.** The top-level line "ISO/XISO disc dump, or the complete extracted
-   folder" reads as cross-platform. Say Windows takes either and Linux takes a folder.
-4. **Stop shipping `mcdub3remix_env.txt`.** It sits inside the release, so an update replaces
-   player settings. Ship `_defaults.txt` only and let the game create the env file.
-5. **Windows run log.** `launcher-cli.log` records CLI actions only; the game's output is lost
-   when it is started directly, so RecompLauncher reports arrive empty.
-6. **Aspect ratio in the UI (issue #6).** The renderer already implements `RECOMP_GL_ASPECT`
-   (`auto` / `4:3` / `fill`) and both `nv2a_gl` and `nv2a_vk` honour it. Mobile already ships a
-   control — Android in its launcher (`LauncherActivity.java:993`), iOS in both its launcher
-   (`src/ios_launcher.m:171`) and in-game Port Options (`src/ios_host.c:252`). **Windows and
-   Linux expose nothing**: no launcher row, no Port Options row, nothing in either
-   `recomplauncher.json`. Add the row on both desktops, reusing the mobile wording
-   "Auto (16:9) / 4:3 / Stretch". Pair it with `RECOMP_WIDESCREEN`, `RECOMP_GL_SQUARE` and
-   `RECOMP_GL_FILL`, which are invisible everywhere. Needs a relaunch: the mode is cached in a
-   static.
+Scope: split-screen, a Mods menu, System Link, online, free roam and UX. Plan:
+`Desktop\ReDUB-0.2.5-work\ROADMAP-0.2.5.md`.
+
+Landed so far (built and run on Windows, 2026-11-19):
+
+1. **Mods page + `MC3_UNLOCK_ALL`.** Every car, part, rim, paint and driving
+   ability is available and every race and city is open (the game's own five
+   flags, re-asserted each frame; the two reward paints through the generic
+   check `sub_0028B4E0`). Career money and saves are untouched. Launcher Mods
+   page, both `recomplauncher.json` manifests. Restart to apply. Verified:
+   flags read back 1 and the game boots to Cruise; the garage list itself has
+   not been eyeballed yet.
+2. **`MC3_AUTOSTART=cruise`.** Cold boot to Arcade, Cruise through the game's
+   own menus (kernel path hook + pad 1 presses); any input of yours stops it.
+   Verified end to end: title, profile, main menu, Arcade, "in Cruise".
+3. **`MC3_SKIP_MOVIES=hard`.** Opens each boot movie and ends it at once with
+   nothing decoded; the Rockstar logos no longer play. Verified: all three
+   boot movies skipped, game reached the title.
+4. **Diff report** for the three mc3-web shared files:
+   `Desktop\ReDUB-0.2.5-work\diff-0.2.5\DIFF-FINDINGS.md`. `kernel_xbox.c` is
+   byte-identical (the 20 s XNET screen is not fixed there); `main.c` has one
+   portable hook; `recomp_manual.c` needs per-feature ports. Their System Link
+   thunk addresses and Online session hooks are recorded there.
+
+Still to do:
+
+5. **Split-screen validation (M0).** Two pads, the game's own mode. Store claim
+   is not true until this passes.
+6. **Linux ISO import.** Port `Xdvdfs.cs` to a native helper, unpack into
+   `redub-data/game-remix`, add a `prepare` step, then `iso_or_folder` in the
+   Linux manifest. Until then `AppRun` should answer an ISO with "this is a
+   disc image; extract it" (two lines, bundled with the rebuild).
+7. **README platform split.** Windows takes an ISO or folder; Linux a folder.
+8. **Stop shipping `mcdub3remix_env.txt`.** It sits inside the release, so an
+   update replaces player settings. Ship `_defaults.txt` only and let the game
+   create the env file.
+9. **Windows run log.** `launcher-cli.log` records CLI actions only; the game's
+   output is lost when it is started directly, so RecompLauncher reports arrive
+   empty.
+10. **System Link (M2)** then **online (M3)** and **free roam (M4)** per the
+    roadmap. `RECOMP_NET_LINK=0` still reports "no cable"; the hook map in
+    `DIFF-FINDINGS.md` is the starting point.
+11. **Aspect ratio in Port Options** (issue #6) — the launcher row exists; the
+    in-game page is full (17 rows + BACK). Decision needed before touching it.
 
 ## Open items
 
