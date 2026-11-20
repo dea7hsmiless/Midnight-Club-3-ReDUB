@@ -105,17 +105,25 @@ Still to do:
    `RECOMP_NET_PEERS` = the other machine) and a firewall rule for UDP
    `20000 + guest port` (20000-21000 covers MC3).
 9. **Online (M3)** — System Link over a VPN first (no code), then rooms.
-10. **Free roam (M4) — transport + engine cap up 2026-11-20.**
+10. **Free roam (M4) — the remote-car pool is in 2026-11-20.**
     `xboxrecomp/src/net/roam/` holds the game-agnostic core, its API and a new
     native UDP platform; `src/games/remix/roam_net.c` starts it under
     `MC3_ROAM=1`. With no hub the core discovers peers by broadcast (up to 8,
     a LAN mesh): two instances log `[roam] MC3 joined` on both sides.
     `src/games/remix/roam_caps.c` grows the vehicle registry once from 10 to
     22 (12 remote cars; `MC3_ROAM_CARS` sets it), verified in a cruise:
-    `[ROAM] caps: vehicle registry 10 -> 22`, no crash. Remaining: the game
-    layer — the remote-car pool (`roam_game.c`, `roam_pool.c`, `roam_cars.c`
-    from upstream, ~156 KB), which needs its Online-session dependencies
-    replaced before it compiles; then map blips and name tags.
+    `[ROAM] caps: vehicle registry 10 -> 22`, no crash.
+    The game layer is now in too: `roam_game.c`, `roam_cars.c` and
+    `roam_pool.c` from upstream, compiled against `roam_compat.h`, with the
+    player-manager, player-update, physics-step and state-pass hooks in
+    `recomp_manual.c` (`xbox_gil_atomic` added to `kernel_bridge.c`). Two
+    instances on one machine (`RECOMP_NET_ADDR` 127.0.0.1/127.0.0.2, each in
+    `RECOMP_NET_PEERS`; each needs its own writable `game-remix` UDATA) reach
+    Cruise with one peer each; both log `[ROAM] slot 1: ... driven, drawn 1,
+    in draw list 1, phys 1 ... (10 m from us)`. The cruise builds 3 slots
+    (1 peer + 2 spares), about 741-779 KB per car. Remaining: map blips and
+    name tags, particle-budget stress, radius tuning, and a visual check at
+    spawn (the two cars start side by side, outside the chase camera).
 11. **Port Options row for Display shape** (issue #6) — the launcher row
     exists; the in-game page is full (17 rows + BACK). Decision needed.
 12. **Rebuild the AppImage** so the ISO reader and the messages land, then
