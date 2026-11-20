@@ -15,6 +15,8 @@ def copy(src,dst):
  dst=Path(dst);dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,dst)
 copy(W/'linux-build/mcdub3remix',A/'usr/bin/mcdub3remix')
 subprocess.run(['cc',str(P/'redub-message.c'),'-o',str(A/'usr/bin/redub-message')]+run('pkg-config','--cflags','--libs','sdl2').split(),check=True)
+# The AppImage has no .NET or Python: this reads an Xbox XDVDFS image itself.
+subprocess.run(['cc','-O2',str(W/'release-source/xboxrecomp/tools/xiso/xdvdfs_extract.c'),'-o',str(A/'usr/bin/redub-xdvdfs')],check=True)
 for f in ['AppRun','redub.png','recomplauncher.json']:copy(P/f,A/f)
 (A/'version').write_text(VERSION+'\n')
 copy(P/'io.github.dea7hsmiless.ReDUB.desktop',A/'usr/share/applications/io.github.dea7hsmiless.ReDUB.desktop')
@@ -37,7 +39,7 @@ copy(W/'ffmpeg-6.1.4/COPYING.LGPLv2.1',A/'usr/share/licenses/redub/FFmpeg-LGPL-2
 copy(W/'ffmpeg-build/ffbuild/config.mak',A/'usr/share/doc/redub/ffmpeg-config.mak')
 env=dict(os.environ,LD_LIBRARY_PATH='/work/ffmpeg-install/lib')
 exclude=re.compile(r'^(ld-linux.*|lib(c|m|dl|rt|pthread|resolv|util|anl)\.so\..*|lib(GL|EGL|GLX|GLdispatch|OpenGL|vulkan|gbm|drm).*\.so.*)$')
-queue=[A/'usr/bin/mcdub3remix',A/'usr/bin/redub-message']; seen=set(); bundled={}; host={}
+queue=[A/'usr/bin/mcdub3remix',A/'usr/bin/redub-message',A/'usr/bin/redub-xdvdfs']; seen=set(); bundled={}; host={}
 while queue:
  f=queue.pop()
  for line in run('ldd',str(f),env=env).splitlines():

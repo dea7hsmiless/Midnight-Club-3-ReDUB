@@ -4,15 +4,27 @@
   "repo": "dea7hsmiless/Midnight-Club-3-ReDUB",
   "name": "ReDUB",
   "game": {
-    "kind": "folder",
-    "label": "Your own original Xbox copy of Midnight Club 3: DUB Edition Remix, extracted as a folder containing default.xbe. The USA and Europe discs both work; an ISO is not read on Linux, and the PS2 and non-Remix releases do not work.",
+    "kind": "iso_or_folder",
+    "label": "Your own original Xbox copy of Midnight Club 3: DUB Edition Remix - the disc image (.iso or .xiso), or the extracted folder containing default.xbe. The USA and Europe discs both work; the PS2 and non-Remix releases do not work.",
     "check": {
-      "file": "default.xbe"
-    }
+      "file": "default.xbe",
+      "xdvdfs": "default.xbe"
+    },
+    "dumps": [
+      { "name": "USA (Platinum Hits)", "size": 7825162240, "crc32": "a4337b2a" },
+      { "name": "Europe", "size": 7825162240, "crc32": "e0cad5e2" }
+    ]
+  },
+  "prepare": {
+    "program": ["ReDUB.AppImage"],
+    "args": ["--portable", "{install}/redub-data", "--import", "{game}"],
+    "label": "Unpacking your disc",
+    "timeout": 3600,
+    "done": ["{install}/redub-data/data/game-remix/default.xbe"]
   },
   "start": {
     "program": ["ReDUB.AppImage"],
-    "args": ["--game-dir", "{game}"]
+    "args": ["--portable", "{install}/redub-data", "--game-dir", "{install}/redub-data/data/game-remix"]
   },
   "config": [
     {

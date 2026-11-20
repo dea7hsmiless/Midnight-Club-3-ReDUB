@@ -42,8 +42,11 @@ ReDUB for Linux (Remix)
 Usage: ReDUB.AppImage [options]
 
 Game files (required):
-  --game-dir DIR        folder containing default.xbe (remembered beside the AppImage)
-  MC3_GAME_DIR          same, as an environment variable
+  --game-dir DIR|ISO    folder containing default.xbe, or an Xbox disc image,
+                        which is unpacked into the data folder (remembered)
+  --import DIR|ISO      only unpack the disc image, for a launcher's setup
+                        step, then exit (progress lines on stdout)
+  MC3_GAME_DIR          same as --game-dir DIR, as an environment variable
 
 Where data goes (portable by default, beside the AppImage):
   --portable DIR        keep saves, settings, logs and caches inside DIR
@@ -107,21 +110,38 @@ while [ "$#" -gt 0 ]; do
             exit 0 ;;
         --game-dir)
             need_value "$@"
-            if [ ! -f "$2/default.xbe" ]; then
-                if [ -f "$2" ]; then
-                    case "$2" in
-                        *.iso|*.ISO|*.xiso|*.XISO)
-                            fail 'That is a disc image, not a folder. This Linux package needs the extracted folder containing default.xbe: extract the ISO first, or use the Windows package, which imports a disc image.'
-                            ;;
-                        *)
-                            fail 'That is a file, not a folder. Give the extracted game folder containing default.xbe.'
-                            ;;
-                    esac
-                fi
+            if [ -d "$2" ] && [ -f "$2/default.xbe" ]; then
+                MC3_GAME_DIR=$(CDPATH= cd -- "$2" && pwd)
+                requested_game_dir=$MC3_GAME_DIR
+            elif [ -f "$2" ] && [ ! -d "$2" ]; then
+                case "$2" in
+                    *.iso|*.ISO|*.xiso|*.XISO)
+                        # Unpacked after the data folder is chosen (see below).
+                        import_image=$(CDPATH= cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")
+                        ;;
+                    *)
+                        fail 'That is a file, not a folder. Give the extracted game folder containing default.xbe, or a .iso disc image.'
+                        ;;
+                esac
+            else
                 fail 'The chosen folder does not contain default.xbe.'
             fi
-            MC3_GAME_DIR=$(CDPATH= cd -- "$2" && pwd)
-            requested_game_dir=$MC3_GAME_DIR
+            shift 2 ;;
+        --import)
+            need_value "$@"
+            if [ -d "$2" ] && [ -f "$2/default.xbe" ]; then
+                import_folder=$2
+            elif [ -f "$2" ]; then
+                case "$2" in
+                    *.iso|*.ISO|*.xiso|*.XISO)
+                        import_image=$(CDPATH= cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")
+                        ;;
+                    *) fail '--import takes an Xbox disc image (.iso or .xiso) or a folder containing default.xbe.' ;;
+                esac
+            else
+                fail "Not found: $2"
+            fi
+            import_only=1
             shift 2 ;;
         --portable)
             need_value "$@"
@@ -190,7 +210,47 @@ fi
 if [ -z "${MC3_GAME_DIR:-}" ]; then read_location "$config_dir/game-location.txt"; fi
 if [ -z "${MC3_GAME_DIR:-}" ]; then read_location "$package_dir/redub.game-location.txt"; fi
 if [ -z "${MC3_GAME_DIR:-}" ] && [ -f "$package_dir/game-remix/default.xbe" ]; then MC3_GAME_DIR=$package_dir/game-remix; fi
-[ -n "${MC3_GAME_DIR:-}" ] && [ -f "$MC3_GAME_DIR/default.xbe" ] || fail 'ReDUB needs your extracted Xbox Remix game files. Run this AppImage with --game-dir followed by the folder containing default.xbe, or put that folder path in redub.game-location.txt beside the AppImage. No game files are included.'
+
+# A folder given to --import is used in place through a symlink; an ISO is
+# unpacked into the data folder. Both land at the same path, so a launcher's
+# prepare step and the game agree on where the files are.
+if [ -n "${import_folder:-}" ]; then
+    target=$data_dir/game-remix
+    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+        mkdir -p "$data_dir"
+        ln -s "$(CDPATH= cd -- "$import_folder" && pwd)" "$target" 2>/dev/null \
+            || fail "Cannot link the game folder into $data_dir."
+    fi
+    MC3_GAME_DIR=$target
+    requested_game_dir=$MC3_GAME_DIR
+fi
+if [ -n "${import_image:-}" ]; then
+    target=$data_dir/game-remix
+    if [ ! -f "$target/default.xbe" ]; then
+        mkdir -p "$data_dir"
+        if [ -e "$target" ] && [ ! -d "$target" ]; then
+            fail "$target exists and is not a folder."
+        fi
+        # A cancelled or failed earlier import leaves a partial folder behind.
+        if [ -d "$target" ] && [ -n "$(ls -A -- "$target" 2>/dev/null)" ]; then
+            rm -rf -- "$target"
+        fi
+        mkdir -p "$target"
+        printf 'Extracting %s to %s\n' "$import_image" "$target" >&2
+        if ! "$APPDIR/usr/bin/redub-xdvdfs" "$import_image" "$target"; then
+            rm -rf -- "$target"
+            fail 'That disc image could not be read. Use a standard Xbox XDVDFS image (2048-byte sectors).'
+        fi
+    fi
+    MC3_GAME_DIR=$target
+    requested_game_dir=$MC3_GAME_DIR
+fi
+if [ -n "${import_only:-}" ]; then
+    printf 'done\n'
+    exit 0
+fi
+
+[ -n "${MC3_GAME_DIR:-}" ] && [ -f "$MC3_GAME_DIR/default.xbe" ] || fail 'ReDUB needs your Xbox Remix game files. Run this AppImage with --game-dir followed by the folder containing default.xbe (or a .iso disc image), or put that folder path in redub.game-location.txt beside the AppImage. No game files are included.'
 MC3_GAME_DIR=$(CDPATH= cd -- "$MC3_GAME_DIR" && pwd)
 export MC3_GAME_DIR
 # Native Wayland is not supported by this release; use X11 or XWayland.
