@@ -70,38 +70,42 @@ Landed so far (built and run on Windows, 2026-11-19):
    byte-identical (the 20 s XNET screen is not fixed there); `main.c` has one
    portable hook; `recomp_manual.c` needs per-feature ports. Their System Link
    thunk addresses and Online session hooks are recorded there.
+5. **Split-screen (M0) — validated 2026-11-19.** Arcade setup offers
+   `PLAYERS: 1/2`; with a second controller (a pad script standing in) it adds
+   `P2 STOCK`, walks `PLAYER 1 PRESS START` / `PLAYER 2 PRESS START`, and the
+   race renders **two live viewports, each with its own HUD and camera**.
+   Screenshot: `Desktop\ReDUB-0.2.5-work\test\shots\split-live.png`. The store
+   claim is now true on this machine.
+6. **System Link (M2) — in progress.** `xboxrecomp/src/net/xnet_hle.c` (host
+   UDP) and 21 thunks in `recomp_manual.c`, all behind `MC3_NETPLAY=1`. Verified:
+   the HLE comes up, the main menu reports "Not Signed In" instead of
+   "Sign-In Failed", and Networking -> System Link -> Create Match -> Host Game
+   reaches the game's own **LOBBY** (4 player slots). Not yet: a second instance
+   joining (needs a profile on both).
+7. **Linux ISO import — implemented 2026-11-19.** Native reader
+   `xboxrecomp/tools/xiso/xdvdfs_extract.c` (port of `Xdvdfs.cs`), bundled as
+   `usr/bin/redub-xdvdfs`; `AppRun --import` / `--game-dir <iso>` unpacks into
+   the data folder with progress; the Linux manifest is `iso_or_folder` with a
+   `prepare` step. Tested on a real Xbox image (2.87 GB: full tree in 22 s, a
+   foreign `default.xbe` correctly refused). The AppImage still needs a rebuild.
 
 Still to do:
 
-5. **Split-screen validation (M0).** Two pads, the game's own mode. Store claim
-   is not true until this passes. Progress 2026-11-19: the Arcade setup offers
-   `PLAYERS: 1/2` and with a second pad present it lists `P2 STOCK`; both start
-   prompts appear and the flow reaches **PLAYER 2 PRESS START**. The split render
-   itself has not been seen: no second physical pad was available, and the
-   synthetic pad-2 press (`RECOMP_PAD2_PRESS`) did not satisfy that prompt. Needs
-   a real controller, or a look at why pad 2's synthetic reports are not read
-   there.
-6. **Linux ISO import.** Port `Xdvdfs.cs` to a native helper, unpack into
-   `redub-data/game-remix`, add a `prepare` step, then `iso_or_folder` in the
-   Linux manifest. Until then `AppRun` answers an ISO with "this is a disc
-   image; extract it" — **done** (0.2.4a, `tools/appimage/AppRun:110`).
-7. **README platform split.** Windows takes an ISO or folder; Linux a folder.
-   **Done** (README, "Your own game files").
-8. **Stop shipping `mcdub3remix_env.txt`.** **Done 2026-11-19:** the build
-   ships `mcdub3remix_env.example.txt` and never the player's file; the game
-   copies the example to `_env.txt` on first run (`windows_host.c`
-   `seed_player_settings`), and the launcher does the same before saving.
-   Verified: a clean dist with no env file creates one and keeps its settings.
-   `MC3_KEEP_ENV=1` restores a developer's copy for local runs.
-9. **Windows run log.** **Done 2026-11-19:** `StartDirect` launches the game
-   through `cmd /s /c "...exe" > work-remix/logs/latest.log 2>&1` (the previous
-   run is kept as `latest.log.previous`), so a RecompLauncher crash report has
-   the game's output. `launcher-cli.log` still records CLI actions.
-10. **System Link (M2)** then **online (M3)** and **free roam (M4)** per the
-    roadmap. `RECOMP_NET_LINK=0` still reports "no cable"; the hook map in
-    `DIFF-FINDINGS.md` is the starting point.
-11. **Aspect ratio in Port Options** (issue #6) — the launcher row exists; the
-    in-game page is full (17 rows + BACK). Decision needed before touching it.
+8. **System Link join.** Two instances, two profiles: host on
+   `RECOMP_NET_ADDR=127.0.0.1` / peer `127.0.0.2`, join on the second, then
+   start a race; then a real LAN and a VPN. The 20 s DHCP screen stays away
+   because the kernel NIC is idle.
+9. **Online (M3)** — System Link over a VPN first (no code), then rooms.
+10. **Free roam (M4)** — last, on M2/M3, with the engine caps in
+    `upstream-mc3web\docs\online-limits.md`.
+11. **Port Options row for Display shape** (issue #6) — the launcher row
+    exists; the in-game page is full (17 rows + BACK). Decision needed.
+12. **Rebuild the AppImage** so the ISO reader and the messages land, then
+    repackage the Windows zip for the env-file/log changes.
+
+Superseded notes on the old list: `AppRun` already answered an ISO with a clear
+message in 0.2.4a; the README platform split landed in 0.2.4a; the env file is
+no longer shipped; the Windows run log is written by the launcher.
 
 ## Open items
 
