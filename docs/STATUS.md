@@ -57,8 +57,11 @@ Landed so far (built and run on Windows, 2026-11-19):
    flags, re-asserted each frame; the two reward paints through the generic
    check `sub_0028B4E0`). Career money and saves are untouched. Launcher Mods
    page, both `recomplauncher.json` manifests. Restart to apply. Verified:
-   flags read back 1 and the game boots to Cruise; the garage list itself has
-   not been eyeballed yet.
+   flags read back 1 and the game boots to Cruise; the showroom report reads
+   94 of 94 cars buyable with the toggle, 10 of 94 without it.
+   The Mods page holds gameplay mods only; autostart and skip-movies moved to
+   **Settings -> Startup** so "Mods" keeps its meaning (see `AGENTS.md`,
+   "Features, options and mods").
 2. **`MC3_AUTOSTART=cruise`.** Cold boot to Arcade, Cruise through the game's
    own menus (kernel path hook + pad 1 presses); any input of yours stops it.
    Verified end to end: title, profile, main menu, Arcade, "in Cruise".

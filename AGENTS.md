@@ -36,6 +36,17 @@ Never modify `game-remix/` — it is the user's own disc data.
   `/home/<name>`, `%USERPROFILE%`, drive letters (`D:\`, `E:\`) or other absolute paths from a
   developer machine into a committed file. Use placeholders (`<repo-root>`, `<game-dir>`) and
   relative paths; this is a public repository.
+- **Features, options and mods are different things.**
+  - *Port feature*: something the Xbox game already did and the port had to rebuild (System
+    Link/LAN Play, split-screen, controller and save handling). Always available or a plain
+    setting; never presented as a mod, and the only kind a store claim may lean on.
+  - *Port option*: presentation, performance, input or startup behaviour (resolution, FXAA,
+    aspect, frame rate, PC music, autostart, skip movies). Lives under Settings.
+  - *Mod*: changes what the game does — its rules, progression or content (unlock
+    everything, drift scoring, extra cars, free-roam multiplayer). Off by default, labelled
+    "(restart)", tested on a throwaway profile, and never part of a store claim.
+  - A mod must not change the simulation while networked: two peers with different mods
+    desync. Keep the mod layer out of anything System Link runs.
 
 ## Before saying "done"
 
