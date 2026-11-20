@@ -6,7 +6,7 @@ Original Xbox code translated to native C - no emulator - for Windows, Linux, An
 
 <p align="center"><a href="https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/tree/main">Source</a> · <a href="https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases">Releases</a> · <a href="BUILDING-WINDOWS.md">Build from source</a></p>
 
-<p align="center"><a href="https://recomplauncher.com"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/press/badge-light.svg"><img alt="Get it on RecompLauncher" src="assets/press/badge-dark.svg" height="48"></picture></a></p>
+<p align="center"><a href="https://recomplauncher.com](https://recomplauncher.com/game/midnight-club-3-redub"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/press/badge-light.svg"><img alt="Get it on RecompLauncher" src="assets/press/badge-dark.svg" height="48"></picture></a></p>
 
 # Midnight Club 3: ReDUB
 
