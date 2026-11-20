@@ -3,16 +3,25 @@
 ReDUB's own code is MIT (see `LICENSE`). It also contains code adapted from other MIT
 projects, whose notices are kept here.
 
-## mc3-web
+## mc3-web and nfsu2-web
 
-`src/autostart.c` and `src/games/remix/unlock_all.c` are adapted from **mc3-web** by
-Leandro Dettmer, taken from commit `7a64713` (2026-11-12), the last commit before that
-project changed licence. Adapted with permission of the MIT licence it carried:
+`src/autostart.c`, `src/games/remix/unlock_all.c` and
+`xboxrecomp/src/net/xnet_hle.c` are adapted from **mc3-web** by Leandro Dettmer,
+taken from commit `7a64713` (2026-11-12), the last commit before that project
+changed licence.
+
+`xboxrecomp/src/net/roam/` (the free-roam core, its API and the native platform
+it plugs into) is ported from **nfsu2-web** by th0mk (MIT), through mc3-web, and
+keeps that project's design: the wire format, the session and interpolation,
+and the platform interface.
+
+Both are used under the MIT licence they carried:
 
 ```
 MIT License
 
 Copyright (c) 2026 Leandro Dettmer
+Copyright (c) 2026 th0mk (nfsu2-web, for the free-roam core)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

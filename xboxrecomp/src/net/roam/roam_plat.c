@@ -1,0 +1,310 @@
+/* roam_plat.c -- free-roam multiplayer: the native UDP platform.
+ *
+ * The core (roam_core.c) is transport-agnostic and already supports hubless
+ * discovery for up to 8 players (MC3_ROAM_HUB=0): it broadcasts HELLO and
+ * learns peers from each other. This file is the endpoint it expects: one
+ * UDP socket on ROAM_PORT, a receive thread that feeds the session and ticks
+ * it every 10 ms, and the monotonic clock and random id the API asks for.
+ *
+ * Two copies on one machine: bind with RECOMP_NET_ADDR (127.0.0.1 and
+ * 127.0.0.2) and list the other in RECOMP_NET_PEERS, the same way the XNet
+ * transport does. On a LAN, neither is needed: HELLOs go to 255.255.255.255.
+ *
+ * The core and API are from mc3-web by Leandro Dettmer (MIT, commit
+ * 7a64713), in turn from nfsu2-web by th0mk (MIT). */
+
+#include "roam_plat.h"
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+typedef SOCKET rsock_t;
+#define RSOCK_BAD INVALID_SOCKET
+static CRITICAL_SECTION g_lock;
+static HANDLE g_thread;
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <time.h>
+#include <unistd.h>
+typedef int rsock_t;
+#define RSOCK_BAD (-1)
+static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t g_thread;
+#endif
+
+#define ROAM_DGRAM_MAX 2048
+#define ROAM_PEERS_MAX 16
+
+static rsock_t     g_sock = RSOCK_BAD;
+static volatile int g_run;
+static rc_session *g_s;
+static uint32_t    g_peers[ROAM_PEERS_MAX];
+static int         g_npeers;
+static int         g_lock_init;
+
+static int64_t plat_now_us(void)
+{
+#ifdef _WIN32
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER c;
+    if (!freq.QuadPart)
+        QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&c);
+    return (int64_t)((double)c.QuadPart * 1000000.0 / (double)freq.QuadPart);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+#endif
+}
+
+int64_t roam_plat_now_us(void) { return plat_now_us(); }
+
+uint32_t roam_plat_random(void)
+{
+    static uint64_t x;
+    if (!x) {
+        x = (uint64_t)plat_now_us() ^ ((uint64_t)(uintptr_t)&x << 17) ^ 0x9E3779B97F4A7C15ull;
+#ifdef _WIN32
+        x ^= (uint64_t)GetCurrentProcessId() << 7;
+#else
+        x ^= (uint64_t)getpid() << 7;
+#endif
+    }
+    x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+    return (uint32_t)x | 1u;
+}
+
+void roam_plat_lock(void)
+{
+    if (!g_lock_init)
+        return;
+#ifdef _WIN32
+    EnterCriticalSection(&g_lock);
+#else
+    pthread_mutex_lock(&g_lock);
+#endif
+}
+
+void roam_plat_unlock(void)
+{
+    if (!g_lock_init)
+        return;
+#ifdef _WIN32
+    LeaveCriticalSection(&g_lock);
+#else
+    pthread_mutex_unlock(&g_lock);
+#endif
+}
+
+static void plat_send(void *user, uint32_t ip, uint16_t port, const uint8_t *buf, int len)
+{
+    struct sockaddr_in a;
+    (void)user;
+    if (g_sock == RSOCK_BAD || len <= 0)
+        return;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_port = htons(port);
+    a.sin_addr.s_addr = htonl(ip);          /* the core passes host order */
+    sendto(g_sock, (const char *)buf, len, 0, (struct sockaddr *)&a, sizeof a);
+}
+
+/* A broadcast that a LAN receives; on one machine (or a VPN that drops
+ * broadcasts) each RECOMP_NET_PEERS address gets a copy instead. */
+static void plat_broadcast(void *user, uint16_t port, const uint8_t *buf, int len)
+{
+    int i;
+    plat_send(user, 0xFFFFFFFFu, port, buf, len);
+    for (i = 0; i < g_npeers; i++)
+        plat_send(user, g_peers[i], port, buf, len);
+}
+
+static void plat_receive_all(void)
+{
+    uint8_t buf[ROAM_DGRAM_MAX];
+    for (;;) {
+        struct sockaddr_in from;
+        int n;
+        socklen_t fl = (socklen_t)sizeof from;
+        n = (int)recvfrom(g_sock, (char *)buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
+        if (n <= 0)
+            return;
+        roam_plat_lock();
+        if (g_run && g_s)
+            rc_receive(g_s, ntohl(from.sin_addr.s_addr), ntohs(from.sin_port), buf, n, plat_now_us());
+        roam_plat_unlock();
+    }
+}
+
+static void plat_loop(void)
+{
+    while (g_run) {
+        fd_set rfds;
+        struct timeval tv;
+        int r;
+        FD_ZERO(&rfds);
+        if (g_sock != RSOCK_BAD)
+            FD_SET(g_sock, &rfds);
+        tv.tv_sec = 0;
+        tv.tv_usec = 10000;                 /* 10 ms: the core's tick */
+        r = select((int)g_sock + 1, &rfds, NULL, NULL, &tv);
+        if (r > 0 && g_sock != RSOCK_BAD && FD_ISSET(g_sock, &rfds))
+            plat_receive_all();
+        roam_plat_lock();
+        if (g_run && g_s)
+            rc_tick(g_s, plat_now_us());
+        roam_plat_unlock();
+    }
+}
+
+#ifdef _WIN32
+static DWORD WINAPI plat_thread(LPVOID p)
+{
+    (void)p;
+    plat_loop();
+    return 0;
+}
+#else
+static void *plat_thread(void *p)
+{
+    (void)p;
+    plat_loop();
+    return NULL;
+}
+#endif
+
+static int parse_peers(void)
+{
+    const char *e = getenv("RECOMP_NET_PEERS");
+    g_npeers = 0;
+    while (e && *e && g_npeers < ROAM_PEERS_MAX) {
+        char ip[64];
+        size_t n = strcspn(e, ",");
+        struct in_addr a;
+        if (n && n < sizeof ip) {
+            memcpy(ip, e, n);
+            ip[n] = 0;
+            if (inet_pton(AF_INET, ip, &a) == 1 && a.s_addr != 0xFFFFFFFFu)
+                g_peers[g_npeers++] = ntohl(a.s_addr);
+        }
+        e += n + (e[n] == ',');
+    }
+    return g_npeers;
+}
+
+int roam_plat_start(rc_session *s, uint16_t port)
+{
+    struct sockaddr_in a;
+    const char *addr;
+    int one = 1;
+
+    if (g_sock != RSOCK_BAD)
+        return -1;
+#ifdef _WIN32
+    {
+        WSADATA w;
+        if (WSAStartup(MAKEWORD(2, 2), &w) != 0)
+            return -1;
+    }
+#else
+    if (!g_lock_init) {
+        pthread_mutex_init(&g_lock, NULL);
+    }
+#endif
+#ifdef _WIN32
+    if (!g_lock_init)
+        InitializeCriticalSection(&g_lock);
+#endif
+    g_lock_init = 1;
+
+    g_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (g_sock == RSOCK_BAD) {
+        g_lock_init = 0;
+        return -1;
+    }
+#ifdef _WIN32
+    setsockopt(g_sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, sizeof one);
+#else
+    setsockopt(g_sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#endif
+    setsockopt(g_sock, SOL_SOCKET, SO_BROADCAST, (const char *)&one, sizeof one);
+
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_port = htons(port);
+    /* Bind the address this copy is told to use, so two instances on one
+     * machine can share the port. A LAN leaves it unset. */
+    addr = getenv("RECOMP_NET_ADDR");
+    if (addr && *addr) {
+        struct in_addr ia;
+        if (inet_pton(AF_INET, addr, &ia) == 1)
+            a.sin_addr.s_addr = ia.s_addr;
+    }
+    if (bind(g_sock, (struct sockaddr *)&a, sizeof a) != 0) {
+#ifdef _WIN32
+        closesocket(g_sock);
+#else
+        close(g_sock);
+#endif
+        g_sock = RSOCK_BAD;
+        g_lock_init = 0;
+        return -1;
+    }
+
+    parse_peers();
+    if (s) {
+        s->io.send = plat_send;
+        s->io.broadcast = plat_broadcast;
+    }
+    g_s = s;
+    g_run = 1;
+#ifdef _WIN32
+    g_thread = CreateThread(NULL, 0, plat_thread, NULL, 0, NULL);
+    if (!g_thread) {
+        g_run = 0;
+        closesocket(g_sock);
+        g_sock = RSOCK_BAD;
+        return -1;
+    }
+#else
+    if (pthread_create(&g_thread, NULL, plat_thread, NULL) != 0) {
+        g_run = 0;
+        close(g_sock);
+        g_sock = RSOCK_BAD;
+        return -1;
+    }
+#endif
+    fprintf(stderr, "[roam] udp platform on port %u, %d peer(s)%s\n",
+            (unsigned)port, g_npeers, g_npeers ? " (broadcasts unicast to them)" : "");
+    return 0;
+}
+
+void roam_plat_stop(void)
+{
+    if (g_sock == RSOCK_BAD)
+        return;
+    g_run = 0;
+#ifdef _WIN32
+    if (g_thread) {
+        WaitForSingleObject(g_thread, 2000);
+        CloseHandle(g_thread);
+        g_thread = NULL;
+    }
+    closesocket(g_sock);
+#else
+    pthread_join(g_thread, NULL);
+    close(g_sock);
+#endif
+    g_sock = RSOCK_BAD;
+    g_s = NULL;
+}

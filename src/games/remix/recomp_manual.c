@@ -2813,6 +2813,7 @@ void sub_00222F00(void)
 
 extern void sub_0020B6F0_gen(void);
 static void unlock_all_pass(void);      /* unlock_all.c, included at the end */
+static void roam_net_boot(void);        /* roam_net.c, included at the end */
 void sub_0020B6F0(void)
 {
     static int on = -1;
@@ -2860,6 +2861,7 @@ void sub_0020B6F0(void)
         MEMF(0x004B2D58u) = 1.0f / 60.0f;
 #endif
     unlock_all_pass();      /* MC3_UNLOCK_ALL: before the game reads its flags */
+    roam_net_boot();        /* MC3_ROAM=1: free-roam transport, once */
     sub_0020B6F0_gen();
     if (s_state_obj) {      /* states 2 and 3: a race or cruise (sub_0001EDB0) */
         extern void mc3_autostart_frame(int in_game, int downs_to_arcade);
@@ -3697,3 +3699,6 @@ void sub_0028B4E0(void)
     if (!unlock_all_paint())
         sub_0028B4E0_gen();
 }
+
+/* Free roam: the transport (roam_net.c); the car pool comes next. */
+#include "roam_net.c"
