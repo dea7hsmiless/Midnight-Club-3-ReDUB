@@ -128,12 +128,14 @@ Still to do:
     screen-space tags; `port_overlay.h` draws them with the port's own glyph
     pass. B logs `[ROAM] name tags: 1 remotes, 1 on screen`; the "MC3" tag is
     visible over the peer's car position (`test\shots\roam-tag-B.png`).
-    Remaining: the remote car body is still not visible under the tag (the
-    render object reports drawn/in draw list/in physics, so this is a draw or
-    occlusion issue, not the pool); map blips; particle-budget stress; radius
-    tuning; and the two-instance start race (one copy sometimes spins at boot
-    when both launch together; starting the second after the first is in
-    Cruise avoids it).
+    The spawn nudge now steps **backward** first (`cc81720`): at the Free
+    Roam start spot the car faces the customs/garage wall, so the old +10 m
+    "along the road" put the second player inside the building (its tag showed
+    through, its car did not). Not yet re-verified visually: after several
+    runs, a second copy on this machine consistently spins at boot
+    (frame 1, XPP thunks) while the first is in Cruise, so the two-instance
+    test needs a clean machine or two PCs. Remaining: verify the body in the
+    open, map blips, particle-budget stress, radius tuning.
 11. **Port Options row for Display shape** (issue #6) — the launcher row
     exists; the in-game page is full (17 rows + BACK). Decision needed.
 12. **Rebuild the AppImage** so the ISO reader and the messages land, then
