@@ -86,6 +86,9 @@ add_subdirectory(src/nv2a)
 # drives these registers directly, so a pad only exists if they do.
 add_subdirectory(src/usb)
 
+# Net: XNet (System Link) API over host UDP sockets (xnet_hle).
+add_subdirectory(src/net)
+
 # Input: Xbox gamepad → XInput
 add_subdirectory(src/input)
 
@@ -113,6 +116,7 @@ target_link_libraries(xboxrecomp INTERFACE
     xbox_dsound
     xbox_input
     xbox_usb
+    xbox_net
     xbox_apu
     xbox_nv2a
     xbox_video

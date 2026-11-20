@@ -3447,6 +3447,244 @@ void sub_0018D590(void)
     if(port_open) {PortRegs r=port_save();port_labels();port_restore(r);}
 }
 
+/* ── System Link: the XNet API answered by the runtime (MC3_NETPLAY=1) ──
+ *
+ * MC3 plays System Link over plain Winsock datagrams: UDP :1000 with
+ * SO_BROADCAST (discovery to 255.255.255.255:1000) and VDP :1001, both
+ * non-blocking; peers by XNADDR -> XNetXnAddrToInAddr. The statically linked
+ * XNET library (CXn at [0x0055FDAC], its NIC driver, secure key exchange)
+ * cannot run: no NIC interrupts. So its exported thunks (`mov ecx,
+ * [0x55FDAC]; jmp CXn::method`, XNET section) are answered by
+ * xboxrecomp/src/net/xnet_hle.c over host UDP sockets.
+ *
+ * XNetStartup / WSAStartup never create CXn, so the Live-only thunks left
+ * lifted (XNetQosLookup, ...) keep returning WSANOTINITIALISED, and
+ * RECOMP_NET_LINK=0 keeps the NIC idle (PhyGetLinkState: no cable), which is
+ * what avoids the ~20 s XNET DHCP black screen. Addresses from the USA XBE
+ * (the edition this tree lifts); the EUR disc is the same code.
+ *
+ * Off by default: each override runs the lifted thunk unless MC3_NETPLAY=1.
+ * Transport: RECOMP_NET_PORT_BASE / _ADDR / _PEERS (xnet_hle.c).
+ *
+ * Adapted from mc3-web by Leandro Dettmer (MIT, commit 7a64713). */
+#include "net/xnet_hle.h"
+
+static int netplay_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("MC3_NETPLAY");
+        on = e && *e == '1';
+        if (on)
+            fprintf(stderr, "[NET] System Link HLE on (MC3_NETPLAY): XNet answered over host UDP\n");
+    }
+    return on;
+}
+
+#define NET_ARG(i) MEM32(g_esp + 4u * (i))
+static uint8_t *net_ptr(uint32_t va) { return va ? (uint8_t *)XBOX_PTR(va) : NULL; }
+/* stdcall return: result in eax, pop the return address and the arguments */
+static void net_ret(uint32_t eax, uint32_t nargs) { g_eax = eax; g_esp += 4u + 4u * nargs; }
+
+/* XNetGetEthernetLinkStatus (XAPI, .text): the System Link menu is gated on it */
+extern void sub_002E9B40_gen(void);
+void sub_002E9B40(void)
+{
+    if (!netplay_on()) { sub_002E9B40_gen(); return; }
+    net_ret(xnet_link_status(), 0);
+}
+
+/* XNetStartup(params) */
+extern void sub_003CC350_gen(void);
+void sub_003CC350(void)
+{
+    if (!netplay_on()) { sub_003CC350_gen(); return; }
+    net_ret((uint32_t)xnet_startup(), 1);
+}
+
+/* WSAStartup(wVersionRequested, lpWSAData). wVersion is the version asked
+ * for, up to 2.2. MC3's network init (sub_001A2870) asks for 2.0 and quits
+ * unless it gets exactly 2.0. */
+extern void sub_003CC367_gen(void);
+void sub_003CC367(void)
+{
+    uint8_t *wsa;
+    uint32_t want = NET_ARG(1);
+    uint8_t major = want & 0xFF, minor = (want >> 8) & 0xFF;
+    int r;
+    if (!netplay_on()) { sub_003CC367_gen(); return; }
+    if (major > 2 || (major == 2 && minor > 2))
+        major = 2, minor = 2;
+    wsa = net_ptr(NET_ARG(2));
+    r = xnet_startup();
+    if (!r && wsa) {
+        wsa[0] = major; wsa[1] = minor;   /* wVersion */
+        wsa[2] = 2; wsa[3] = 2;           /* wHighVersion */
+    }
+    net_ret((uint32_t)(wsa ? r : XNET_WSAEFAULT), 2);
+}
+
+/* WSACleanup() */
+extern void sub_003CC455_gen(void);
+void sub_003CC455(void)
+{
+    if (!netplay_on()) { sub_003CC455_gen(); return; }
+    net_ret(0, 0);
+}
+
+/* WSAGetLastError() */
+extern void sub_003CC4E5_gen(void);
+void sub_003CC4E5(void)
+{
+    if (!netplay_on()) { sub_003CC4E5_gen(); return; }
+    net_ret((uint32_t)xnet_last_error(), 0);
+}
+
+/* XNetRandom(pb, cb) */
+extern void sub_003CBF8F_gen(void);
+void sub_003CBF8F(void)
+{
+    uint8_t *p;
+    if (!netplay_on()) { sub_003CBF8F_gen(); return; }
+    p = net_ptr(NET_ARG(1));
+    if (p) xnet_random(p, NET_ARG(2));
+    net_ret(0, 2);
+}
+
+/* XNetCreateKey(pxnkid, pxnkey) */
+extern void sub_003CBF9A_gen(void);
+void sub_003CBF9A(void)
+{
+    uint8_t *kid, *key;
+    if (!netplay_on()) { sub_003CBF9A_gen(); return; }
+    kid = net_ptr(NET_ARG(1));
+    key = net_ptr(NET_ARG(2));
+    if (kid && key) xnet_create_key(kid, key);
+    net_ret(0, 2);
+}
+
+/* XNetRegisterKey(pxnkid, pxnkey): no security, nothing to register */
+extern void sub_003CBFA5_gen(void);
+void sub_003CBFA5(void)
+{
+    if (!netplay_on()) { sub_003CBFA5_gen(); return; }
+    net_ret(0, 2);
+}
+
+/* XNetUnregisterKey(pxnkid) */
+extern void sub_003CBFB0_gen(void);
+void sub_003CBFB0(void)
+{
+    if (!netplay_on()) { sub_003CBFB0_gen(); return; }
+    net_ret(0, 1);
+}
+
+/* XNetXnAddrToInAddr(pxna, pxnkid, pina): the peer's plain address, xna.ina */
+extern void sub_003CBFBB_gen(void);
+void sub_003CBFBB(void)
+{
+    uint32_t xna, ina;
+    if (!netplay_on()) { sub_003CBFBB_gen(); return; }
+    xna = NET_ARG(1);
+    ina = NET_ARG(3);
+    if (!xna || !ina) { net_ret(XNET_WSAEFAULT, 3); return; }
+    MEM32(ina) = MEM32(xna);
+    net_ret(0, 3);
+}
+
+/* XNetQosListen(...): Live matchmaking only */
+extern void sub_003CBFF4_gen(void);
+void sub_003CBFF4(void)
+{
+    if (!netplay_on()) { sub_003CBFF4_gen(); return; }
+    net_ret(0, 5);
+}
+
+/* XNetQosRelease(pxnqos) */
+extern void sub_003CC01F_gen(void);
+void sub_003CC01F(void)
+{
+    if (!netplay_on()) { sub_003CC01F_gen(); return; }
+    net_ret(0, 1);
+}
+
+/* XNetGetTitleXnAddr(pxna) */
+extern void sub_003CC02A_gen(void);
+void sub_003CC02A(void)
+{
+    uint8_t *xna;
+    if (!netplay_on()) { sub_003CC02A_gen(); return; }
+    xna = net_ptr(NET_ARG(1));
+    net_ret(xna ? xnet_get_title_xnaddr(xna) : 0x0001u, 1);
+}
+
+/* XNetGetConnectStatus(ina): no key exchange, so always connected */
+extern void sub_003CC13F_gen(void);
+void sub_003CC13F(void)
+{
+    if (!netplay_on()) { sub_003CC13F_gen(); return; }
+    net_ret(XNET_CONNECT_STATUS_CONNECTED, 1);
+}
+
+/* socket(af, type, protocol) */
+extern void sub_003CC035_gen(void);
+void sub_003CC035(void)
+{
+    if (!netplay_on()) { sub_003CC035_gen(); return; }
+    net_ret(xnet_socket((int)NET_ARG(1), (int)NET_ARG(2), (int)NET_ARG(3)), 3);
+}
+
+/* closesocket(s) */
+extern void sub_003CC040_gen(void);
+void sub_003CC040(void)
+{
+    if (!netplay_on()) { sub_003CC040_gen(); return; }
+    net_ret((uint32_t)xnet_closesocket(NET_ARG(1)), 1);
+}
+
+/* ioctlsocket(s, cmd, argp) */
+extern void sub_003CC056_gen(void);
+void sub_003CC056(void)
+{
+    if (!netplay_on()) { sub_003CC056_gen(); return; }
+    net_ret((uint32_t)xnet_ioctlsocket(NET_ARG(1), NET_ARG(2), net_ptr(NET_ARG(3))), 3);
+}
+
+/* setsockopt(s, level, optname, optval, optlen) */
+extern void sub_003CC061_gen(void);
+void sub_003CC061(void)
+{
+    if (!netplay_on()) { sub_003CC061_gen(); return; }
+    net_ret((uint32_t)xnet_setsockopt(NET_ARG(1), (int)NET_ARG(2), (int)NET_ARG(3),
+                                      net_ptr(NET_ARG(4)), (int)NET_ARG(5)), 5);
+}
+
+/* bind(s, name, namelen) */
+extern void sub_003CC070_gen(void);
+void sub_003CC070(void)
+{
+    if (!netplay_on()) { sub_003CC070_gen(); return; }
+    net_ret((uint32_t)xnet_bind(NET_ARG(1), net_ptr(NET_ARG(2)), (int)NET_ARG(3)), 3);
+}
+
+/* recvfrom(s, buf, len, flags, from, fromlen) */
+extern void sub_003CC0BE_gen(void);
+void sub_003CC0BE(void)
+{
+    if (!netplay_on()) { sub_003CC0BE_gen(); return; }
+    net_ret((uint32_t)xnet_recvfrom(NET_ARG(1), net_ptr(NET_ARG(2)), (int)NET_ARG(3),
+                                    (int)NET_ARG(4), net_ptr(NET_ARG(5)), net_ptr(NET_ARG(6))), 6);
+}
+
+/* sendto(s, buf, len, flags, to, tolen) */
+extern void sub_003CC0DC_gen(void);
+void sub_003CC0DC(void)
+{
+    if (!netplay_on()) { sub_003CC0DC_gen(); return; }
+    net_ret((uint32_t)xnet_sendto(NET_ARG(1), net_ptr(NET_ARG(2)), (int)NET_ARG(3),
+                                  (int)NET_ARG(4), net_ptr(NET_ARG(5)), (int)NET_ARG(6)), 6);
+}
+
 /* Mods: MC3_UNLOCK_ALL, the game's own unlock flags (unlock_all.c). */
 #include "unlock_all.c"
 
