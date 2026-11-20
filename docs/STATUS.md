@@ -62,10 +62,13 @@ eight assets were replaced before publishing, and the published digests match `S
 5. **Windows run log.** `launcher-cli.log` records CLI actions only; the game's output is lost
    when it is started directly, so RecompLauncher reports arrive empty.
 6. **Aspect ratio in the UI (issue #6).** The renderer already implements `RECOMP_GL_ASPECT`
-   (`auto` / `4:3` / `fill`) and both `nv2a_gl` and `nv2a_vk` honour it, but only the Android
-   launcher exposes it. Add a row to the Windows launcher, to Windows and Linux Port Options, and
-   to both `recomplauncher.json` manifests. Pair it with `RECOMP_WIDESCREEN`, `RECOMP_GL_SQUARE`
-   and `RECOMP_GL_FILL`, which are equally invisible. Needs a relaunch: the mode is cached in a
+   (`auto` / `4:3` / `fill`) and both `nv2a_gl` and `nv2a_vk` honour it. Mobile already ships a
+   control — Android in its launcher (`LauncherActivity.java:993`), iOS in both its launcher
+   (`src/ios_launcher.m:171`) and in-game Port Options (`src/ios_host.c:252`). **Windows and
+   Linux expose nothing**: no launcher row, no Port Options row, nothing in either
+   `recomplauncher.json`. Add the row on both desktops, reusing the mobile wording
+   "Auto (16:9) / 4:3 / Stretch". Pair it with `RECOMP_WIDESCREEN`, `RECOMP_GL_SQUARE` and
+   `RECOMP_GL_FILL`, which are invisible everywhere. Needs a relaunch: the mode is cached in a
    static.
 
 ## Open items
