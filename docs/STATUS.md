@@ -61,6 +61,12 @@ eight assets were replaced before publishing, and the published digests match `S
    player settings. Ship `_defaults.txt` only and let the game create the env file.
 5. **Windows run log.** `launcher-cli.log` records CLI actions only; the game's output is lost
    when it is started directly, so RecompLauncher reports arrive empty.
+6. **Aspect ratio in the UI (issue #6).** The renderer already implements `RECOMP_GL_ASPECT`
+   (`auto` / `4:3` / `fill`) and both `nv2a_gl` and `nv2a_vk` honour it, but only the Android
+   launcher exposes it. Add a row to the Windows launcher, to Windows and Linux Port Options, and
+   to both `recomplauncher.json` manifests. Pair it with `RECOMP_WIDESCREEN`, `RECOMP_GL_SQUARE`
+   and `RECOMP_GL_FILL`, which are equally invisible. Needs a relaunch: the mode is cached in a
+   static.
 
 ## Open items
 
