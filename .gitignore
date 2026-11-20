@@ -47,6 +47,8 @@ TODO.md
 # Your own Switch settings (the template is switch/mcdub3_env.example.txt).
 /switch/mcdub3_env.txt
 /switch/mcdub3remix_env.txt
+# A player's settings file is never source (templates end in .example.txt).
+*_env.txt
 # Personal HD texture packs (beside game/; see hd_pack.c): never committed.
 /hd/
 

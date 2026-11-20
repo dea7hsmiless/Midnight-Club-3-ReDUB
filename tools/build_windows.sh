@@ -166,4 +166,15 @@ if [ "$MC3_HOST" = windows ] && [ "${MC3_NO_DESKTOP_SHORTCUT:-0}" != 1 ]; then
         && echo "desktop shortcut: $MC3_SHORT_NAME -> $EXE_W" || echo "(no desktop shortcut)"
 fi
 cp "$MC3_REPO/tools/windows/now_playing.ps1" "$DIST/now_playing.ps1"
+# Release hygiene: the package may not carry this machine's settings. The
+# 0.2.4a release did (MC3_PC_MUSIC=1), so a fresh install started with PC
+# music on. Dist is checked here; release-check.sh checks the finished zips.
+if [ "${MC3_KEEP_ENV:-0}" = 1 ]; then
+    echo "warning: MC3_KEEP_ENV=1: $DIST/${MC3_APP}_env.txt holds this machine's settings; do not package this dist." >&2
+else
+    "$PY" "$MC3_REPO/tools/check-release-package.py" "$DIST" || {
+        echo "error: dist failed the release-package check" >&2
+        exit 1
+    }
+fi
 echo "built $DIST/$MC3_APP.exe   (double-click it, the desktop shortcut, or make run)"

@@ -44,6 +44,8 @@ jobs:
           echo "all scripts parse"
       - name: Python syntax
         run: python3 -m py_compile tools/*.py
+      - name: Release package guard
+        run: python3 tools/check-release-package.py --self-test
       - name: Version and release notes
         run: |
           source config/dub/app.env
