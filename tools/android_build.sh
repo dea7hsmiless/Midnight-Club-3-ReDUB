@@ -67,4 +67,8 @@ src="$MC3_REPO/android/app/build/outputs/apk/$kind/$name"
 [ -f "$src" ] || mc3_fail "no $src after the build"
 mkdir -p "$MC3_WORK/android"
 cp "$src" "$MC3_WORK/android/$name"
+py=python3
+command -v "$py" >/dev/null 2>&1 || py=python
+"$py" "$MC3_REPO/tools/check-release-package.py" "$MC3_WORK/android/$name" \
+    || mc3_fail "the APK carries a player settings file or a PC-music default"
 echo "  APK: ${MC3_WORK#$MC3_REPO/}/android/$name ($(du -h "$src" | cut -f1 | tr -d ' '), version $version)"

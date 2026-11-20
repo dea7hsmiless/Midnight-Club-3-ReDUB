@@ -22,6 +22,6 @@ docker run --rm \
  --mount "type=bind,source=$repo/tools/appimage,target=/work/packaging,readonly" \
  -e "REDUB_SOURCE_COMMIT=$commit" -e "SOURCE_DATE_EPOCH=$epoch" -e "REDUB_VERSION=$REDUB_VERSION" \
  ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 \
- bash -c 'bash /work/packaging/build-release.sh && python3 /work/packaging/package.py && bash /work/packaging/test-launcher.sh && bash /work/packaging/make-appimage.sh && python3 /work/packaging/collect-sources.py'
+ bash -c 'bash /work/packaging/build-release.sh && python3 /work/packaging/package.py && python3 /work/release-source/tools/check-release-package.py /work/AppDir && bash /work/packaging/test-launcher.sh && bash /work/packaging/make-appimage.sh && python3 /work/packaging/collect-sources.py'
 echo "Built AppImage: $work/release-out/ReDUB-${REDUB_VERSION:-0.2.2}-x86_64.AppImage"
 echo "Matching library sources: $work/dependency-sources"

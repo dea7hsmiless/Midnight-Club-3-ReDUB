@@ -86,6 +86,35 @@ if [ -n "${ver:-}" ] && git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; 
   warn "tag v$ver already exists locally ($(git rev-parse --short "v$ver^{commit}")); never move a published tag — bump the version"
 fi
 
+# 7. Release packages: no player settings, no defaults that turn options on.
+# 0.2.4a shipped dist/mcdub3remix_env.txt (MC3_PC_MUSIC=1), so every fresh
+# extract started with PC music on. Check the finished artifacts, not dist:
+# a local dist legitimately has the player's file.
+shopt -s nullglob
+packages=(release/*.zip release/*.tar.gz release/*.tgz)
+shopt -u nullglob
+if [ ${#packages[@]} -eq 0 ]; then
+  warn "no release packages under release/ to audit; run tools/check-release-package.py on the artifact before upload"
+else
+  py="${MC3_PYTHON:-}"
+  if [ -z "$py" ]; then
+    for candidate in python3 python py; do
+      if command -v "$candidate" >/dev/null 2>&1; then py=$candidate; break; fi
+    done
+  fi
+  # MSYS2 has Python beside the compiler but not on the default PATH.
+  if [ -z "$py" ] && [ -x /c/msys64/clang64/bin/python.exe ]; then
+    py=/c/msys64/clang64/bin/python.exe
+  fi
+  if [ -z "$py" ]; then
+    bad "no Python found to audit release packages (set MC3_PYTHON or install python3)"
+  elif "$py" tools/check-release-package.py "${packages[@]}"; then
+    ok "release packages carry no player settings"
+  else
+    bad "release package audit failed (see the FAIL lines above)"
+  fi
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then
   note "release-check: PASS"
