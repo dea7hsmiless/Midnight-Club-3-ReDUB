@@ -1387,7 +1387,11 @@ static int s_rra_back;                          /* roam_race_ai.c */
 
 static int roam_spawn_clear(uint32_t veh, roam_pose *s)
 {
-    static const float step[] = { 0, 10, -10, 20, -20, 30, -30, 40, -40 };
+    /* Backward first: the Free Roam start spot faces the garage door (the
+     * customs building), so "along the road" forward is a wall; the road is
+     * behind the car. (A peer moved forward there vanished inside the
+     * building; the tag showed through, the car did not.) */
+    static const float step[] = { 0, -10, 10, -20, 20, -30, 30, -40, 40 };
     float m[12], best_d = -1.0f;
     int i, j, best = 0;
     if (s_rra_back || !s_roam_seen || roam_group_race())   /* a group race: the game's grid (roam_race_ai.c) */
