@@ -105,13 +105,17 @@ Still to do:
    `RECOMP_NET_PEERS` = the other machine) and a firewall rule for UDP
    `20000 + guest port` (20000-21000 covers MC3).
 9. **Online (M3)** — System Link over a VPN first (no code), then rooms.
-10. **Free roam (M4) — transport up 2026-11-20.** `xboxrecomp/src/net/roam/`
-    holds the game-agnostic core, its API and a new native UDP platform;
-    `src/games/remix/roam_net.c` starts it under `MC3_ROAM=1`. With no hub the
-    core discovers peers by broadcast (up to 8, a LAN mesh): two instances on
-    one machine log `[roam] MC3 joined` on both sides. Remaining: the game
-    layer — the remote-car pool, registry and particle caps, map blips and
-    name tags — which is what puts other players' cars on the road.
+10. **Free roam (M4) — transport + engine cap up 2026-11-20.**
+    `xboxrecomp/src/net/roam/` holds the game-agnostic core, its API and a new
+    native UDP platform; `src/games/remix/roam_net.c` starts it under
+    `MC3_ROAM=1`. With no hub the core discovers peers by broadcast (up to 8,
+    a LAN mesh): two instances log `[roam] MC3 joined` on both sides.
+    `src/games/remix/roam_caps.c` grows the vehicle registry once from 10 to
+    22 (12 remote cars; `MC3_ROAM_CARS` sets it), verified in a cruise:
+    `[ROAM] caps: vehicle registry 10 -> 22`, no crash. Remaining: the game
+    layer — the remote-car pool (`roam_game.c`, `roam_pool.c`, `roam_cars.c`
+    from upstream, ~156 KB), which needs its Online-session dependencies
+    replaced before it compiles; then map blips and name tags.
 11. **Port Options row for Display shape** (issue #6) — the launcher row
     exists; the in-game page is full (17 rows + BACK). Decision needed.
 12. **Rebuild the AppImage** so the ISO reader and the messages land, then
