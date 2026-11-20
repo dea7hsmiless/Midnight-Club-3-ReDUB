@@ -1,4 +1,4 @@
-/* Windows window controls; port settings are rendered by the Xbox menu. */
+﻿/* Windows window controls; port settings are rendered by the Xbox menu. */
 #ifdef _WIN32
 #include <windows.h>
 #include <SDL.h>
@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#include "windows_paths.h"
 #include "input/xinput_xbox.h"
 #ifndef MC3_APP
 #define MC3_APP "mcdub3"
@@ -47,10 +48,10 @@ int windows_port_vsync_get(void) { return atomic_load(&swap_interval); }
 static int save_settings(const char **keys,const char **values,int count)
 {
     char path[2048],tmp[2056],line[4096],*slash;FILE *in,*out;int last='\n';
-    GetModuleFileNameA(NULL,path,sizeof path);slash=strrchr(path,'\\');if(!slash)return 0;
+    if(!mc3_module_path(path,sizeof path))return 0;slash=strrchr(path,'\\');if(!slash)return 0;
     snprintf(slash+1,sizeof path-(slash+1-path),MC3_APP "_env.txt");snprintf(tmp,sizeof tmp,"%s.tmp",path);
-    out=fopen(tmp,"wb");if(!out)goto fail;
-    in=fopen(path,"rb");
+    out=mc3_fopen_utf8(tmp,L"wb");if(!out)goto fail;
+    in=mc3_fopen_utf8(path,L"rb");
     if(in){while(fgets(line,sizeof line,in)){
         char *p=line;int skip=0;while(*p==' '||*p=='\t')p++;
         /* Match "KEY=" and "KEY = " so a rewritten key never duplicates. */
@@ -62,9 +63,9 @@ static int save_settings(const char **keys,const char **values,int count)
     if(last!='\n')fputs("\r\n",out);
     for(int i=0;i<count;i++)fprintf(out,"%s=%s\r\n",keys[i],values[i]);
     {int bad=ferror(out);if(fclose(out)!=0||bad)goto fail;}
-    if(!MoveFileExA(tmp,path,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))goto fail;
+    if(!mc3_replace_utf8(tmp,path))goto fail;
     return 1;
-fail:DeleteFileA(tmp);MessageBoxA(hwnd,"Could not save settings beside the game executable.","Port Options",MB_OK|MB_ICONERROR);return 0;
+fail:mc3_delete_utf8(tmp);MessageBoxA(hwnd,"Could not save settings beside the game executable.","Port Options",MB_OK|MB_ICONERROR);return 0;
 }
 static int save_setting(const char *key,const char *value){return save_settings(&key,&value,1);}
 

@@ -504,6 +504,10 @@ public class LauncherActivity extends Activity {
         new Thread(() -> {
             String error = null;
             try {
+                // A failed rollback may have left the only intact saves here.
+                File recovery = new File(home, "game-iso.previous");
+                if (!target.exists() && recovery.exists() && !recovery.renameTo(target))
+                    throw new java.io.IOException("could not restore the previous install; it was left in " + recovery);
                 ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "r");
                 if (pfd == null)
                     throw new java.io.IOException("the disc image could not be opened");
@@ -529,6 +533,7 @@ public class LauncherActivity extends Activity {
                 File xbe = new File(staging, "default.xbe");
                 if (!xbe.isFile() || xbe.length() == 0)
                     throw new java.io.IOException("the image has no default.xbe");
+                DiscSaveData.preserve(target, staging);
                 /* Back the old install up, then replace: a rename failure
                  * must not lose a working install (or its saves). */
                 File previous = new File(home, "game-iso.previous");

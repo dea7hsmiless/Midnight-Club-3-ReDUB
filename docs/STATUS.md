@@ -1,6 +1,6 @@
 # ReDUB status
 
-_Updated 2026-11-19. This file is the single current state. Overwrite it; do not append._
+_Updated 2026-11-20. This file is the single current state. Overwrite it; do not append._
 
 ## Released
 
@@ -70,6 +70,25 @@ eight assets were replaced before publishing, and the published digests match `S
    "Auto (16:9) / 4:3 / Stretch". Pair it with `RECOMP_WIDESCREEN`, `RECOMP_GL_SQUARE` and
    `RECOMP_GL_FILL`, which are invisible everywhere. Needs a relaunch: the mode is cached in a
    static.
+
+## Unreleased source fixes
+
+The source audit adds save preservation during Windows/Android disc replacement,
+Windows UTF-8/UTF-16 host-path handling, and corrected file-I/O APC stack/register
+restoration. Windows builds ship the commented settings example, preserve local
+player settings without failing a rebuild, and create player settings on the first
+launcher adjustment. CLI imports now refuse a running game. PNGs are excluded from
+the AppImage directory's text normalization rule.
+
+Regression checks: `tools/windows/Test-Stability.ps1` (pass `-ClangPath` for the
+Unicode-path test), `tools/windows/Test-DiscSaveData.java`, and the native harness
+at `xboxrecomp/tests/stability`. CI runs these without disc data. No version, tag,
+release assets or published release is changed by this source work.
+
+The long-session invalid GPU jump warning still needs a captured gameplay trace.
+Synthetic command-stream tests are not a fix for that unresolved case. Full career,
+multiplayer, physical-controller and Android-device testing remain outstanding;
+the iOS source is still outside this repository.
 
 ## Open items
 

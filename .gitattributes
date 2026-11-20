@@ -13,6 +13,10 @@ tools/appimage/AppRun text eol=lf
 # CRLF breaks desktop-file-validate and shell shebangs. Keep this directory LF.
 tools/appimage/** text eol=lf
 
+# PNG signatures contain CRLF bytes; the directory's text rule must not
+# normalize artwork when it is staged or checked out on Windows.
+*.png -text
+
 # Version files are sourced by bash on every platform. A CR from a Windows
 # checkout is folded into the value by `source` and breaks version matching,
 # so store and check them out as LF everywhere.

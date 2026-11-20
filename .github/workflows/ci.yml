@@ -46,6 +46,11 @@ jobs:
         run: python3 -m py_compile tools/*.py
       - name: Release package guard
         run: python3 tools/check-release-package.py --self-test
+      - name: Android save preservation
+        run: |
+          mkdir -p work/android-save-tests
+          javac -d work/android-save-tests android/app/src/main/java/io/github/laureladastra/mcdub3/DiscSaveData.java tools/windows/Test-DiscSaveData.java
+          java -cp work/android-save-tests io.github.laureladastra.mcdub3.TestDiscSaveData work
       - name: Version and release notes
         run: |
           source config/dub/app.env
@@ -58,3 +63,27 @@ jobs:
           grep -q "^## v$APP_VERSION\b" RELEASE_NOTES.md \
             || echo "::warning::RELEASE_NOTES.md has no '## v$APP_VERSION' section yet (needed to release)"
           echo "version $APP_VERSION"
+
+  windows-stability:
+    name: Windows installer and runtime stability
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          install: >-
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-ninja
+            mingw-w64-clang-x86_64-pkgconf
+            mingw-w64-clang-x86_64-SDL2
+      - name: Installer recovery, fresh settings and Unicode paths
+        shell: msys2 {0}
+        run: powershell.exe -NoProfile -File tools/windows/Test-Stability.ps1 -ClangPath "$(cygpath -w "$(command -v clang)")"
+      - name: Native runtime regressions
+        shell: msys2 {0}
+        run: |
+          cmake -S xboxrecomp/tests/stability -B work/native-stability -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang
+          cmake --build work/native-stability --target kernel_bridge_test kernel_directory_test kernel_object_paths_test kernel_audio_setting_test kernel_irql_abi_test kernel_dispatch_test idex_channel_test pushbuffer_test
+          ctest --test-dir work/native-stability --output-on-failure --timeout 30

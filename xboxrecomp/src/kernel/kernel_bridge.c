@@ -1,4 +1,4 @@
-/**
+﻿/**
  * kernel_bridge.c - Bridge between translated game code and kernel functions
  *
  * Problem:
@@ -4149,6 +4149,11 @@ recomp_func_t recomp_lookup_kernel(uint32_t xbox_va);
 static void deliver_one_apc(uint32_t apc_routine, uint32_t apc_context,
                             uint32_t iostatus)
 {
+    extern RECOMP_TLS RecompXmm g_xmm0,g_xmm1,g_xmm2,g_xmm3,g_xmm4,g_xmm5,g_xmm6,g_xmm7;
+    extern RECOMP_TLS RecompMmx g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7;
+    extern RECOMP_TLS double g_fp_stack[8];
+    extern RECOMP_TLS int g_fp_top,g_fp_cmp,g_df;
+    extern RECOMP_TLS uint16_t g_fp_control_word,g_fp_cc;
     /* The APC can be game code or a kernel export. Halo's XAPI passes the
      * latter -- 0xFE0000FC, one of our own synthetic thunk VAs -- so the recomp
      * dispatch correctly fails to find it and the kernel fallback is the one
@@ -4157,13 +4162,27 @@ static void deliver_one_apc(uint32_t apc_routine, uint32_t apc_context,
     if (!fn) fn = recomp_lookup_manual(apc_routine);
     if (!fn) fn = recomp_lookup_kernel(apc_routine);
     if (fn) {
+        /* APC delivery interrupts a kernel request, rather than being its
+         * return value. Preserve the interrupted CPU state, including the I/O
+         * status in EAX and the argument frame used by the outer bridge.
+         * The callback's stdcall ret already consumes its three arguments. */
+        uint32_t regs[]={g_eax,g_ecx,g_edx,g_ebx,g_esi,g_edi,g_ebp,g_esp,g_seh_ebp};
+        RecompXmm xs[]={g_xmm0,g_xmm1,g_xmm2,g_xmm3,g_xmm4,g_xmm5,g_xmm6,g_xmm7};
+        RecompMmx ms[]={g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7};
+        double fp[8];memcpy(fp,g_fp_stack,sizeof fp);
+        int top=g_fp_top,cmp=g_fp_cmp,df=g_df;
+        uint16_t control=g_fp_control_word,cc=g_fp_cc;
         /* VOID ApcRoutine(PVOID ApcContext, PIO_STATUS_BLOCK, ULONG) */
         g_esp -= 4; BRIDGE_MEM32(g_esp) = 0;
         g_esp -= 4; BRIDGE_MEM32(g_esp) = iostatus;
         g_esp -= 4; BRIDGE_MEM32(g_esp) = apc_context;
         g_esp -= 4; BRIDGE_MEM32(g_esp) = 0;   /* dummy return address */
         GUEST_CALL(fn);
-        g_esp += 12;
+        g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];g_esi=regs[4];g_edi=regs[5];
+        g_ebp=regs[6];g_esp=regs[7];g_seh_ebp=regs[8];
+        g_xmm0=xs[0];g_xmm1=xs[1];g_xmm2=xs[2];g_xmm3=xs[3];g_xmm4=xs[4];g_xmm5=xs[5];g_xmm6=xs[6];g_xmm7=xs[7];
+        g_mm0=ms[0];g_mm1=ms[1];g_mm2=ms[2];g_mm3=ms[3];g_mm4=ms[4];g_mm5=ms[5];g_mm6=ms[6];g_mm7=ms[7];
+        memcpy(g_fp_stack,fp,sizeof fp);g_fp_top=top;g_fp_cmp=cmp;g_df=df;g_fp_control_word=control;g_fp_cc=cc;
     } else {
         uint32_t ord = 0;
         if (apc_routine >= KERNEL_VA_BASE && apc_routine < KERNEL_VA_END) {

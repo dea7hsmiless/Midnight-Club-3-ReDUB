@@ -126,9 +126,9 @@ fi
     [ -n "${EDITION:-}" ] && echo "EDITION=$EDITION"   # the disc in game-<edition>\ (windows_host.c)
     for kv in ${SETTINGS:-}; do echo "$kv"; done
 } | sed 's/$/\r/' > "$DIST/${MC3_APP}_defaults.txt"
-if [ ! -f "$DIST/${MC3_APP}_env.txt" ]; then
-    sed 's/$/\r/' "$MC3_REPO/switch/mcdub3_env.example.txt" > "$DIST/${MC3_APP}_env.txt"
-fi
+# Ship the commented example, never seed a player file in a fresh dist.
+# Port Options and the launcher create _env.txt on the first settings change.
+sed 's/$/\r/' "$MC3_REPO/switch/mcdub3_env.example.txt" > "$DIST/${MC3_APP}_env.example.txt"
 
 # The launcher, optional (the exe finds the disc and saves itself,
 # src/windows_host.c): the settings files, a log per run in
@@ -163,8 +163,8 @@ cp "$MC3_REPO/tools/windows/now_playing.ps1" "$DIST/now_playing.ps1"
 # Release hygiene: the package may not carry this machine's settings. The
 # 0.2.4a release did (MC3_PC_MUSIC=1), so a fresh install started with PC
 # music on. Dist is checked here; release-check.sh checks the finished zips.
-if [ "${MC3_KEEP_ENV:-0}" = 1 ]; then
-    echo "warning: MC3_KEEP_ENV=1: $DIST/${MC3_APP}_env.txt holds this machine's settings; do not package this dist." >&2
+if [ -f "$DIST/${MC3_APP}_env.txt" ]; then
+    echo "warning: preserved $DIST/${MC3_APP}_env.txt for local play; exclude it from release packages." >&2
 else
     "$PY" "$MC3_REPO/tools/check-release-package.py" "$DIST" || {
         echo "error: dist failed the release-package check" >&2

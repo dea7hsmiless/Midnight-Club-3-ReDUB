@@ -1,4 +1,4 @@
-/* windows_host.c -- mcdub3.exe started on its own (double-click, shortcut).
+﻿/* windows_host.c -- mcdub3.exe started on its own (double-click, shortcut).
  *
  * Windows' counterpart of switch_nx.c's set-up: what run_mcdub3.bat did, so
  * the exe works without it (it did nothing when double-clicked: no disc
@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "windows_paths.h"
 
 #ifndef MC3_APP                              /* per game, from CMake */
 #  define MC3_APP "mcdub3"
@@ -43,13 +44,13 @@ static char s_exe_dir[MAX_PATH * 3];
 
 static int is_dir(const char *p)
 {
-    DWORD a = GetFileAttributesA(p);
+    DWORD a = mc3_attributes_utf8(p);
     return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
 static int is_file(const char *p)
 {
-    DWORD a = GetFileAttributesA(p);
+    DWORD a = mc3_attributes_utf8(p);
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
@@ -90,7 +91,7 @@ static void load_settings(const char *file)
     char path[sizeof s_exe_dir + 64], line[1024];
     FILE *f;
     snprintf(path, sizeof path, "%s\\%s", s_exe_dir, file);
-    if (!(f = fopen(path, "r")))
+    if (!(f = mc3_fopen_utf8(path, L"r")))
         return;
     while (fgets(line, sizeof line, f)) {
         char *s = line, *eq, *e, *name_end, *value;
@@ -116,7 +117,7 @@ static void load_settings(const char *file)
             }
         }
         if (*s && !was_set_outside(s))
-            _putenv_s(s, value);
+            mc3_setenv_utf8(s, value);
     }
     fclose(f);
 }
@@ -130,7 +131,7 @@ static void find_dir(const char *var, const char *const *cands)
     for (; *cands; cands++) {
         snprintf(p, sizeof p, "%s\\%s", s_exe_dir, *cands);
         if (is_dir(p)) {
-            _putenv_s(var, p);
+            mc3_setenv_utf8(var, p);
             return;
         }
     }
@@ -153,7 +154,7 @@ static void log_to_file_if_alone(void)
         snprintf(path, sizeof path, "%s\\windows_run_%s.log", logs, ts);
     else
         snprintf(path, sizeof path, "%s\\" MC3_APP "_log.txt", s_exe_dir);
-    if (freopen(path, "w", stdout) && freopen(path, "a", stderr)) {
+    if (mc3_freopen_utf8(path, L"w", stdout) && mc3_freopen_utf8(path, L"a", stderr)) {
         setvbuf(stdout, NULL, _IONBF, 0);
         setvbuf(stderr, NULL, _IONBF, 0);
         FreeConsole();
@@ -172,7 +173,7 @@ static void pick_game_dir(void)
     char repo[sizeof s_exe_dir + 16], cand[16][sizeof s_exe_dir + 64], pick[sizeof s_exe_dir + 64] = "";
     const char *ed = getenv("EDITION"), *e = getenv("MC3_GAME_DIR");
     int n = 0, i;
-    WIN32_FIND_DATAA fd;
+    WIN32_FIND_DATAW fd;
     HANDLE h;
     if (e && *e)
         return;
@@ -181,7 +182,7 @@ static void pick_game_dir(void)
         snprintf(pick, sizeof pick, "%s\\" MC3_DISC_PREFIX "-%s", repo, ed);
         if (!has_disc(pick) && (strcmp(MC3_DISC_PREFIX, "game") || !strcmp(ed, "usa")))
             snprintf(pick, sizeof pick, "%s\\" MC3_DISC_PREFIX, repo);   /* the folder before editions */
-        _putenv_s("MC3_GAME_DIR", pick);
+        mc3_setenv_utf8("MC3_GAME_DIR", pick);
         return;
     }
     snprintf(cand[n], sizeof cand[n], "%s\\game", s_exe_dir);
@@ -190,24 +191,28 @@ static void pick_game_dir(void)
     if (has_disc(cand[n])) n++;
     {
         char pat[sizeof repo + 16];
+        wchar_t wide_pat[MAX_PATH * 3];
         snprintf(pat, sizeof pat, "%s\\" MC3_DISC_PREFIX "-*", repo);
-        if ((h = FindFirstFileA(pat, &fd)) != INVALID_HANDLE_VALUE) {
+        if (mc3_path_wide(pat, wide_pat, MAX_PATH * 3) &&
+            (h = FindFirstFileW(wide_pat, &fd)) != INVALID_HANDLE_VALUE) {
             do {
+                char name[MAX_PATH * 3];
+                if (!mc3_path_utf8(fd.cFileName, name, sizeof name)) continue;
                 /* game-* holds the Remix's folders too: not the DUB Edition's */
-                if (!strcmp(MC3_DISC_PREFIX, "game") && !strncmp(fd.cFileName, "game-remix", 10))
+                if (!strcmp(MC3_DISC_PREFIX, "game") && !strncmp(name, "game-remix", 10))
                     continue;
                 if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && n < 16) {
-                    snprintf(cand[n], sizeof cand[n], "%s\\%s", repo, fd.cFileName);
+                    snprintf(cand[n], sizeof cand[n], "%s\\%s", repo, name);
                     if (has_disc(cand[n])) n++;
                 }
-            } while (FindNextFileA(h, &fd));
+            } while (FindNextFileW(h, &fd));
             FindClose(h);
         }
     }
     if (n == 0)
         return;                                            /* fatal() at the XBE says so */
     if (n == 1) {
-        _putenv_s("MC3_GAME_DIR", cand[0]);
+        mc3_setenv_utf8("MC3_GAME_DIR", cand[0]);
         return;
     }
     /* Several: game\, then the lifted edition's, then the first by name. */
@@ -231,14 +236,14 @@ static void pick_game_dir(void)
     fprintf(stderr, "note: several discs; %s is used (EDITION=<name> in " MC3_APP "_env.txt picks "
             MC3_DISC_PREFIX "-<name>)\n",
             strrchr(pick, '\\') + 1);
-    _putenv_s("MC3_GAME_DIR", pick);
+    mc3_setenv_utf8("MC3_GAME_DIR", pick);
 }
 
 void windows_boot(void)
 {
     static const char *const save[] = { "..\\..\\save", NULL };
     char *slash;
-    GetModuleFileNameA(NULL, s_exe_dir, sizeof s_exe_dir);
+    if (!mc3_module_path(s_exe_dir, sizeof s_exe_dir)) return;
     if ((slash = strrchr(s_exe_dir, '\\')) != NULL)
         *slash = 0;
     log_to_file_if_alone();
