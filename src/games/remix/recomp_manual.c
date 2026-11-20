@@ -58,6 +58,8 @@ static void roam_pool_load(void);               /* roam_pool.c: standalone cars 
 static void roam_pool_frame(void);              /* after the physics step */
 static void roam_pool_pass(uint32_t obj, int after);    /* the state machine's pass */
 static void roam_player(uint32_t p);            /* before a player's update */
+static void roam_tag_frame(void);               /* roam_tagdraw.c: name tags this frame */
+static void roam_tag_projection(uint32_t vp);   /* roam_tagdraw.c: the main view's projection */
 
 /* ── Native replacements ───────────────────────────────────── */
 
@@ -1744,8 +1746,10 @@ extern void sub_002BDEC0_gen(void);
 void sub_002BDEC0(void)
 {
     cam_call(33, 0x002BDEC0u, sub_002BDEC0_gen);
-    if (roam_running())                 /* after the physics step (roam_pool.c) */
+    if (roam_running()) {               /* after the physics step (roam_pool.c) */
         roam_pool_frame();
+        roam_tag_frame();               /* and the name tags over the remote cars */
+    }
 }
 extern void sub_002C1520_gen(void);
 void sub_002C1520(void)
@@ -1783,16 +1787,19 @@ void sub_002D4AE0(void)
     static uint32_t vp[8];
     static time_t last[8];
     const char *e = getenv("MC3_CAM_TRACE");
+    uint32_t this_vp = g_ecx;               /* thiscall: the viewport */
     int i;
-    for (i = 0; i < 7 && vp[i] && vp[i] != g_ecx; i++)
+    for (i = 0; i < 7 && vp[i] && vp[i] != this_vp; i++)
         ;                                  /* one line per viewport (main view, mirror, map) */
-    vp[i] = g_ecx;
+    vp[i] = this_vp;
     if (e && e[0] == '1' && time(NULL) != last[i]) {
         last[i] = time(NULL);
         fprintf(stderr, "[CAM] projection: viewport %08X fov %.3f aspect %.3f near %.3f far %.1f (from %08X)\n",
-                g_ecx, MEMF(g_esp + 4), MEMF(g_esp + 8), MEMF(g_esp + 12), MEMF(g_esp + 16), MEM32(g_esp));
+                this_vp, MEMF(g_esp + 4), MEMF(g_esp + 8), MEMF(g_esp + 12), MEMF(g_esp + 16), MEM32(g_esp));
     }
     cam_call(42, 0x002D4AE0u, sub_002D4AE0_gen);
+    if (roam_running())                 /* the main view's projection, for name tags */
+        roam_tag_projection(this_vp);
 }
 
 /* The rest of the race's frame update (the dispatcher at 0x0001EEDE calls
@@ -3764,3 +3771,6 @@ void sub_0028B4E0(void)
 #include "roam_game.c"
 #include "roam_cars.c"
 #include "roam_pool.c"
+
+/* Free roam: the name tags over the remote cars (roam_tagdraw.c). */
+#include "roam_tagdraw.c"

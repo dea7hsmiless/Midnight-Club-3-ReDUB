@@ -86,6 +86,65 @@ static const unsigned char port_glyphs[][7]={
  {17,27,21,21,17,17,17},{31,16,16,30,16,16,31},
  {0,4,4,0,4,4,0},{0,0,0,0,0,6,6}};
 static int port_glyph(char c){if(c>='0'&&c<='9')return c-'0';const char *s="FPSRAME:.",*p=strchr(s,c);return p?(int)(p-s)+10:-1;}
+/* Free roam name tags (src/games/remix/roam_tagdraw.c): the game thread
+ * publishes the on-screen tags, the overlay draws them. Glyphs: the same
+ * small font as the FPS readout, plus the letters a player name needs. */
+typedef struct { float x, y, alpha; char name[24]; } port_tag;
+static const unsigned char port_tag_alpha[26][7]={
+ {14,17,17,31,17,17,17},{30,17,17,30,17,17,30},{14,17,16,16,16,17,14},
+ {30,17,17,17,17,17,30},{31,16,16,30,16,16,31},{31,16,16,30,16,16,16},
+ {14,17,16,23,17,17,15},{17,17,17,31,17,17,17},{14,4,4,4,4,4,14},
+ {7,2,2,2,18,18,12},{17,18,20,24,20,18,17},{16,16,16,16,16,16,31},
+ {17,27,21,21,17,17,17},{17,25,25,21,19,19,17},{14,17,17,17,17,17,14},
+ {30,17,17,30,16,16,16},{14,17,17,17,21,18,13},{30,17,17,30,20,18,17},
+ {15,16,16,14,1,1,30},{31,4,4,4,4,4,4},{17,17,17,17,17,17,14},
+ {17,17,17,17,17,10,4},{17,17,17,21,21,21,10},{17,17,10,4,10,17,17},
+ {17,17,10,4,4,4,4},{31,1,2,4,8,16,31}};
+static int port_tag_glyph(int c,unsigned char rows[7])
+{
+    if(c>='a'&&c<='z')c-=32;
+    if(c>='A'&&c<='Z'){memcpy(rows,port_tag_alpha[c-'A'],7);return 1;}
+    if(c>='0'&&c<='9'){memcpy(rows,port_glyphs[c-'0'],7);return 1;}
+    memset(rows,0,7);
+    switch(c){
+    case '_':rows[6]=31;break;case '-':rows[3]=31;break;case '.':rows[6]=6;break;
+    case ' ':return 1;default:return 0;}
+    return 1;
+}
+static void port_tag_quads(float *v,int *n,int sw,int sh)
+{
+    extern int roam_tag_box(void **tags);   /* src/games/remix/roam_tagdraw.c */
+    const port_tag *t; int count;
+    count = roam_tag_box((void **)&t);
+    int scale=sh>=1000?2:1;
+    for(int i=0;i<count;i++){
+        int len=(int)strlen(t[i].name),w=len*6*scale,h=9*scale;
+        float x=t[i].x*sw-w*0.5f,y=t[i].y*sh-h;
+        if(t[i].alpha<=0.01f||w<1)continue;
+        if(x<0)x=0;if(y<0)y=0;
+        port_quad(v,n,x-2*scale,y-1*scale,w+4*scale,h+2*scale,0.06f*t[i].alpha,sw,sh);
+        for(int c=0;c<len;c++){
+            unsigned char rows[7];
+            if(!port_tag_glyph((unsigned char)t[i].name[c],rows))continue;
+            for(int gy=0;gy<7;gy++)for(int gx=0;gx<5;gx++)if(rows[gy]&(16>>gx))
+                port_quad(v,n,x+(c*6+gx)*scale,y+gy*scale,scale,scale,t[i].alpha,sw,sh);
+        }
+    }
+}
+/* Does anything want the overlay this frame? The tags are drawn even with the
+ * FPS readout and now-playing line off. */
+static int port_tags_pending(void)
+{
+    extern int roam_tag_box(void **tags);
+    static const char *off;
+    void *t = NULL;
+    int n;
+    if (!off) { const char *e = getenv("MC3_NAMETAGS"); if (e && *e && e[0] == '0') off = "0"; }
+    if (off)
+        return 0;
+    n = roam_tag_box(&t);
+    return n > 0;
+}
 static void port_quad(float *v,int *n,float x,float y,float w,float h,float c,int sw,int sh)
 {
     float l=x*2/sw-1,r=(x+w)*2/sw-1,t=1-y*2/sh,b=1-(y+h)*2/sh;
@@ -101,7 +160,7 @@ static void port_overlay_draw(void)
     if(prev){double dt=(now-prev)/hz*1000;ms=ms?ms*0.9+dt*0.1:dt;}
     prev=now;if(!epoch)epoch=now;frames++;
     if((now-epoch)/hz>=0.5){fps=frames*hz/(now-epoch);frames=0;epoch=now;}
-    if((!windows_port_overlay_get()&&!windows_port_pc_music_get())||failed)return;
+    if((!windows_port_overlay_get()&&!windows_port_pc_music_get()&&!port_tags_pending())||failed)return;
     if(!prog){
         const char *vs="#version 330 core\nlayout(location=0)in vec3 p;out float c;void main(){gl_Position=vec4(p.xy,0,1);c=p.z;}";
         const char *fs="#version 330 core\nin float c;out vec4 o;void main(){o=vec4(vec3(c),1);}";
@@ -121,6 +180,8 @@ static void port_overlay_draw(void)
             port_quad(verts,&n,12+(i*6+x)*scale,12+y*scale,scale,scale,1,sw,sh);
     }
     port_music_quads(verts,&n,sw,sh);
+    port_tag_quads(verts,&n,sw,sh);
+    if(n<=0)return;
     GLint oldprog,oldvao,oldvbo,oldfb,vp[4],flags[5],mask[4];
     const GLenum caps[]={GL_BLEND,GL_DEPTH_TEST,GL_STENCIL_TEST,GL_CULL_FACE,GL_SCISSOR_TEST};
     glGetIntegerv(0x8B8D,&oldprog);glGetIntegerv(0x85B5,&oldvao);glGetIntegerv(0x8894,&oldvbo);
