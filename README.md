@@ -32,7 +32,7 @@ All six are ReDUB running its own converted code — no emulator, and no capture
 
 ## Which game files do I need?
 
-Use **Midnight Club 3: DUB Edition Remix for the original Xbox** (the first Xbox console). Supply your own supported Xbox ISO/XISO disc dump, or the complete extracted Xbox disc folder containing `default.xbe` and all remaining game data.
+Use **Midnight Club 3: DUB Edition Remix for the original Xbox** (the first Xbox console). Windows takes either a supported Xbox ISO/XISO disc dump or the complete extracted Xbox disc folder containing `default.xbe` and all remaining game data. Linux takes the extracted folder: the AppImage does not import a disc image yet.
 
 **PS2/PCSX2 images, the non-Remix DUB Edition, and Nintendo Switch NSP/XCI/NRO files are not compatible inputs.** Xbox 360/One/Series controller support does not change the required source game. Upstream Switch builds are an output platform, not a source disc format.
 
