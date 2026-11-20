@@ -48,6 +48,17 @@ static void port_media_frame(void);
 static atomic_int port_gameplay_active;
 static void port_gameplay_update(void);
 
+/* Free roam (MC3_ROAM=1): the game layer included at the end of this file.
+ * These forward declarations let the overrides below call it; each entry
+ * point does nothing unless roam_running() (the transport started). */
+int  roam_running(void);                        /* net/roam/roam_api.h */
+static void roam_build(void);                   /* roam_game.c: the cruise's remote slots */
+static void roam_built(void);
+static void roam_pool_load(void);               /* roam_pool.c: standalone cars after the load */
+static void roam_pool_frame(void);              /* after the physics step */
+static void roam_pool_pass(uint32_t obj, int after);    /* the state machine's pass */
+static void roam_player(uint32_t p);            /* before a player's update */
+
 /* ── Native replacements ───────────────────────────────────── */
 
 /* memmove (CRT), 0x002DB4C0 -- func_id: memmove, confidence 0.9.
@@ -1705,17 +1716,46 @@ void sub_003635D0(void) { cam_call(30, 0x003635D0u, sub_003635D0_gen); }
 extern void sub_003636A0_gen(void);
 void sub_003636A0(void) { cam_call(31, 0x003636A0u, sub_003636A0_gen); }
 
-/* The race's per-frame path down to the cameras (from the stack of a
- * capture in the spin, 2026-10-25): sub_00198E90 (world update) ->
- * sub_002BDEC0 (player) -> sub_002C1520 (the player's camera control)
+/* The player manager (sub_002BE2C0) built at each cruise load. Free roam's
+ * remote slots go into the race setup before the players are made (roam_build),
+ * and its standalone cars after the game's own (roam_pool_load). */
+extern void sub_002BE2C0_gen(void);
+void sub_002BE2C0(void)
+{
+    uint32_t r[8] = { g_eax, g_ecx, g_edx, g_ebx, g_esp, g_ebp, g_esi, g_edi };
+    if (roam_running()) {
+        roam_build();
+        g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3];
+        g_esp = r[4]; g_ebp = r[5]; g_esi = r[6]; g_edi = r[7];
+    }
+    sub_002BE2C0_gen();
+    if (roam_running()) {
+        roam_built();
+        roam_pool_load();
+    }
+}
+
+/* sub_002BDEC0 (player) -> sub_002C1520 (the player's camera control)
  * -> sub_002C5B30 -> the camera's update. Wrapped for the census and for
  * MC3_DIFFTEST_FUNC=198E90,2BDEC0,2C1520,2C5B30. */
 extern void sub_00198E90_gen(void);
 void sub_00198E90(void) { cam_call(32, 0x00198E90u, sub_00198E90_gen); }
 extern void sub_002BDEC0_gen(void);
-void sub_002BDEC0(void) { cam_call(33, 0x002BDEC0u, sub_002BDEC0_gen); }
+void sub_002BDEC0(void)
+{
+    cam_call(33, 0x002BDEC0u, sub_002BDEC0_gen);
+    if (roam_running())                 /* after the physics step (roam_pool.c) */
+        roam_pool_frame();
+}
 extern void sub_002C1520_gen(void);
-void sub_002C1520(void) { cam_call(34, 0x002C1520u, sub_002C1520_gen); }
+void sub_002C1520(void)
+{
+    uint32_t p = g_ecx;
+    if (roam_running())                 /* before each player's update (roam_game.c) */
+        roam_player(p);
+    g_ecx = p;
+    cam_call(34, 0x002C1520u, sub_002C1520_gen);
+}
 extern void sub_002C5B30_gen(void);
 void sub_002C5B30(void) { cam_call(35, 0x002C5B30u, sub_002C5B30_gen); }
 
@@ -2311,8 +2351,18 @@ static uint32_t s_state_obj;                    /* the front end's state object,
 void sub_00020EC0(void)
 {
     uint32_t obj = g_ecx, before = MEM32(obj + 4);
+    uint32_t r[8];
     s_state_obj = obj;
+    if (roam_running()) {                   /* a queued request may end the cruise (roam_pool.c) */
+        r[0] = g_eax; r[1] = g_ecx; r[2] = g_edx; r[3] = g_ebx;
+        r[4] = g_esp; r[5] = g_ebp; r[6] = g_esi; r[7] = g_edi;
+        roam_pool_pass(obj, 0);
+        g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3];
+        g_esp = r[4]; g_ebp = r[5]; g_esi = r[6]; g_edi = r[7];
+    }
     sub_00020EC0_gen();
+    if (roam_running())
+        roam_pool_pass(obj, 1);
     if (state_trace_on() && MEM32(obj + 4) != before)
         fprintf(stderr, "[STATE] %u -> %u\n", before, MEM32(obj + 4));
 }
@@ -3707,3 +3757,10 @@ void sub_0028B4E0(void)
 
 /* Free roam: the engine capacity it needs (roam_caps.c). */
 #include "roam_caps.c"
+
+/* Free roam game layer: the upstream files compiled against roam_compat.h.
+ * Inert unless MC3_ROAM=1 started the transport (roam_running). */
+#include "roam_compat.h"
+#include "roam_game.c"
+#include "roam_cars.c"
+#include "roam_pool.c"

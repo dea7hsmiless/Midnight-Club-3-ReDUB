@@ -806,6 +806,17 @@ void xbox_gil_leave(void)
         gil_unlock();
 }
 
+/* roam_game.c: hold the guest lock across a resource page-in (d > 0) and
+ * release it (d < 0), with the same nesting depth as lifted code. Upstream's
+ * kernel_bridge added this for free roam's standalone car builds. */
+void xbox_gil_atomic(int d)
+{
+    if (d > 0)
+        xbox_gil_enter();
+    else if (d < 0)
+        xbox_gil_leave();
+}
+
 /* Around a call out of guest code (a kernel call): let everyone else run. */
 int xbox_gil_suspend(void)
 {

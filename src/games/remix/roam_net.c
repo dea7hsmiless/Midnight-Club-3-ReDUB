@@ -36,6 +36,5 @@ static void roam_net_boot(void)
         return;
     }
     atexit(roam_stop);
-    fprintf(stderr, "[ROAM] transport up; the remote-car pool is not ported yet, so this only"
-            " proves discovery\n");
+    fprintf(stderr, "[ROAM] transport up; peers' cars are built at the cruise (MC3_ROAM=1)\n");
 }
