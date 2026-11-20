@@ -96,8 +96,10 @@ Still to do:
 
 8. **System Link join.** Two instances, two profiles: host on
    `RECOMP_NET_ADDR=127.0.0.1` / peer `127.0.0.2`, join on the second, then
-   start a race; then a real LAN and a VPN. The 20 s DHCP screen stays away
-   because the kernel NIC is idle.
+   start a race; then a real LAN and a VPN. Both instances come up and the HLE
+   initialises; the blocker is the second save dir having no profile (it lands
+   on Create Profile) and posted keys not driving a second window reliably.
+   `test\key2.ps1` targets a PID if that helps.
 9. **Online (M3)** — System Link over a VPN first (no code), then rooms.
 10. **Free roam (M4)** — last, on M2/M3, with the engine caps in
     `upstream-mc3web\docs\online-limits.md`.
