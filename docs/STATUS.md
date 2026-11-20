@@ -121,9 +121,19 @@ Still to do:
     `RECOMP_NET_PEERS`; each needs its own writable `game-remix` UDATA) reach
     Cruise with one peer each; both log `[ROAM] slot 1: ... driven, drawn 1,
     in draw list 1, phys 1 ... (10 m from us)`. The cruise builds 3 slots
-    (1 peer + 2 spares), about 741-779 KB per car. Remaining: map blips and
-    name tags, particle-budget stress, radius tuning, and a visual check at
-    spawn (the two cars start side by side, outside the chase camera).
+    (1 peer + 2 spares), about 741-779 KB per car.
+    Name tags are native (2026-11-20): `roam_tagdraw.c` projects each driven
+    peer's car through the camera (view matrix [0x559758], the main viewport's
+    projection captured in the `sub_002D4AE0` override) and publishes
+    screen-space tags; `port_overlay.h` draws them with the port's own glyph
+    pass. B logs `[ROAM] name tags: 1 remotes, 1 on screen`; the "MC3" tag is
+    visible over the peer's car position (`test\shots\roam-tag-B.png`).
+    Remaining: the remote car body is still not visible under the tag (the
+    render object reports drawn/in draw list/in physics, so this is a draw or
+    occlusion issue, not the pool); map blips; particle-budget stress; radius
+    tuning; and the two-instance start race (one copy sometimes spins at boot
+    when both launch together; starting the second after the first is in
+    Cruise avoids it).
 11. **Port Options row for Display shape** (issue #6) — the launcher row
     exists; the in-game page is full (17 rows + BACK). Decision needed.
 12. **Rebuild the AppImage** so the ISO reader and the messages land, then
