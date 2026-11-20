@@ -4,6 +4,21 @@ _Updated 2026-11-19. This file is the single current state. Overwrite it; do not
 
 ## Released
 
+**v0.2.4a** — https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases/tag/v0.2.4a
+Tag `v0.2.4a` = `3a64190`; published 2026-11-20. Adds RecompLauncher support (Windows and
+Linux), the `KEY = value` settings reader, and Redump disc matching. Full release, so it is the
+GitHub "latest" and what RecompLauncher installs.
+
+| Asset | Bytes | SHA-256 |
+|---|---|---|
+| `ReDUB-0.2.4-Windows-x86_64.zip` | 81,060,490 | `e9abdea5538df9a55cf178f247de7e2e558ed35d29f3a69d16e2a412cd97a62f` |
+| `ReDUB-0.2.4-x86_64.AppImage` | 22,145,528 | `f0080f18da540f878df3e300c061f34402c35eaffc9c918c326798b71b1c8aab` |
+| `ReDUB-0.2.4-x86_64.tar.gz` | 23,850,799 | `557ace2f4b4f959fbf231f374ac5fb981143bd7b29d7e2412cbeca74dd4e7ffb` |
+
+Launcher `3d56207303fc683269712f894c7ada1e0103d2df2c4052bbe767ed3d6f3584ae` (111,104 B);
+game exe `cd1e3a7e24ea98d666c39b58c0d6698c0a40f88fb9aff3ac34146c30a649d6c7` (34,111,488 B).
+Android and iOS assets are the unchanged 0.2.4 files.
+
 **v0.2.4** — https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases/tag/v0.2.4
 Tag `v0.2.4` = `d00c579`; published 2026-11-19. Branch `release/0.2.4` is merged into `main`.
 
@@ -21,6 +36,23 @@ Launcher inside the zip: `c32713e31177019d11dc7a13b536dc2f451babff8056386077df41
 eight assets were replaced before publishing, and the published digests match `SHA256SUMS.txt`.
 
 **Previous:** v0.2.3 — tag `a6f14fe`, launcher `6e2466f6…` (90,112 B).
+
+## Planned for 0.2.5
+
+1. **Linux ISO import.** The AppImage has never read a disc image (verified: `AppRun` is
+   byte-identical to 0.2.4's and no C code ever had an XDVDFS reader). To match Windows: bundle
+   an extractor in the AppImage, unpack into `redub-data/game-remix`, add a Linux `prepare` step
+   that prints `progress` lines, then set `iso_or_folder` in the Linux manifest. Port
+   `Xdvdfs.cs` or reuse `xboxrecomp/tools/xiso/xdvdfs.py`.
+2. **Say what an ISO is on Linux.** Until that lands, `AppRun` should answer an ISO given to
+   `--game-dir` with "this is a disc image; extract it" instead of the generic `default.xbe`
+   message. Two lines, bundled with the rebuild above.
+3. **README platform split.** The top-level line "ISO/XISO disc dump, or the complete extracted
+   folder" reads as cross-platform. Say Windows takes either and Linux takes a folder.
+4. **Stop shipping `mcdub3remix_env.txt`.** It sits inside the release, so an update replaces
+   player settings. Ship `_defaults.txt` only and let the game create the env file.
+5. **Windows run log.** `launcher-cli.log` records CLI actions only; the game's output is lost
+   when it is started directly, so RecompLauncher reports arrive empty.
 
 ## Open items
 
