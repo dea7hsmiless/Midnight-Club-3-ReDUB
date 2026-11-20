@@ -250,6 +250,23 @@
 #RECOMP_UNIMPL_TRAP=0
 
 # ============================================================================
+# Networking (System Link / LAN)
+# ============================================================================
+# On: the game's own Xbox System Link sessions are carried over host UDP
+# (xboxrecomp/src/net/xnet_hle.c). Off: the game reports no cable, as before.
+# Two copies on one network: Create Match on one, Join Game on the other.
+#MC3_NETPLAY=0
+
+# Only when a broadcast will not reach the other machine (two instances on one
+# PC, or a VPN): the local address and the peers to send broadcasts to.
+# Leave both unset on a normal LAN; the LAN address is detected.
+#RECOMP_NET_ADDR=192.168.1.20
+#RECOMP_NET_PEERS=192.168.1.31
+# Host port = this base + the game's guest port (20000 + 1000/1001 by default).
+# Allow UDP 20000-21000 through the firewall if it asks.
+#RECOMP_NET_PORT_BASE=20000
+
+# ============================================================================
 # Required: set by the game itself, do not change
 # ============================================================================
 # RECOMP_VBLANK=1  RECOMP_FLIP_VBLANK=1  RECOMP_PB_EXEC=1  RECOMP_USB=1
