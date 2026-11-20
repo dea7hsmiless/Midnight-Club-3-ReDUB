@@ -59,7 +59,7 @@ chmod +x ReDUB-0.2.4-x86_64.AppImage
 
 A plain `ReDUB-0.2.4-x86_64.tar.gz` carries the same AppDir. `--portable DIR` keeps config, data, cache and state beside the package instead of in XDG directories. The folder is remembered for later launches. Requires x86_64 Linux, glibc 2.39+ (Ubuntu 24.04 / Debian 13 tested), X11/XWayland, and OpenGL 3.3. The package bundles SDL2, D-Bus, Bink-only FFmpeg, and the ReDUB logo artwork. Saves and Port Options live in user directories; original game files may be read-only. If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB-0.2.4-x86_64.AppImage`.
 
-Shared menu, synchronization, pushbuffer, and movie fixes match the Windows release source; the entry/page title uses **Port Options** capitalization. Linux PC Music uses MPRIS, with transliterated song text. Native Wayland, Vulkan/DLSS, and experimental 60/120 FPS are excluded. Native desktop sound and MPRIS output remain unverified in our WSLg environment. See [Linux setup and build instructions](BUILDING-LINUX.md).
+Shared menu, synchronization, pushbuffer, and movie fixes match the Windows release source; the entry/page title uses **Port Options** capitalization. Linux PC Music uses MPRIS, with transliterated song text. Native Wayland and experimental 60/120 FPS are excluded. Native desktop sound and MPRIS output remain unverified in our WSLg environment. See [Linux setup and build instructions](BUILDING-LINUX.md).
 
 ## Launcher
 
@@ -87,13 +87,9 @@ Optional artwork lives in `launcher/art`: `hero.jpg` or `hero.png`, `logo.png`, 
 
 These settings are available through native **Port Options** with controller navigation. Render queue is currently launcher-only.
 
-The same Port Options menu and graphics settings backend are built for Windows and Linux. The Linux AppImage ships the OpenGL renderer, with shared display, FXAA, sharpening, gamma/brightness, FPS overlay, controller vibration, PC Music controls, final presentation overlays, and the ReDUB HD logo pack. Linux uses MPRIS over the desktop D-Bus for track metadata, previous/next, menu pause/resume, and player volume when supported. The external player continues through the normal desktop audio mix; the game radio is muted while driving. DLSS and the experimental Vulkan path remain Windows-side work and are not part of the Linux AppImage. Linux build and WSLg test setup are documented in [BUILDING-LINUX.md](BUILDING-LINUX.md).
+The same Port Options menu and graphics settings backend are built for Windows and Linux. The Linux AppImage ships the OpenGL renderer, with shared display, FXAA, sharpening, gamma/brightness, FPS overlay, controller vibration, PC Music controls, final presentation overlays, and the ReDUB HD logo pack. Linux uses MPRIS over the desktop D-Bus for track metadata, previous/next, menu pause/resume, and player volume when supported. The external player continues through the normal desktop audio mix; the game radio is muted while driving. OpenGL is the only renderer. Linux build and WSLg test setup are documented in [BUILDING-LINUX.md](BUILDING-LINUX.md).
 
-### Experimental Vulkan and DLSS
-
-The original OpenGL renderer remains available. **Settings → Graphics → Graphics API** selects OpenGL or Vulkan; both renderers share Career/profile data and local Xbox system data. Its **DLSS Super Resolution** control is a familiar On/Off switch, with **Quality**, **Balanced**, and **Performance** modes. Choosing **Play** builds missing Vulkan/DLSS files automatically. All three modes passed controlled GPU evaluations on an RTX 3070. Quality, Balanced, and Performance also passed short user driving checks on that system with jitter disabled. Other GPUs/drivers and longer sessions remain unverified. If DLSS cannot initialize, Vulkan falls back to native rendering. NVIDIA runtime files are downloaded into ignored build data and are not part of the GitHub source package. Fullscreen and resolution settings are shared with Vulkan and persist across launches.
-
-Vulkan now follows OpenGL for small effects-buffer scaling, render-texture padding sampling, and fixed-function texture matrices. User checks found the earlier white border and blurred right-side strip resolved, with particles and race markers animating correctly. No presentation crop is applied. DLSS jitter is disabled by default because it caused fine-detail shaking in local testing. No frame generation or higher simulation rate is included.
+**OpenGL is the only renderer.** An experimental Vulkan path existed but was never shipped in a release package, ran at a fraction of OpenGL's frame rate, and has been removed along with its DLSS option. The launcher no longer offers a renderer choice.
 
 | Setting | Behavior |
 | --- | --- |
@@ -102,7 +98,7 @@ Vulkan now follows OpenGL for small effects-buffer scaling, render-texture paddi
 | Presets | Performance, Balanced, Quality, and Custom after adjustments. |
 | Render scale | 1×, 1.5×, 2×, 3×, 5×; restart required. |
 | HUD texture quality | Independent 1×, 2×, 3×, 5× upscaling; restart required. Improves existing art rather than supplying an HD asset pack. |
-| FXAA | Off, Low, Standard, High; changes live while driving. Menus/loading bypass it for sharp text, and DLSS bypasses it to avoid double anti-aliasing. |
+| FXAA | Off, Low, Standard, High; changes live while driving. Menus/loading bypass it for sharp text. |
 | Texture filtering | 1×, 4×, 16× anisotropic filtering; restart required. |
 | Sharpening | 0–100% in 25% steps, live; uses the FXAA presentation path. |
 | Gamma | 0.8–1.4, live even with FXAA off; default 1.0. |
@@ -195,4 +191,4 @@ ReDUB builds on [laureladastra/mcdub3-nx](https://github.com/laureladastra/mcdub
 
 Game names, trademarks, executable code, soundtrack, and original artwork belong to their rights holders. Artwork provenance is documented separately; inclusion does not grant redistribution rights for third-party material. The source-code license does not license game data or texture packs.
 
-Anti-aliasing offers FXAA Low, standard FXAA, and FXAA High during driving; menus and loading screens bypass it to preserve sharp text, and DLSS does not stack it. MSAA is not included because it requires multisampled render targets, depth handling, and resolve support; SMAA is not included.
+Anti-aliasing offers FXAA Low, standard FXAA, and FXAA High during driving; menus and loading screens bypass it to preserve sharp text. MSAA is not included because it requires multisampled render targets, depth handling, and resolve support; SMAA is not included.

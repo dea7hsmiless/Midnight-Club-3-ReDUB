@@ -93,6 +93,16 @@
         { "label": "Off", "set": { "RECOMP_GL_VSYNC": "0" } }
       ],
       "defaults": { "RECOMP_GL_VSYNC": "0" }
+    },    {
+      "id": "display_shape",
+      "label": "Display shape",
+      "help": "Auto shows a widescreen game at 16:9. 4:3 keeps the original shape with bars at the sides. Stretch fills the window. Restart to apply.",
+      "choices": [
+        { "label": "Auto (16:9)", "set": { "RECOMP_GL_ASPECT": "auto" } },
+        { "label": "4:3", "set": { "RECOMP_GL_ASPECT": "4:3" } },
+        { "label": "Stretch", "set": { "RECOMP_GL_ASPECT": "fill" } }
+      ],
+      "defaults": { "RECOMP_GL_ASPECT": "auto" }
     },
     {
       "id": "anisotropic",

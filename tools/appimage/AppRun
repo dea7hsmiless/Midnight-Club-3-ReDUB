@@ -107,7 +107,19 @@ while [ "$#" -gt 0 ]; do
             exit 0 ;;
         --game-dir)
             need_value "$@"
-            [ -f "$2/default.xbe" ] || fail 'The chosen folder does not contain default.xbe.'
+            if [ ! -f "$2/default.xbe" ]; then
+                if [ -f "$2" ]; then
+                    case "$2" in
+                        *.iso|*.ISO|*.xiso|*.XISO)
+                            fail 'That is a disc image, not a folder. This Linux package needs the extracted folder containing default.xbe: extract the ISO first, or use the Windows package, which imports a disc image.'
+                            ;;
+                        *)
+                            fail 'That is a file, not a folder. Give the extracted game folder containing default.xbe.'
+                            ;;
+                    esac
+                fi
+                fail 'The chosen folder does not contain default.xbe.'
+            fi
             MC3_GAME_DIR=$(CDPATH= cd -- "$2" && pwd)
             requested_game_dir=$MC3_GAME_DIR
             shift 2 ;;
