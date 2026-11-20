@@ -79,6 +79,22 @@ int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
 
+    /* Assert the wire value, not the macro: the fallback once used 004D,
+     * STATUS_INCOMPATIBLE_FILE_MAP, and a symbolic-only test would miss it. */
+    HANDLE semaphore = NULL;
+    NTSTATUS semaphore_status = xbox_NtCreateSemaphore(&semaphore, NULL, 1, 1);
+    check(semaphore_status == 0 && semaphore != NULL, "create bounded semaphore", NULL);
+    if (semaphore) {
+        check((uint32_t)xbox_NtReleaseSemaphore(semaphore, 1, NULL) == 0xC0000047u,
+              "semaphore overflow returns NTSTATUS 0xC0000047", NULL);
+        check(WaitForSingleObject(semaphore, 0) == WAIT_OBJECT_0 &&
+              WaitForSingleObject(semaphore, 0) == WAIT_TIMEOUT,
+              "rejected release leaves semaphore count unchanged", NULL);
+        check(xbox_NtReleaseSemaphore(semaphore, 1, NULL) == 0,
+              "valid semaphore release still succeeds", NULL);
+        CloseHandle(semaphore);
+    }
+
     const uint32_t THUNK_VA = 0x10000, STACK_VA = 0x20000;
 
     uint8_t *mem = VirtualAlloc(NULL, 16 * 1024 * 1024,

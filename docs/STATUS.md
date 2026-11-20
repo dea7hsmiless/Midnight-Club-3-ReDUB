@@ -80,6 +80,11 @@ player settings without failing a rebuild, and create player settings on the fir
 launcher adjustment. CLI imports now refuse a running game. PNGs are excluded from
 the AppImage directory's text normalization rule.
 
+The semaphore-overflow fallback now returns the correct NTSTATUS `0xC0000047`
+(it previously used `0xC000004D`, an incompatible-file-map error). The native
+regression checks the numeric status and that a rejected release leaves the
+semaphore count unchanged; this does not repair an underlying over-release.
+
 Regression checks: `tools/windows/Test-Stability.ps1` (pass `-ClangPath` for the
 Unicode-path test), `tools/windows/Test-DiscSaveData.java`, and the native harness
 at `xboxrecomp/tests/stability`. CI runs these without disc data. No version, tag,

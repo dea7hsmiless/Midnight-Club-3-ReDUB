@@ -1,4 +1,4 @@
-/*
+﻿/*
  * kernel.h - Xbox Kernel Replacement Layer
  *
  * Master header for the Xbox kernel function replacements.
@@ -94,7 +94,7 @@ enum {
 #ifndef STATUS_SEMAPHORE_LIMIT_EXCEEDED
 /* NtReleaseSemaphore's own status when ReleaseCount would take the count past
  * MaximumCount: the release is refused and the count stays where it was. */
-#define STATUS_SEMAPHORE_LIMIT_EXCEEDED ((NTSTATUS)0xC000004DL)
+#define STATUS_SEMAPHORE_LIMIT_EXCEEDED ((NTSTATUS)0xC0000047L)
 #endif
 #ifndef STATUS_INVALID_INFO_CLASS
 #define STATUS_INVALID_INFO_CLASS       ((NTSTATUS)0xC0000003L)
