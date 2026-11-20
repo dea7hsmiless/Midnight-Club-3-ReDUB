@@ -87,7 +87,9 @@ Landed so far (built and run on Windows, 2026-11-19):
    joined game." on both lobbies, and starting the race puts **both players in
    the same San Diego cruise with name tags**. Screenshots:
    `test\shots\net8.png`, `jb2.png`, `ja5.png`, `ja6.png`, `jb4.png`.
-   Next: a real LAN, then the same over a VPN (no server needed).
+   The launcher exposes it as **Settings -> Network -> LAN Play (System Link)**
+   (both manifests, documented in the env template). Next: a real LAN, then
+   the same over a VPN (no server needed).
 7. **Linux ISO import — implemented 2026-11-19.** Native reader
    `xboxrecomp/tools/xiso/xdvdfs_extract.c` (port of `Xdvdfs.cs`), bundled as
    `usr/bin/redub-xdvdfs`; `AppRun --import` / `--game-dir <iso>` unpacks into
