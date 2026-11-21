@@ -19,7 +19,7 @@
  *                per frame sub_0006A7D0 (spawn/slot pass, sub_000719xx...).
  *   sub_0007E450  the live ambient car ctor: base class sub_00093010 gives
  *                vtable 0x44D868, a secondary vtable at +0x2C (0x44D848) and
- *                +0x38 (0x44D6C8), +0x0C render object, +0x1C the transform.
+ *                +0x38 (0x44D6C8), +0x0C the model block, +0x1C the transform.
  *
  *   The owner's live list:
  *     +0x30  array of pointers to live cars (0x690 B each)
@@ -300,7 +300,7 @@ static void amb_car_line(uint32_t slot, uint32_t o, const float me[3])
     } else if (pv && pv->ok) {
         snprintf(speed, sizeof speed, " | record moved %08X -> %08X", (unsigned)pv->rec, (unsigned)rec);
     }
-    fprintf(stderr, "[AMBIENT]  slot %2u obj %08X vt %08X rend %08X | pos %.2f %.2f %.2f%s"
+    fprintf(stderr, "[AMBIENT]  slot %2u obj %08X vt %08X model %08X | pos %.2f %.2f %.2f%s"
                     " | %.1f m away | fwd %.2f %.2f %.2f\n",
             (unsigned)slot, (unsigned)o, (unsigned)MEM32(o),
             (unsigned)MEM32(o + 0x0Cu), p[0], p[1], p[2], speed,
@@ -889,9 +889,21 @@ static void amb_rx_drain(void)
     }
 }
 
-/* Milestone 4's pose takeover, defined below (used by amb_net_frame). */
+/* Milestone 4/5's takeover, defined below (used by amb_net_frame). */
 static void amb_ghost_apply(void);
+static void amb_ghost_takeover(void);
+static void amb_ghost_check(void);
 static uint32_t s_amb_ghost_cars, s_amb_ghost_slots;
+
+#define AMB_GHOST_MAX 32
+static struct {
+    uint32_t obj;
+    uint32_t slot;
+    uint32_t rec;      /* last record, to show whether anything rewrites it */
+    uint32_t rec_seen; /* unchanged frame count */
+} s_amb_ghost[AMB_GHOST_MAX];
+static int s_amb_nghost;
+static int s_amb_takeover_on = -1;
 
 /* Called every frame from the probe entry point. Sends at ~15 Hz of wall
  * time, not of frames, so a slow frame does not thin the stream. */
@@ -902,7 +914,9 @@ static void amb_net_frame(void)
     if (!roam_running() || !s_roam_cruise || !s_online)
         return;
     amb_rx_drain();
+    amb_ghost_takeover();
     amb_ghost_apply();
+    amb_ghost_check();
     now = roam_now();
     if (now < next)
         return;
@@ -943,6 +957,33 @@ static void amb_net_log(void)
     if (s_amb_ghost_slots)
         fprintf(stderr, "[AMBIENT] ghost: posed %u car(s) in %u slots\n",
                 s_amb_ghost_cars, s_amb_ghost_slots);
+    if (s_amb_nghost) {
+        int i, stable = 0;
+        for (i = 0; i < s_amb_nghost; i++) {
+            uint32_t rec;
+            if (s_amb_ghost[i].rec_seen > 60)
+                stable++;
+            rec = online_ram_n(s_amb_ghost[i].obj, 0x20u) ? MEM32(s_amb_ghost[i].obj + 0x1Cu) : 0;
+            if (online_ram_n(rec, AMB_REC_POS + 12u)) {
+                float gx = MEMF(rec + AMB_REC_POS), gy = MEMF(rec + AMB_REC_POS + 4u),
+                      gz = MEMF(rec + AMB_REC_POS + 8u);
+                uint32_t j;
+                double d = -1.0;
+                for (j = 0; j < (uint32_t)s_amb_rx_n; j++)
+                    if (s_amb_rx[j].used && s_amb_rx[j].kind == AMB_KIND_CAR &&
+                        s_amb_rx[j].model == s_amb_ghost[i].slot) {
+                        double dx = s_amb_rx[j].p[0] - gx, dy = s_amb_rx[j].p[1] - gy,
+                               dz = s_amb_rx[j].p[2] - gz;
+                        d = sqrt(dx * dx + dy * dy + dz * dz);
+                        break;
+                    }
+                fprintf(stderr, "[AMBIENT] takeover: slot %u ghost %.2f %.2f %.2f (net err %.2f m)\n",
+                        (unsigned)s_amb_ghost[i].slot, gx, gy, gz, (float)d);
+            }
+        }
+        fprintf(stderr, "[AMBIENT] takeover: %d ghost(s), %d with a stable record\n",
+                s_amb_nghost, stable);
+    }
     s_amb_tx_msgs = s_amb_rx_msgs = s_amb_rx_ents = s_amb_rx_bad = 0;
     s_amb_tx_peers = 0;
 }
@@ -959,6 +1000,33 @@ static void amb_net_log(void)
  * MC3_ROAM_AMBIENT_GHOST=1 turns it on (a client). It is a write, but only
  * into a car the game already owns, in the fields its own update writes.
  */
+static void amb_write_pose(uint32_t o, const amb_rx_ent *e)
+{
+    uint32_t rec;
+    float yaw, s, c;
+    if (!online_ram(o) || !online_ram_n(rec = MEM32(o + 0x1Cu), AMB_REC_POS + 12u))
+        return;
+    yaw = (e->yaw == AMB_YAW_UNKNOWN) ? 0.0f : (float)e->yaw * (6.283185307179586f / 65535.0f);
+    s = sinf(yaw);
+    c = cosf(yaw);
+    /* rotation: right (c,0,-s), up (0,1,0), forward (s,0,c) */
+    MEMF(rec + 0x24u) = c;  MEMF(rec + 0x28u) = 0.0f; MEMF(rec + 0x2Cu) = -s;
+    MEMF(rec + 0x30u) = 0.0f; MEMF(rec + 0x34u) = 1.0f; MEMF(rec + 0x38u) = 0.0f;
+    MEMF(rec + 0x3Cu) = s;  MEMF(rec + 0x40u) = 0.0f; MEMF(rec + 0x44u) = c;
+    MEMF(rec + AMB_REC_POS) = e->p[0];
+    MEMF(rec + AMB_REC_POS + 4u) = e->p[1];
+    MEMF(rec + AMB_REC_POS + 8u) = e->p[2];
+    /* the interpolation copy the renderer may pick from */
+    MEMF(rec + 0x40u + 0x24u) = c;
+    MEMF(rec + 0x40u + 0x2Cu) = -s;
+    MEMF(rec + 0x40u + 0x34u) = 1.0f;
+    MEMF(rec + 0x40u + 0x3Cu) = s;
+    MEMF(rec + 0x40u + 0x44u) = c;
+    MEMF(rec + 0x40u + AMB_REC_POS) = e->p[0];
+    MEMF(rec + 0x40u + AMB_REC_POS + 4u) = e->p[1];
+    MEMF(rec + 0x40u + AMB_REC_POS + 8u) = e->p[2];
+}
+
 static void amb_ghost_apply(void)
 {
     static int on = -1;
@@ -985,39 +1053,132 @@ static void amb_ghost_apply(void)
 
     for (i = 0; i < (uint32_t)s_amb_rx_n; i++) {
         amb_rx_ent *e = &s_amb_rx[i];
-        uint32_t slot, o, rec;
-        float yaw, s, c;
+        uint32_t slot, o = 0;
+        amb_rx_ent copy;
+        int j;
+        if (!e->used || e->kind != AMB_KIND_CAR)
+            continue;
+        slot = e->model;
+        if (slot >= cnt)
+            continue;
+        for (j = 0; j < s_amb_nghost; j++)
+            if (s_amb_ghost[j].slot == slot) {
+                o = s_amb_ghost[j].obj;
+                break;
+            }
+        if (!o)
+            o = MEM32(arr + slot * 4u);    /* not taken over: the local car */
+        if (!o || !online_ram(o))
+            continue;
+        copy = *e;
+        {   /* MC3_ROAM_AMBIENT_NEAR=1: park the first ghost in front of us, to
+             * settle by eye whether a taken-over car still draws */
+            static int near_on = -1;
+            static int near_slot = -1;
+            float me[3];
+            if (near_on < 0) {
+                const char *v = getenv("MC3_ROAM_AMBIENT_NEAR");
+                near_on = v && v[0] == '1';
+            }
+            if (near_on && near_slot < 0)
+                near_slot = (int)slot;
+            if (near_on && (int)slot == near_slot && amb_local_pos(me)) {
+                uint32_t pm = MEM32(AMB_PM_VA), p0, v0, m0;
+                float fx = 0.0f, fz = 1.0f;
+                if (online_ram(pm) && online_ram(p0 = MEM32(pm + 8u)) &&
+                    online_ram(v0 = MEM32(p0 + 0x14u)) && online_ram_n(m0 = MEM32(v0 + 0x1Cu), 0x40u)) {
+                    fx = MEMF(m0 + 0x28u);          /* our forward row */
+                    fz = MEMF(m0 + 0x30u);
+                }
+                copy.p[0] = me[0] + fx * 12.0f;
+                copy.p[1] = me[1];
+                copy.p[2] = me[2] + fz * 12.0f;
+            }
+        }
+        amb_write_pose(o, &copy);
+        applied++;
+    }
+    s_amb_ghost_cars = (uint32_t)applied;
+    s_amb_ghost_slots = cnt;
+}
+
+/* ── Milestone 5, first slice: take the slot away from the AI ──
+ *
+ * The AI keeps rewriting the record the ghost writes (that is why the first
+ * pose slice only wins its own frame). The owner's per-frame pass walks
+ * owner+0x30, so clearing the slot removes the car from the simulation while
+ * leaving the object allocated and, presumably, still in whatever list the
+ * renderer walks (unverified - see the M5 notes). The probe
+ * keeps the pointer and poses it: a ghost that nothing else updates.
+ *
+ * MC3_ROAM_AMBIENT_TAKEOVER=1 turns it on (a client). A slot the sender has
+ * no entity for is left alone, so the local population still fills it.
+ */
+static void amb_ghost_takeover(void)
+{
+    uint32_t owner = 0, arr, cnt, i;
+    int j;
+
+    if (s_amb_takeover_on < 0) {
+        const char *e = getenv("MC3_ROAM_AMBIENT_TAKEOVER");
+        s_amb_takeover_on = e && e[0] == '1';
+    }
+    if (!s_amb_takeover_on)
+        return;
+    for (i = 0; i < (uint32_t)s_amb_nseen; i++)
+        if (s_amb_tag[i] != AMB_TAG_GLOBAL && s_amb_tag[i] < AMB_TAG_PEDTYPE && s_amb_seen[i]) {
+            owner = s_amb_seen[i];
+            break;
+        }
+    if (!owner || !online_ram_n(owner, 0x40u))
+        return;
+    cnt = ZX16(MEM16(owner + 0x34u));
+    arr = MEM32(owner + 0x30u);
+    if (!online_ram(arr) || cnt > 64u)
+        return;
+
+    for (i = 0; i < (uint32_t)s_amb_rx_n && s_amb_nghost < AMB_GHOST_MAX; i++) {
+        amb_rx_ent *e = &s_amb_rx[i];
+        uint32_t slot, o;
         if (!e->used || e->kind != AMB_KIND_CAR)
             continue;
         slot = e->model;
         if (slot >= cnt)
             continue;
         o = MEM32(arr + slot * 4u);
-        if (!online_ram(o) || !online_ram_n(rec = MEM32(o + 0x1Cu), AMB_REC_POS + 12u))
+        if (!o || !online_ram(o))
             continue;
-        yaw = (e->yaw == AMB_YAW_UNKNOWN) ? 0.0f : (float)e->yaw * (6.283185307179586f / 65535.0f);
-        s = sinf(yaw);
-        c = cosf(yaw);
-        /* rotation: right (c,0,-s), up (0,1,0), forward (s,0,c) */
-        MEMF(rec + 0x24u) = c;  MEMF(rec + 0x28u) = 0.0f; MEMF(rec + 0x2Cu) = -s;
-        MEMF(rec + 0x30u) = 0.0f; MEMF(rec + 0x34u) = 1.0f; MEMF(rec + 0x38u) = 0.0f;
-        MEMF(rec + 0x3Cu) = s;  MEMF(rec + 0x40u) = 0.0f; MEMF(rec + 0x44u) = c;
-        MEMF(rec + AMB_REC_POS) = e->p[0];
-        MEMF(rec + AMB_REC_POS + 4u) = e->p[1];
-        MEMF(rec + AMB_REC_POS + 8u) = e->p[2];
-        /* the interpolation copy the renderer may pick from */
-        MEMF(rec + 0x40u + 0x24u) = c;
-        MEMF(rec + 0x40u + 0x2Cu) = -s;
-        MEMF(rec + 0x40u + 0x34u) = 1.0f;
-        MEMF(rec + 0x40u + 0x3Cu) = s;
-        MEMF(rec + 0x40u + 0x44u) = c;
-        MEMF(rec + 0x40u + AMB_REC_POS) = e->p[0];
-        MEMF(rec + 0x40u + AMB_REC_POS + 4u) = e->p[1];
-        MEMF(rec + 0x40u + AMB_REC_POS + 8u) = e->p[2];
-        applied++;
+        for (j = 0; j < s_amb_nghost; j++)
+            if (s_amb_ghost[j].obj == o)
+                break;
+        if (j < s_amb_nghost)
+            continue;                      /* already ours */
+        s_amb_ghost[s_amb_nghost].obj = o;
+        s_amb_ghost[s_amb_nghost].slot = slot;
+        s_amb_ghost[s_amb_nghost].rec = MEM32(o + 0x1Cu);
+        s_amb_ghost[s_amb_nghost].rec_seen = 0;
+        s_amb_nghost++;
+        MEM32(arr + slot * 4u) = 0;        /* out of the AI's slot list */
+        fprintf(stderr, "[AMBIENT] takeover: slot %u obj %08X rec %08X\n",
+                (unsigned)slot, (unsigned)o, (unsigned)MEM32(o + 0x1Cu));
     }
-    s_amb_ghost_cars = (uint32_t)applied;
-    s_amb_ghost_slots = cnt;
+}
+
+/* One ghost's stability: is anything still rewriting its record? */
+static void amb_ghost_check(void)
+{
+    int i;
+    for (i = 0; i < s_amb_nghost; i++) {
+        uint32_t rec = online_ram_n(s_amb_ghost[i].obj, 0x20u) ? MEM32(s_amb_ghost[i].obj + 0x1Cu) : 0;
+        if (rec == s_amb_ghost[i].rec)
+            s_amb_ghost[i].rec_seen++;
+        else {
+            s_amb_ghost[i].rec = rec;
+            s_amb_ghost[i].rec_seen = 0;
+            fprintf(stderr, "[AMBIENT] takeover: slot %u record moved to %08X\n",
+                    (unsigned)s_amb_ghost[i].slot, (unsigned)rec);
+        }
+    }
 }
 
 /* One ambient owner: its slot list and the live cars in it. */
