@@ -637,6 +637,308 @@ static void amb_creature_line(int idx)
     }
 }
 
+/* ── Milestone 3: the ambient message ────────────────────────
+ *
+ * The roam core's game channel (roam_send_msg / roam_recv_msg) carries at most
+ * ROAM_MSG_MAX (96) opaque bytes to one linked peer, unreliable. One ambient
+ * entity is 18 bytes:
+ *
+ *   u16 id     session-scoped, kind-specific handle (cars: epoch<<6 | slot)
+ *   u8  kind   0 car, 1 pedestrian
+ *   u8  model  car: slot == model index; ped: 0 for now (type not on the wire)
+ *   f32 x,y,z  world position
+ *   u16 yaw    0..65535 = 0..2pi; 0xFFFF = unknown (peds)
+ *
+ * A datagram is: u8 ver, u8 count, u8 seq, u8 chunk, then up to 5 entities.
+ * The receiver keys chunks by (sender, seq, chunk) and counts them; milestone
+ * 4 will assemble them into ghosts.
+ *
+ * MC3_ROAM_AMBIENT (1 or 2) turns the probe on; MC3_ROAM_AMBIENT_SEND=1 makes
+ * this instance the streamer (host authority is milestone 5). */
+#define AMB_WIRE_VER      1u
+#define AMB_WIRE_MAX      96u
+#define AMB_ENT_BYTES     18u
+#define AMB_HDR_BYTES     4u
+#define AMB_ENTS_PER_MSG  ((AMB_WIRE_MAX - AMB_HDR_BYTES) / AMB_ENT_BYTES)
+#define AMB_TX_MAX        48
+#define AMB_YAW_UNKNOWN   0xFFFFu
+
+enum { AMB_KIND_CAR = 0, AMB_KIND_PED = 1 };
+
+typedef struct {
+    uint16_t id;
+    uint8_t  kind, model;
+    float    p[3];
+    uint16_t yaw;
+} amb_wire;
+
+static amb_wire s_amb_tx[AMB_TX_MAX];
+static int      s_amb_ntx;
+static uint8_t  s_amb_tx_seq;
+static int      s_amb_send_on = -1;
+
+/* per-slot epoch for cars: bumped when the slot's object changes */
+static uint32_t s_amb_slot_obj[64];
+static uint8_t  s_amb_slot_epoch[64];
+
+/* receive counters, logged once a second */
+/* The received entities, newest by id: the list milestone 4 will draw. */
+#define AMB_RX_MAX 64
+typedef struct {
+    uint16_t id;
+    uint8_t  kind, model, used;
+    float    p[3];
+    uint16_t yaw;
+    double   t;                        /* roam_now() when it arrived */
+} amb_rx_ent;
+
+static amb_rx_ent s_amb_rx[AMB_RX_MAX];
+static int s_amb_rx_n;
+
+static amb_rx_ent *amb_rx_slot(uint16_t id, uint8_t kind)
+{
+    amb_rx_ent *old = &s_amb_rx[0];
+    int i;
+    for (i = 0; i < s_amb_rx_n; i++) {
+        if (s_amb_rx[i].used && s_amb_rx[i].id == id && s_amb_rx[i].kind == kind)
+            return &s_amb_rx[i];
+        if (s_amb_rx[i].t < old->t)
+            old = &s_amb_rx[i];
+    }
+    if (s_amb_rx_n < AMB_RX_MAX) {
+        amb_rx_ent *e = &s_amb_rx[s_amb_rx_n++];
+        memset(e, 0, sizeof *e);
+        return e;
+    }
+    return old;                        /* reuse the stalest */
+}
+
+static unsigned s_amb_rx_msgs, s_amb_rx_ents, s_amb_rx_bad;
+static uint32_t s_amb_rx_from;
+static struct { uint16_t id; uint8_t kind, model; float p[3]; } s_amb_rx_first, s_amb_tx_first;
+static int s_amb_rx_first_have;
+static unsigned s_amb_tx_msgs;
+static uint32_t s_amb_tx_peers;
+
+static void wr8(uint8_t **p, unsigned v) { *(*p)++ = (uint8_t)v; }
+static void wr16(uint8_t **p, unsigned v) { wr8(p, v & 0xFFu); wr8(p, (v >> 8) & 0xFFu); }
+static void wrf(uint8_t **p, float v) { memcpy(*p, &v, 4); *p += 4; }
+static unsigned rd8(const uint8_t **p) { return *(*p)++; }
+static unsigned rd16(const uint8_t **p) { unsigned v = rd8(p); return v | (rd8(p) << 8); }
+static float rdf(const uint8_t **p) { float v; memcpy(&v, *p, 4); *p += 4; return v; }
+
+/* Yaw from the car's forward row (the measured rotation at record+0x24). */
+static uint16_t amb_yaw_of(const float rot[9])
+{
+    double yaw = atan2((double)rot[6], (double)rot[8]);
+    if (yaw < 0)
+        yaw += 6.283185307179586;
+    return (uint16_t)(yaw * (65535.0 / 6.283185307179586));
+}
+
+/* Collect what this instance would stream, from the same objects the 1 Hz
+ * log reads. No heap scans here: creature pointers were collected once. */
+static void amb_tx_collect(void)
+{
+    int i, k;
+    s_amb_ntx = 0;
+    for (k = 0; k < s_amb_nseen && s_amb_ntx < AMB_TX_MAX; k++) {
+        uint32_t c, cnt, arr, slot;
+        if (s_amb_tag[k] == AMB_TAG_GLOBAL || s_amb_tag[k] >= AMB_TAG_PEDTYPE)
+            continue;                       /* only traffic owners have car slots */
+        c = s_amb_seen[k];
+        if (!online_ram_n(c, 0x40u))
+            continue;
+        cnt = ZX16(MEM16(c + 0x34u));
+        arr = MEM32(c + 0x30u);
+        if (!online_ram(arr) || cnt > 64u)
+            continue;
+        for (slot = 0; slot < cnt && s_amb_ntx < AMB_TX_MAX; slot++) {
+            uint32_t o = MEM32(arr + slot * 4u);
+            float p[3], rot[9];
+            if (!o || !online_ram(o))
+                continue;
+            if (s_amb_slot_obj[slot] != o) {
+                s_amb_slot_obj[slot] = o;
+                s_amb_slot_epoch[slot]++;
+            }
+            if (!amb_car_pose(o, p, rot))
+                continue;
+            s_amb_tx[s_amb_ntx].id = (uint16_t)(((s_amb_slot_epoch[slot] & 0x3Fu) << 6) | (slot & 0x3Fu));
+            s_amb_tx[s_amb_ntx].kind = AMB_KIND_CAR;
+            s_amb_tx[s_amb_ntx].model = (uint8_t)slot;      /* slot == model */
+            s_amb_tx[s_amb_ntx].p[0] = p[0];
+            s_amb_tx[s_amb_ntx].p[1] = p[1];
+            s_amb_tx[s_amb_ntx].p[2] = p[2];
+            s_amb_tx[s_amb_ntx].yaw = amb_yaw_of(rot);
+            s_amb_ntx++;
+        }
+    }
+    for (i = 0; i < s_amb_ncreature && s_amb_ntx < AMB_TX_MAX; i++) {
+        uint32_t c = s_amb_creature[i];
+        if (!amb_creature_active(c))
+            continue;
+        if (!online_ram_n(c, AMB_CREATURE_POS + 12u))
+            continue;
+        s_amb_tx[s_amb_ntx].id = (uint16_t)(c >> 4);
+        s_amb_tx[s_amb_ntx].kind = AMB_KIND_PED;
+        s_amb_tx[s_amb_ntx].model = 0;
+        s_amb_tx[s_amb_ntx].p[0] = MEMF(c + AMB_CREATURE_POS);
+        s_amb_tx[s_amb_ntx].p[1] = MEMF(c + AMB_CREATURE_POS + 4u);
+        s_amb_tx[s_amb_ntx].p[2] = MEMF(c + AMB_CREATURE_POS + 8u);
+        s_amb_tx[s_amb_ntx].yaw = AMB_YAW_UNKNOWN;
+        s_amb_ntx++;
+    }
+}
+
+/* Send the collected entities, in 5-entity chunks, to every linked peer. */
+static void amb_tx_send(void)
+{
+    roam_peer peers[ROAM_K_MAX];
+    uint8_t buf[AMB_WIRE_MAX];
+    int np, i, base;
+
+    if (s_amb_send_on < 0) {
+        const char *e = getenv("MC3_ROAM_AMBIENT_SEND");
+        s_amb_send_on = e && e[0] == '1';
+    }
+    if (!s_amb_send_on || !s_amb_ntx)
+        return;
+    np = roam_peers(peers, ROAM_K_MAX);
+    if (np <= 0)
+        return;
+    for (base = 0; base < s_amb_ntx; base += AMB_ENTS_PER_MSG) {
+        uint8_t *p = buf;
+        int n = s_amb_ntx - base, j;
+        if (n > (int)AMB_ENTS_PER_MSG)
+            n = (int)AMB_ENTS_PER_MSG;
+        wr8(&p, AMB_WIRE_VER);
+        wr8(&p, (unsigned)s_amb_ntx);              /* the whole list's size */
+        wr8(&p, s_amb_tx_seq);
+        wr8(&p, (unsigned)(base / AMB_ENTS_PER_MSG));
+        for (j = 0; j < n; j++) {
+            const amb_wire *e = &s_amb_tx[base + j];
+            wr16(&p, e->id);
+            wr8(&p, e->kind);
+            wr8(&p, e->model);
+            wrf(&p, e->p[0]); wrf(&p, e->p[1]); wrf(&p, e->p[2]);
+            wr16(&p, e->yaw);
+        }
+        for (i = 0; i < np; i++)
+            if (roam_send_msg(peers[i].id, buf, (int)(p - buf)) == 0)
+                s_amb_tx_msgs++;
+        s_amb_tx_seq++;
+    }
+    s_amb_tx_peers = (uint32_t)np;
+}
+
+/* Drain the game channel and count what valid ambient datagrams carry. */
+static void amb_rx_drain(void)
+{
+    uint8_t buf[AMB_WIRE_MAX];
+    int n;
+    uint32_t from;
+
+    while ((n = roam_recv_msg(&from, buf, sizeof buf)) > 0) {
+        const uint8_t *p = buf;
+        unsigned ver, count, chunk, k, ents, want;
+        int rem;
+        if (n < (int)AMB_HDR_BYTES)
+            continue;
+        ver = rd8(&p); count = rd8(&p); (void)rd8(&p); chunk = rd8(&p);
+        ents = (unsigned)(n - (int)AMB_HDR_BYTES) / AMB_ENT_BYTES;
+        rem = (int)count - (int)chunk * (int)AMB_ENTS_PER_MSG;
+        want = rem <= 0 ? 0u : (rem < (int)AMB_ENTS_PER_MSG ? (unsigned)rem : AMB_ENTS_PER_MSG);
+        if (ver != AMB_WIRE_VER || count > AMB_TX_MAX || ents != want) {
+            s_amb_rx_bad++;
+            continue;
+        }
+        for (k = 0; k < ents; k++) {
+            uint16_t id = (uint16_t)rd16(&p);
+            unsigned kind = rd8(&p), model = rd8(&p);
+            float x = rdf(&p), y = rdf(&p), z = rdf(&p);
+            unsigned yaw = rd16(&p);
+            amb_rx_ent *e;
+            if (kind > AMB_KIND_PED || model > 63u)
+                continue;
+            if (!(x > -20000.0f && x < 20000.0f) || !(y > -2000.0f && y < 2000.0f) ||
+                !(z > -20000.0f && z < 20000.0f))
+                continue;
+            e = amb_rx_slot(id, (uint8_t)kind);
+            e->used = 1;
+            e->id = id;
+            e->kind = (uint8_t)kind;
+            e->model = (uint8_t)model;
+            e->p[0] = x; e->p[1] = y; e->p[2] = z;
+            e->yaw = (uint16_t)yaw;
+            e->t = roam_now();
+            if (k == 0 && chunk == 0) {
+                s_amb_rx_first.id = id;
+                s_amb_rx_first.kind = (uint8_t)kind;
+                s_amb_rx_first.model = (uint8_t)model;
+                s_amb_rx_first.p[0] = x;
+                s_amb_rx_first.p[1] = y;
+                s_amb_rx_first.p[2] = z;
+                s_amb_rx_first_have = 1;
+            }
+            s_amb_rx_ents++;
+        }
+        s_amb_rx_msgs++;
+        if (from)
+            s_amb_rx_from = from;
+    }
+}
+
+/* Called every frame from the probe entry point. Sends at ~15 Hz of wall
+ * time, not of frames, so a slow frame does not thin the stream. */
+static void amb_net_frame(void)
+{
+    static double next;
+    double now;
+    if (!roam_running() || !s_roam_cruise || !s_online)
+        return;
+    amb_rx_drain();
+    now = roam_now();
+    if (now < next)
+        return;
+    next = now + (1.0 / 15.0);
+    if (next < now)                     /* first call or a long stall */
+        next = now + (1.0 / 15.0);
+    amb_tx_collect();
+    amb_tx_send();
+}
+
+/* One line a second: the transport is working end to end. */
+static void amb_net_log(void)
+{
+    fprintf(stderr, "[AMBIENT] net: sent %u msg to %u peer(s), %d ent(s) | recv %u msg, %u ent(s), %u bad\n",
+            s_amb_tx_msgs, s_amb_tx_peers, s_amb_ntx, s_amb_rx_msgs, s_amb_rx_ents, s_amb_rx_bad);
+    if (s_amb_ntx > 0) {
+        s_amb_tx_first.id = s_amb_tx[0].id;
+        s_amb_tx_first.kind = s_amb_tx[0].kind;
+        s_amb_tx_first.model = s_amb_tx[0].model;
+        memcpy(s_amb_tx_first.p, s_amb_tx[0].p, sizeof s_amb_tx_first.p);
+        fprintf(stderr, "[AMBIENT] net tx first: id %04X kind %u model %u at %.2f %.2f %.2f\n",
+                s_amb_tx_first.id, s_amb_tx_first.kind, s_amb_tx_first.model,
+                s_amb_tx_first.p[0], s_amb_tx_first.p[1], s_amb_tx_first.p[2]);
+    }
+    if (s_amb_rx_first_have)
+        fprintf(stderr, "[AMBIENT] net rx first: id %04X kind %u model %u at %.2f %.2f %.2f\n",
+                s_amb_rx_first.id, s_amb_rx_first.kind, s_amb_rx_first.model,
+                s_amb_rx_first.p[0], s_amb_rx_first.p[1], s_amb_rx_first.p[2]);
+    {
+        double now = roam_now();
+        int i, live = 0;
+        for (i = 0; i < s_amb_rx_n; i++)
+            if (s_amb_rx[i].used && now - s_amb_rx[i].t < 2.0)
+                live++;
+        fprintf(stderr, "[AMBIENT] net table: %d live of %d (rx from %08X)\n",
+                live, s_amb_rx_n, (unsigned)s_amb_rx_from);
+    }
+    s_amb_tx_msgs = s_amb_rx_msgs = s_amb_rx_ents = s_amb_rx_bad = 0;
+    s_amb_tx_peers = 0;
+}
+
 /* One ambient owner: its slot list and the live cars in it. */
 static void amb_owner(const char *tag, uint32_t c)
 {
@@ -759,6 +1061,7 @@ static void dri_ambient_pass(void)
     lvl = amb_level();
     if (lvl <= 0)
         return;
+    amb_net_frame();
     if (!once) {
         once = 1;
         if (lvl >= 2) {
@@ -779,6 +1082,7 @@ static void dri_ambient_pass(void)
     if (now == last)
         return;
     last = now;
+    amb_net_log();
     if (!s_amb_nseen) {
         fprintf(stderr, "[AMBIENT] no ambient object captured yet"
                         " (sub_0006C840 / sub_0006A7D0 not seen)\n");
