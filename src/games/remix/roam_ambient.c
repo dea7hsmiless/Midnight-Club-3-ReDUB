@@ -62,7 +62,7 @@
 #define AMB_CITY_SIZE    0x50u
 #define AMB_TRAFFIC_VA   0x005587E0u    /* the global ambient manager */
 #define AMB_PM_VA        0x00558814u    /* the player manager */
-#define AMB_NODE_MAX     8              /* objects captured by the wrappers */
+#define AMB_NODE_MAX     12             /* objects captured by the wrappers */
 #define AMB_SLOT_LOG     12             /* live cars logged per owner */
 #define AMB_CAR_SIZE     0x690u         /* one live ambient car */
 
@@ -75,9 +75,13 @@
 #define AMB_TAG_FEED     1u             /* sub_0006BD20: per cruise load */
 #define AMB_TAG_SPAWN    2u             /* sub_0006A7D0: the spawn pass */
 #define AMB_TAG_GLOBAL   3u             /* sub_002B8B20: the global manager */
+#define AMB_TAG_PEDTYPE  4u             /* sub_0022C110: a pedestrian type */
+#define AMB_TAG_PEDTUNE  5u             /* sub_0022C170: its second pass */
+#define AMB_TAG_AGENT    6u             /* sub_00071AC0: an agent record init */
 
 static uint32_t s_amb_seen[AMB_NODE_MAX];
 static uint32_t s_amb_tag[AMB_NODE_MAX];
+static uint32_t s_amb_arg[AMB_NODE_MAX];
 static int      s_amb_nseen;
 
 /* 0: off, 1: the per-car lines, 2: also the layout dump. */
@@ -116,13 +120,37 @@ static void amb_str_at(const char *what, uint32_t va)
     fprintf(stderr, "[AMBIENT] %s @%08X: \"%s\"\n", what, (unsigned)va, s);
 }
 
+/* The first pedestrian agent records sub_00071AC0 filled (type vtable
+ * 0x46EBD8). Kept apart from the owner list so they cannot crowd it out. */
+#define AMB_PEDREC_MAX 4
+
+static uint32_t s_amb_pedrec[AMB_PEDREC_MAX];
+static uint32_t s_amb_pedrec_type[AMB_PEDREC_MAX];
+static int      s_amb_npedrec;
+
 /* Called from the wrappers (game thread); records the first objects only. */
 static void amb_note(int tag, uint32_t va, uint32_t arg)
 {
     int i;
-    (void)arg;
     if (amb_level() <= 0 || !online_ram(va))
         return;
+    if (tag == AMB_TAG_AGENT) {
+        /* the record's type: only pedestrian types reach here (traffic passes
+         * a 0x690 car object whose vtable is 0x44D868) */
+        if (!online_ram(arg) || MEM32(arg) != 0x46EBD8u)
+            return;
+        for (i = 0; i < s_amb_npedrec; i++)
+            if (s_amb_pedrec[i] == va)
+                return;
+        if (s_amb_npedrec >= AMB_PEDREC_MAX)
+            return;
+        s_amb_pedrec[s_amb_npedrec] = va;
+        s_amb_pedrec_type[s_amb_npedrec] = arg;
+        s_amb_npedrec++;
+        fprintf(stderr, "[AMBIENT] ped agent record %08X type %08X (0x21C bytes)\n",
+                (unsigned)va, (unsigned)arg);
+        return;
+    }
     for (i = 0; i < s_amb_nseen; i++)
         if (s_amb_seen[i] == va)
             return;
@@ -130,6 +158,7 @@ static void amb_note(int tag, uint32_t va, uint32_t arg)
         return;
     s_amb_seen[s_amb_nseen] = va;
     s_amb_tag[s_amb_nseen] = (uint32_t)tag;
+    s_amb_arg[s_amb_nseen] = arg;
     s_amb_nseen++;
 }
 
@@ -432,6 +461,182 @@ static void amb_census_shape(void)
     fprintf(stderr, "[AMBIENT] shape scan: %u candidate owner(s)\n", (unsigned)shown);
 }
 
+/* A pedestrian type: its head, and the manager that owns it (found by a heap
+ * reference). The walkers hang off that manager, not off the type. */
+static void amb_ped_type(uint32_t t)
+{
+    uint32_t i, ref;
+    if (!online_ram_n(t, 0x60u))
+        return;
+    fprintf(stderr, "[AMBIENT] pedtype %08X head:", (unsigned)t);
+    for (i = 0; i < 0x60u; i += 4u)
+        fprintf(stderr, " %08X", (unsigned)MEM32(t + i));
+    fprintf(stderr, "\n");
+    {   /* strings the type holds: the model path and density keys */
+        for (i = 0; i < 0x60u; i += 4u) {
+            uint32_t v = MEM32(t + i), vt;
+            if (!online_ram_n(v, 0x20u))
+                continue;
+            vt = MEM32(v);
+            if (vt >= 0x004476E0u && vt < 0x004A8140u)
+                fprintf(stderr, "[AMBIENT]  pedtype+%02X -> object %08X vt %08X\n",
+                        (unsigned)i, (unsigned)v, (unsigned)vt);
+        }
+    }
+    ref = amb_find_refs_heap("pedtype", t);
+    if (ref)
+        amb_heap_dump(ref - 0x40u, 0x120u);
+}
+
+/* One live walker record: head, nearest world position to us, and the speed
+ * between samples. The layout is not known yet, so the position is found by
+ * distance (the same method that cracked the traffic record). */
+typedef struct { float pos[3]; int ok; } amb_pedprev;
+
+static amb_pedprev s_amb_pedprev[AMB_PEDREC_MAX];
+
+static void amb_ped_record(int idx)
+{
+    uint32_t rec = s_amb_pedrec[idx], type = s_amb_pedrec_type[idx], i, boff = 0;
+    float me[3], bp[3] = { 0, 0, 0 };
+    double bd = 1e30;
+    int have_me = amb_local_pos(me), found = 0;
+
+    if (!online_ram_n(rec, 0x21Cu)) {
+        fprintf(stderr, "[AMBIENT] pedrec %08X: gone\n", (unsigned)rec);
+        return;
+    }
+    if (have_me) {
+        for (i = 0; i + 12u <= 0x21Cu; i += 4u) {
+            double x = MEMF(rec + i), y = MEMF(rec + i + 4u), z = MEMF(rec + i + 8u), d;
+            if (!(x > -4000.0 && x < 4000.0) || !(y > -1000.0 && y < 1000.0) ||
+                !(z > -4000.0 && z < 4000.0))
+                continue;
+            d = (x - me[0]) * (x - me[0]) + (y - me[1]) * (y - me[1]) + (z - me[2]) * (z - me[2]);
+            if (d < bd) {
+                bd = d; boff = i; found = 1;
+                bp[0] = (float)x; bp[1] = (float)y; bp[2] = (float)z;
+            }
+        }
+    }
+    if (!found) {
+        fprintf(stderr, "[AMBIENT] pedrec %08X type %08X: no position yet\n",
+                (unsigned)rec, (unsigned)type);
+        return;
+    }
+    {
+        char speed[40] = "";
+        if (s_amb_pedprev[idx].ok) {
+            float dx = bp[0] - s_amb_pedprev[idx].pos[0];
+            float dy = bp[1] - s_amb_pedprev[idx].pos[1];
+            float dz = bp[2] - s_amb_pedprev[idx].pos[2];
+            snprintf(speed, sizeof speed, " %.2f m/s",
+                     (float)sqrt((double)(dx * dx + dy * dy + dz * dz)));
+        }
+        fprintf(stderr, "[AMBIENT] pedrec %08X type %08X | pos %.2f %.2f %.2f (at +0x%03X)%s"
+                        " | %.1f m away\n",
+                (unsigned)rec, (unsigned)type, bp[0], bp[1], bp[2], (unsigned)boff, speed,
+                (float)sqrt(bd));
+        memcpy(s_amb_pedprev[idx].pos, bp, sizeof bp);
+        s_amb_pedprev[idx].ok = 1;
+    }
+}
+
+/* Pedestrians are mcCreature instances: the record the pedestrian type is
+ * held in has vtable 0x46E95C, next to the "mcCreature" string in .rdata.
+ * Census that vtable once, then track the objects like the cars. */
+#define AMB_CREATURE_VT 0x0046E95Cu
+#define AMB_CREATURE_MAX 64
+
+static uint32_t s_amb_creature[AMB_CREATURE_MAX];
+static int      s_amb_ncreature;
+static int      s_amb_creature_scanned;
+
+static void amb_creature_scan(void)
+{
+    uint32_t a;
+    s_amb_ncreature = 0;
+    for (a = AMB_HEAP_LO; a + 4u <= AMB_HEAP_HI && s_amb_ncreature < AMB_CREATURE_MAX; a += 4u)
+        if (MEM32(a) == AMB_CREATURE_VT)
+            s_amb_creature[s_amb_ncreature++] = a;
+    s_amb_creature_scanned = 1;
+    fprintf(stderr, "[AMBIENT] creature census: %d object(s) with vt %08X\n",
+            s_amb_ncreature, AMB_CREATURE_VT);
+}
+
+/* A creature with the update-frozen bit (0x20 at +0x134) or the "not placed"
+ * sentinel is a prototype, not a walker. */
+static int amb_creature_active(uint32_t c)
+{
+    float p[3];
+    if (!online_ram_n(c, 0x138u))
+        return 0;
+    if (MEM8(c + 0x134u) & 0x20u)
+        return 0;
+    p[0] = MEMF(c + 0x6Cu); p[1] = MEMF(c + 0x70u); p[2] = MEMF(c + 0x74u);
+    return !(p[0] == 100.0f && p[1] == 0.0f && p[2] == 0.0f);
+}
+
+/* A live walker's transform, measured: the mcCreature object keeps its world
+ * position at +0xF4 (3 floats). Verified by behaviour - the triple advances
+ * ~1 m/s along the pavement at ground height (y ~0.15), which is a walking
+ * pedestrian. +0x6C holds a normalised direction/scale triple, not a
+ * position. */
+#define AMB_CREATURE_POS 0xF4u
+
+static void amb_creature_line(int idx)
+{
+    static amb_pedprev prev[AMB_CREATURE_MAX];
+    static uint32_t dumped[AMB_CREATURE_MAX];
+    uint32_t c = s_amb_creature[idx], i, boff = 0;
+    float me[3], p[3], bp[3] = { 0, 0, 0 };
+    double bd = 1e30;
+    int have_me = amb_local_pos(me), found = 0;
+
+    if (!online_ram_n(c, AMB_CREATURE_POS + 12u)) {
+        fprintf(stderr, "[AMBIENT] creature %08X: gone\n", (unsigned)c);
+        return;
+    }
+    p[0] = MEMF(c + AMB_CREATURE_POS);
+    p[1] = MEMF(c + AMB_CREATURE_POS + 4u);
+    p[2] = MEMF(c + AMB_CREATURE_POS + 8u);
+    if (have_me) {
+        for (i = 0; i + 12u <= 0x400u; i += 4u) {
+            double x = MEMF(c + i), y = MEMF(c + i + 4u), z = MEMF(c + i + 8u), d;
+            if (!(x > -4000.0 && x < 4000.0) || !(y > -1000.0 && y < 1000.0) ||
+                !(z > -4000.0 && z < 4000.0))
+                continue;
+            d = (x - me[0]) * (x - me[0]) + (y - me[1]) * (y - me[1]) + (z - me[2]) * (z - me[2]);
+            if (d < bd) {
+                bd = d; boff = i; found = 1;
+                bp[0] = (float)x; bp[1] = (float)y; bp[2] = (float)z;
+            }
+        }
+    }
+    {
+        char speed[40] = "";
+        float dx = p[0] - prev[idx].pos[0], dy = p[1] - prev[idx].pos[1];
+        float dz = p[2] - prev[idx].pos[2];
+        if (prev[idx].ok)
+            snprintf(speed, sizeof speed, " %.2f m/s",
+                     (float)sqrt((double)(dx * dx + dy * dy + dz * dz)));
+        fprintf(stderr, "[AMBIENT] creature %08X | pos %.2f %.2f %.2f%s | nearest +0x%03X %.2f %.2f %.2f (%.1f m)%s\n",
+                (unsigned)c, p[0], p[1], p[2], speed,
+                (unsigned)boff, bp[0], bp[1], bp[2],
+                found ? (float)sqrt(bd) : 0.0f,
+                have_me ? "" : " (no local pose)");
+        memcpy(prev[idx].pos, p, sizeof p);
+        prev[idx].ok = 1;
+    }
+    if (!dumped[idx] && online_ram_n(c, 0x140u)) {
+        dumped[idx] = 1;
+        fprintf(stderr, "[AMBIENT] creature %08X head:", (unsigned)c);
+        for (i = 0; i < 0x140u; i += 4u)
+            fprintf(stderr, " %08X", (unsigned)MEM32(c + i));
+        fprintf(stderr, "\n");
+    }
+}
+
 /* One ambient owner: its slot list and the live cars in it. */
 static void amb_owner(const char *tag, uint32_t c)
 {
@@ -467,6 +672,10 @@ static void amb_owner(const char *tag, uint32_t c)
         amb_car_line(i, o, have_me ? me : (const float[3]){ 0, 0, 0 });
     }
     fprintf(stderr, "[AMBIENT]  %u live, %u slots\n", (unsigned)live, (unsigned)cnt);
+    for (i = 0; i < (uint32_t)s_amb_npedrec; i++)
+        amb_ped_record((int)i);
+    if (!s_amb_npedrec)
+        fprintf(stderr, "[AMBIENT] no pedestrian agent record captured yet\n");
 }
 
 /* ── Layout dump (level 2), once ────────────────────────────── */
@@ -548,6 +757,7 @@ static void dri_ambient_pass(void)
             amb_global();
             amb_vtable("ambient car", 0x44D868u);
             amb_vtable("global manager", 0x475FD8u);
+            amb_vtable("pedestrian type", 0x46EBD8u);
         }
     }
     now = time(NULL);
@@ -585,6 +795,19 @@ static void dri_ambient_pass(void)
         static int laid_out;
         if (s_amb_tag[i] == AMB_TAG_GLOBAL)
             continue;               /* not this layout: amb_global() showed it */
+        if (s_amb_tag[i] >= AMB_TAG_PEDTYPE) {
+            static uint32_t ped_done[8];
+            static int nped;
+            int k, done = 0;
+            for (k = 0; k < nped; k++)
+                if (ped_done[k] == s_amb_seen[i])
+                    done = 1;
+            if (!done && nped < 8) {
+                ped_done[nped++] = s_amb_seen[i];
+                amb_ped_type(s_amb_seen[i]);
+            }
+            continue;
+        }
         amb_owner(names[s_amb_tag[i] & 3u], s_amb_seen[i]);
         if (lvl < 2 || laid_out)
             continue;
@@ -596,6 +819,26 @@ static void dri_ambient_pass(void)
                 laid_out = 1;
                 amb_car_layout(o);
             }
+        }
+    }
+    {   /* pedestrians, if their type has been seen: census mcCreature once */
+        int have_ped = 0;
+        for (i = 0; i < (uint32_t)s_amb_nseen; i++)
+            if (s_amb_tag[i] >= AMB_TAG_PEDTYPE) {
+                have_ped = 1;
+                break;
+            }
+        if (have_ped) {
+            int active = 0;
+            if (!s_amb_creature_scanned)
+                amb_creature_scan();
+            for (i = 0; i < (uint32_t)s_amb_ncreature; i++) {
+                if (!amb_creature_active(s_amb_creature[i]))
+                    continue;
+                active++;
+                amb_creature_line((int)i);
+            }
+            fprintf(stderr, "[AMBIENT] creatures: %d/%d active\n", active, s_amb_ncreature);
         }
     }
 }

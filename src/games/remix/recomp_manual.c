@@ -1888,6 +1888,42 @@ void sub_002B8B20(void)                         /* [0x5587E0], the global manage
     amb_note(3, self, 0);
 }
 
+/* Pedestrian types: sub_0022C110 (thiscall, 4 params) is the type's init -
+ * it builds the model path from "$/ped" via sub_0022BC30 and stores the
+ * tune/density at +0x40/+0x48. The type object's vtable is 0x46EBD8, and the
+ * class has no live-agent array of its own, so capturing the type is the
+ * first step to finding the manager that owns the walkers. */
+extern void sub_0022C110_gen(void);
+void sub_0022C110(void)
+{
+    uint32_t self = g_ecx;
+    sub_0022C110_gen();
+    amb_note(4, self, 0);
+}
+
+extern void sub_0022C170_gen(void);
+void sub_0022C170(void)                         /* the type's second vtable pass */
+{
+    uint32_t self = g_ecx;
+    sub_0022C170_gen();
+    amb_note(5, self, 0);
+}
+
+/* The shared agent-record init: sub_00071AC0(record=ecx, type-or-object).
+ * Traffic calls it with a 0x690 car object, and sub_0006D7D0 calls it with an
+ * ambient *type* pointer. A pedestrian type (vtable 0x46EBD8) arriving here
+ * means the record being filled is a live walker, which is what M5 needs. */
+extern void sub_00071AC0_gen(void);
+void sub_00071AC0(void)
+{
+    uint32_t r[8] = { g_eax, g_ecx, g_edx, g_ebx, g_esp, g_ebp, g_esi, g_edi };
+    uint32_t rec = g_ecx, who = MEM32(g_esp + 4u);
+    amb_note(6, rec, who);
+    g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3];
+    g_esp = r[4]; g_ebp = r[5]; g_esi = r[6]; g_edi = r[7];
+    sub_00071AC0_gen();
+}
+
 /* ── Manual function overrides ─────────────────────────────── */
 
 /*
