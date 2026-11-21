@@ -675,8 +675,6 @@ typedef struct {
 static amb_wire s_amb_tx[AMB_TX_MAX];
 static int      s_amb_ntx;
 static uint8_t  s_amb_tx_seq;
-static int      s_amb_send_on = -1;
-
 /* per-slot epoch for cars: bumped when the slot's object changes */
 static uint32_t s_amb_slot_obj[64];
 static uint8_t  s_amb_slot_epoch[64];
@@ -792,17 +790,14 @@ static void amb_tx_collect(void)
 }
 
 /* Send the collected entities, in 5-entity chunks, to every linked peer. */
+static int  amb_owner_elect(void);
 static void amb_tx_send(void)
 {
     roam_peer peers[ROAM_K_MAX];
     uint8_t buf[AMB_WIRE_MAX];
     int np, i, base;
 
-    if (s_amb_send_on < 0) {
-        const char *e = getenv("MC3_ROAM_AMBIENT_SEND");
-        s_amb_send_on = e && e[0] == '1';
-    }
-    if (!s_amb_send_on || !s_amb_ntx)
+    if (!amb_owner_elect() || !s_amb_ntx)
         return;
     np = roam_peers(peers, ROAM_K_MAX);
     if (np <= 0)
@@ -891,7 +886,7 @@ static void amb_rx_drain(void)
 
 /* Milestone 4/5's takeover, defined below (used by amb_net_frame). */
 static void amb_ghost_apply(void);
-static void amb_ghost_takeover(void);
+static int  amb_owner_elect(void);static void amb_ghost_takeover(void);
 static void amb_ghost_check(void);
 static void amb_model_walk(uint32_t o);
 static void dri_ambient_draw(void);
@@ -1091,8 +1086,8 @@ static void amb_ghost_apply(void)
         const char *e = getenv("MC3_ROAM_AMBIENT_GHOST");
         on = e && e[0] == '1';
     }
-    if (!on || !s_amb_rx_n)
-        return;
+    if (!on || !s_amb_rx_n || amb_owner_elect())
+        return;                            /* the owner draws its own cars */
     for (i = 0; i < (uint32_t)s_amb_nseen; i++)
         if (s_amb_tag[i] != AMB_TAG_GLOBAL && s_amb_tag[i] < AMB_TAG_PEDTYPE && s_amb_seen[i]) {
             owner = s_amb_seen[i];
@@ -1170,7 +1165,7 @@ static void amb_ghost_apply(void)
             sup_on = v && v[0] == '1';
         }
         if (sup_on) {
-            for (i = 0; i < cnt; i++) {
+            for (i = 0; i < cnt && !amb_owner_elect(); i++) {
                 uint32_t o = MEM32(arr + i * 4u), rec;
                 int ours = 0, streamed = 0;
                 uint32_t k;
@@ -1239,8 +1234,8 @@ static void amb_ghost_takeover(void)
         const char *e = getenv("MC3_ROAM_AMBIENT_TAKEOVER");
         s_amb_takeover_on = e && e[0] == '1';
     }
-    if (!s_amb_takeover_on)
-        return;
+    if (!s_amb_takeover_on || amb_owner_elect())
+        return;                            /* the owner keeps its own cars */
     deslot = getenv("MC3_ROAM_AMBIENT_DESLOT") && getenv("MC3_ROAM_AMBIENT_DESLOT")[0] == '1';
     for (i = 0; i < (uint32_t)s_amb_nseen; i++)
         if (s_amb_tag[i] != AMB_TAG_GLOBAL && s_amb_tag[i] < AMB_TAG_PEDTYPE && s_amb_seen[i]) {
@@ -1366,6 +1361,72 @@ static void dri_ambient_draw(void)
         }
         (void)shown;
     }
+}
+
+/* ── Milestone 5: which instance owns the ambient simulation ──
+ *
+ * One owner streams, everyone else is a client. The election is "lowest
+ * session id in the room", which needs no handshake and is stable while the
+ * room holds: our id is fixed per start (roam_self_id), and the peers list is
+ * the same set the hub links us with.
+ *
+ * MC3_ROAM_AMBIENT_SEND=1 still forces this instance to stream (handy for
+ * tests); MC3_ROAM_AMBIENT_SEND=0 forces it to be a client. Unset: elect.
+ */
+static int  s_amb_owner = -1;      /* -1 unknown, 0 client, 1 owner */
+static uint32_t s_amb_owner_id;
+static int  s_amb_forced = -1;     /* -1 elect, 0 force client, 1 force owner */
+
+static int amb_owner_elect(void)
+{
+    roam_peer peers[ROAM_K_MAX];
+    uint32_t me, best;
+    int np, i;
+
+    if (s_amb_forced < 0) {
+        const char *e = getenv("MC3_ROAM_AMBIENT_SEND");
+        /* The loopback test feeds our own entities back to us, so it must stay
+         * a client even though it is alone in its room. */
+        if (getenv("MC3_ROAM_AMBIENT_LOOP") && getenv("MC3_ROAM_AMBIENT_LOOP")[0] == '1')
+            s_amb_forced = 0;
+        else
+            s_amb_forced = (e && e[0]) ? (e[0] == '1' ? 1 : (e[0] == '0' ? 0 : -1)) : -1;
+    }
+    if (s_amb_forced == 1) {
+        s_amb_owner = 1;
+        s_amb_owner_id = roam_self_id();
+        return 1;
+    }
+    if (s_amb_forced == 0) {
+        s_amb_owner = 0;
+        return 0;
+    }
+    me = roam_self_id();
+    if (!me)
+        return 0;
+    best = me;
+    np = roam_peers(peers, ROAM_K_MAX);
+    for (i = 0; i < np; i++)
+        if (peers[i].id && peers[i].id < best)
+            best = peers[i].id;
+    if (best != s_amb_owner_id || s_amb_owner < 0) {
+        int was = s_amb_owner;
+        s_amb_owner_id = best;
+        s_amb_owner = (best == me);
+        if (was != s_amb_owner)
+            fprintf(stderr, "[AMBIENT] owner: %s (our id %08X, room's lowest %08X)\n",
+                    s_amb_owner ? "us - we stream the population" : "a peer - we follow it",
+                    (unsigned)me, (unsigned)best);
+        if (s_amb_owner && was == 0) {
+            /* Took over: the local population is the authority's now, so the
+             * ghosts we were following have to go back to the local cars. */
+            s_amb_nghost = 0;
+            memset(s_amb_rx, 0, sizeof s_amb_rx);
+            s_amb_rx_n = 0;
+            fprintf(stderr, "[AMBIENT] owner: took over, dropped %d ghost(s)\n", s_amb_nghost);
+        }
+    }
+    return s_amb_owner;
 }
 
 /* One ambient owner: its slot list and the live cars in it. */

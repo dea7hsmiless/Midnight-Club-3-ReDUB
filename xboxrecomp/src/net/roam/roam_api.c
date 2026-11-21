@@ -173,3 +173,10 @@ int roam_recv_msg(uint32_t *from, void *out, int cap){
     roam_plat_lock(); int r = rc_recv_game(&g_s, from, (uint8_t *)out, cap); roam_plat_unlock();
     return r;
 }
+/* Our own session id (nonzero while running, 0 when not).  The game layers
+ * need it to elect one owner deterministically - e.g. "the lowest id in the
+ * room streams the ambient population" - without a separate handshake. */
+uint32_t roam_self_id(void){
+    if (!g_on) return 0;
+    return g_s.conf.self_id;
+}

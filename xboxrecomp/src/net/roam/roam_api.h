@@ -127,6 +127,11 @@ int  roam_send_msg(uint32_t to, const void *data, int len);
  * length (copied up to cap), *from its sender's id; 0 none */
 int  roam_recv_msg(uint32_t *from, void *out, int cap);
 
+/* Our own session id: nonzero while free roam runs, 0 otherwise.  Game layers
+ * use it to elect one owner deterministically (lowest id wins), so "who
+ * simulates the ambient population" needs no extra handshake. */
+uint32_t roam_self_id(void);
+
 #ifdef __cplusplus
 }
 #endif
