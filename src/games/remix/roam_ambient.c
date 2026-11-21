@@ -893,6 +893,7 @@ static void amb_rx_drain(void)
 static void amb_ghost_apply(void);
 static void amb_ghost_takeover(void);
 static void amb_ghost_check(void);
+static void amb_model_walk(uint32_t o);
 static uint32_t s_amb_ghost_cars, s_amb_ghost_slots;
 
 #define AMB_GHOST_MAX 32
@@ -961,6 +962,11 @@ static void amb_net_log(void)
         int i, stable = 0;
         for (i = 0; i < s_amb_nghost; i++) {
             uint32_t rec;
+            static int walked;
+            if (!walked && i == 0) {
+                walked = 1;
+                amb_model_walk(s_amb_ghost[0].obj);
+            }
             if (s_amb_ghost[i].rec_seen > 60)
                 stable++;
             rec = online_ram_n(s_amb_ghost[i].obj, 0x20u) ? MEM32(s_amb_ghost[i].obj + 0x1Cu) : 0;
@@ -1071,28 +1077,24 @@ static void amb_ghost_apply(void)
         if (!o || !online_ram(o))
             continue;
         copy = *e;
-        {   /* MC3_ROAM_AMBIENT_NEAR=1: park the first ghost in front of us, to
-             * settle by eye whether a taken-over car still draws */
+        {   /* MC3_ROAM_AMBIENT_NEAR=1: place the ghosts in a square around us,
+             * one per ghost, so whichever way the camera faces at least one is
+             * in frame. With takeover on an invisible square means a de-slotted
+             * car stops drawing; with takeover off a visible one means drawing
+             * itself is fine and the de-slot is what costs it. */
             static int near_on = -1;
-            static int near_slot = -1;
             float me[3];
             if (near_on < 0) {
                 const char *v = getenv("MC3_ROAM_AMBIENT_NEAR");
                 near_on = v && v[0] == '1';
             }
-            if (near_on && near_slot < 0)
-                near_slot = (int)slot;
-            if (near_on && (int)slot == near_slot && amb_local_pos(me)) {
-                uint32_t pm = MEM32(AMB_PM_VA), p0, v0, m0;
-                float fx = 0.0f, fz = 1.0f;
-                if (online_ram(pm) && online_ram(p0 = MEM32(pm + 8u)) &&
-                    online_ram(v0 = MEM32(p0 + 0x14u)) && online_ram_n(m0 = MEM32(v0 + 0x1Cu), 0x40u)) {
-                    fx = MEMF(m0 + 0x28u);          /* our forward row */
-                    fz = MEMF(m0 + 0x30u);
-                }
-                copy.p[0] = me[0] + fx * 12.0f;
+            if (near_on && amb_local_pos(me)) {
+                static const float ox[4] = { 6.0f, -6.0f, 6.0f, -6.0f };
+                static const float oz[4] = { 6.0f, 6.0f, -6.0f, -6.0f };
+                int k = (int)(slot & 3u);      /* stable per slot */
+                copy.p[0] = me[0] + ox[k];
                 copy.p[1] = me[1];
-                copy.p[2] = me[2] + fz * 12.0f;
+                copy.p[2] = me[2] + oz[k];
             }
         }
         amb_write_pose(o, &copy);
@@ -1177,6 +1179,41 @@ static void amb_ghost_check(void)
             s_amb_ghost[i].rec_seen = 0;
             fprintf(stderr, "[AMBIENT] takeover: slot %u record moved to %08X\n",
                     (unsigned)s_amb_ghost[i].slot, (unsigned)rec);
+        }
+    }
+}
+
+/* Where is an ambient car's *render* object? The player car keeps it at
+ * veh+0x0C with a drawn byte at +0x12D (roam_tagdraw.c relies on that), but an
+ * ambient car's +0x0C is the model block ("va_..." text). Walk the blocks an
+ * ambient car points at and report any object that looks like a render node —
+ * one with a vtable and a +0x12D byte — so the drawn question can be answered
+ * from the game's own data instead of a screenshot.
+ */
+static void amb_model_walk(uint32_t o)
+{
+    uint32_t i, j;
+    const char *const what[3] = { "obj+0x0C", "obj+0x2C", "obj+0x38" };
+
+    for (j = 0; j < 3u; j++) {
+        static const uint32_t off[3] = { 0x0Cu, 0x2Cu, 0x38u };
+        uint32_t base = MEM32(o + off[j]);
+        if (!online_ram_n(base, 0x40u))
+            continue;
+        fprintf(stderr, "[AMBIENT] walk %s %08X:", what[j], (unsigned)base);
+        for (i = 0; i < 0x10u; i += 4u)
+            fprintf(stderr, " %08X", (unsigned)MEM32(base + i));
+        fprintf(stderr, "\n");
+        for (i = 0; i + 4u <= 0x100u; i += 4u) {
+            uint32_t p = MEM32(base + i), vt;
+            if (!online_ram_n(p, 0x140u))
+                continue;
+            vt = MEM32(p);
+            if (vt < 0x004476E0u || vt >= 0x004A8140u)
+                continue;
+            fprintf(stderr, "[AMBIENT]  %s+%02X -> %08X vt %08X drawn %u (+0x12D) +12C %u\n",
+                    what[j], (unsigned)i, (unsigned)p, (unsigned)vt,
+                    (unsigned)MEM8(p + 0x12Du), (unsigned)MEM8(p + 0x12Cu));
         }
     }
 }
