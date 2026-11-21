@@ -1,4 +1,4 @@
-/*
+﻿/*
  * win32_compat.h - POSIX implementation of generic Win32 host primitives
  *
  * The Xbox kernel HLE (src/kernel) is built on top of a handful of *generic*
@@ -128,6 +128,9 @@ BOOL  DuplicateHandle(HANDLE srcProc, HANDLE src, HANDLE dstProc,
  * handles flow through the same CloseHandle path as every other object. */
 HANDLE      w32_open_handle(int fd, const char *host_path);
 int         w32_handle_fd(HANDLE h);
+/* Serialize operations on a shared file position, including duplicate handles. */
+BOOL        w32_file_lock(HANDLE h);
+void        w32_file_unlock(HANDLE h);
 const char *w32_handle_path(HANDLE h);
 
 /* ---- Events ----------------------------------------------------------- */
@@ -160,6 +163,7 @@ HANDLE CreateThread(LPSECURITY_ATTRIBUTES sa, SIZE_T stackSize,
                     DWORD flags, LPDWORD threadId);
 VOID   ExitThread(DWORD exitCode);
 BOOL   GetExitCodeThread(HANDLE h, LPDWORD exitCode);
+#define STILL_ACTIVE 259u
 DWORD  ResumeThread(HANDLE h);
 DWORD  SuspendThread(HANDLE h);
 BOOL   TerminateThread(HANDLE h, DWORD exitCode);

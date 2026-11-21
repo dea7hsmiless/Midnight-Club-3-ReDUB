@@ -790,12 +790,27 @@ static void gil_unlock(void)
     LeaveCriticalSection(&s_gil_cs);
 }
 
+/* A suspend can arrive while this thread waits for its ticket. Recheck after
+ * acquiring, release the ticket, and only then park without runtime locks. */
+static void gil_lock_cooperative(void)
+{
+    for (;;) {
+        xbox_kernel_suspend_checkpoint();
+        gil_lock();
+        if (!xbox_kernel_suspend_pending()) return;
+        gil_unlock();
+    }
+}
+
 void xbox_gil_enter(void)
 {
-    if (!gil_enabled())
+    xbox_kernel_guest_register();
+    if (!gil_enabled()) {
+        xbox_kernel_suspend_checkpoint();
         return;
+    }
     if (t_gil_depth++ == 0)
-        gil_lock();
+        gil_lock_cooperative();
 }
 
 void xbox_gil_leave(void)
@@ -819,8 +834,9 @@ int xbox_gil_suspend(void)
 
 void xbox_gil_resume(int depth)
 {
+    xbox_kernel_suspend_checkpoint();
     if (depth > 0 && gil_enabled()) {
-        gil_lock();
+        gil_lock_cooperative();
         t_gil_depth = depth;
     }
 }
@@ -886,8 +902,12 @@ void recomp_spin_yield(void)
  * traffic collisions). */
 void recomp_preempt(void)
 {
-    if (t_gil_depth <= 0 || t_gil_nopreempt || xbox_thread_holds_dispatch())
+    if (t_gil_nopreempt || xbox_thread_holds_dispatch())
         return;
+    if (t_gil_depth <= 0) {
+        xbox_kernel_suspend_checkpoint();
+        return;
+    }
     recomp_spin_yield();
 }
 
@@ -967,6 +987,7 @@ static DWORD WINAPI bridge_thread_main(LPVOID param)
     guest_thread_forget();
     xbox_FreeThreadStack(g_thread_stack_top);
     g_thread_stack_top = 0;
+    xbox_kernel_guest_unregister();
     return 0;
 }
 
@@ -1006,7 +1027,7 @@ static void pending_start_flush(DWORD creator)
             continue;
         if (creator ? g_pending_start[i].creator == creator
                     : now - g_pending_start[i].t >= 5) {
-            ResumeThread(g_pending_start[i].th);
+            xbox_NtResumeThread(g_pending_start[i].th, NULL);
             g_pending_start[i].th = NULL;
             InterlockedDecrement(&g_pending_count);
         }
@@ -1027,6 +1048,11 @@ static HANDLE bridge_spawn_thread(recomp_func_t fn, uint32_t ctx1,
     s->tib = xbox_AllocThreadTib();
 
     th = CreateThread(NULL, 0, bridge_thread_main, s, CREATE_SUSPENDED, NULL);
+    if (th && !xbox_kernel_guest_prepare(th)) {
+        TerminateThread(th, STATUS_INSUFFICIENT_RESOURCES);
+        CloseHandle(th);
+        th = NULL;
+    }
     /* Registered now, not when it first runs: the creator sets its priority
      * (ObReferenceObjectByHandle -> KTHREAD) before starting it, and used to
      * wait up to 200 ms per call for a thread that could not start until the
@@ -1060,7 +1086,7 @@ static HANDLE bridge_spawn_thread(recomp_func_t fn, uint32_t ctx1,
         }
         ReleaseSRWLockExclusive(&g_pending_lock);
         if (i == PENDING_START_MAX)
-            ResumeThread(th);          /* list full: start it now */
+            xbox_NtResumeThread(th, NULL); /* list full: start it now */
     }
     if (!th) free(s);
     /* Record the game thread so a host-tick-driven title's watchdog can sample
@@ -2737,6 +2763,7 @@ static void bridge_PsTerminateSystemThread(void)
         guest_thread_forget();
         xbox_FreeThreadStack(g_thread_stack_top);
         g_thread_stack_top = 0;
+        xbox_kernel_guest_unregister();
         ExitThread(exit_status);
     }
 }
@@ -8124,8 +8151,11 @@ static void bridge_KeResumeThread(void)
     if (!hThread)
         hThread = XBOX_TO_NATIVE(STACK_ARG(0));
 
-    if (hThread)
-        g_eax = (uint32_t)ResumeThread(hThread);
+    if (hThread) {
+        ULONG previous = 0;
+        NTSTATUS status = xbox_NtResumeThread(hThread, &previous);
+        g_eax = status == STATUS_SUCCESS ? previous : UINT32_MAX;
+    }
     else
         g_eax = 0;
 }
@@ -8137,8 +8167,11 @@ static void bridge_KeSuspendThread(void)
     if (!hThread)
         hThread = XBOX_TO_NATIVE(STACK_ARG(0));
 
-    if (hThread)
-        g_eax = (uint32_t)SuspendThread(hThread);
+    if (hThread) {
+        ULONG previous = 0;
+        NTSTATUS status = xbox_NtSuspendThread(hThread, &previous);
+        g_eax = status == STATUS_SUCCESS ? previous : UINT32_MAX;
+    }
     else
         g_eax = 0;
 }

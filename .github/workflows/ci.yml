@@ -85,5 +85,18 @@ jobs:
         shell: msys2 {0}
         run: |
           cmake -S xboxrecomp/tests/stability -B work/native-stability -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER=clang
-          cmake --build work/native-stability --target kernel_bridge_test kernel_directory_test kernel_object_paths_test kernel_audio_setting_test kernel_irql_abi_test kernel_dispatch_test idex_channel_test pushbuffer_test
+          cmake --build work/native-stability --target kernel_bridge_test kernel_directory_test kernel_object_paths_test kernel_audio_setting_test kernel_irql_abi_test kernel_dispatch_test idex_channel_test pushbuffer_test thread_suspend_test
+          ctest --test-dir work/native-stability --output-on-failure --timeout 30
+
+  linux-stability:
+    name: Linux file I/O and thread stability
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtime test dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libsdl2-dev libgl1-mesa-dev libssl-dev
+      - name: Native runtime regressions
+        run: |
+          cmake -S xboxrecomp/tests/stability -B work/native-stability -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          cmake --build work/native-stability --target kernel_bridge_test kernel_audio_setting_test thread_suspend_test file_concurrency_test kernel_memory_posix_test --parallel 4
           ctest --test-dir work/native-stability --output-on-failure --timeout 30

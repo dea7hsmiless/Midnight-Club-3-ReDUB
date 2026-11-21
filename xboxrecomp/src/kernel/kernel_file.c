@@ -1,4 +1,4 @@
-/*
+﻿/*
  * kernel_file.c - Xbox File I/O
  *
  * Implements the Nt*File kernel functions. All Xbox device paths are
@@ -1007,22 +1007,30 @@ NTSTATUS __stdcall xbox_NtReadFile(
         return STATUS_INVALID_PARAMETER;
 
     int fd = w32_handle_fd(FileHandle);
-    if (fd < 0) {
+    if (fd < 0 || !w32_file_lock(FileHandle)) {
         IoStatusBlock->Status = STATUS_INVALID_HANDLE;
+        IoStatusBlock->Information = 0;
         return STATUS_INVALID_HANDLE;
     }
 
     int64_t pos = -1;
     if (ByteOffset && ByteOffset->QuadPart >= 0) {
-        lseek(fd, (off_t)ByteOffset->QuadPart, SEEK_SET);
+        if (lseek(fd, (off_t)ByteOffset->QuadPart, SEEK_SET) < 0) {
+            w32_file_unlock(FileHandle);
+            IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
+            IoStatusBlock->Information = 0;
+            return STATUS_UNSUCCESSFUL;
+        }
         pos = ByteOffset->QuadPart;
     } else if (xbox_file_read_hook) {
         pos = (int64_t)lseek(fd, 0, SEEK_CUR);
     }
 
     ssize_t n = host_read(fd, Buffer, Length);
+    int read_error = errno;
+    w32_file_unlock(FileHandle);
     if (n < 0) {
-        XBOX_TRACE(XBOX_LOG_FILE, "NtReadFile(handle=%p) errno=%d", FileHandle, errno);
+        XBOX_TRACE(XBOX_LOG_FILE, "NtReadFile(handle=%p) errno=%d", FileHandle, read_error);
         IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
         IoStatusBlock->Information = 0;
         return STATUS_UNSUCCESSFUL;
@@ -1051,17 +1059,25 @@ NTSTATUS __stdcall xbox_NtWriteFile(
         return STATUS_INVALID_PARAMETER;
 
     int fd = w32_handle_fd(FileHandle);
-    if (fd < 0) {
+    if (fd < 0 || !w32_file_lock(FileHandle)) {
         IoStatusBlock->Status = STATUS_INVALID_HANDLE;
+        IoStatusBlock->Information = 0;
         return STATUS_INVALID_HANDLE;
     }
 
-    if (ByteOffset && ByteOffset->QuadPart >= 0)
-        lseek(fd, (off_t)ByteOffset->QuadPart, SEEK_SET);
+    if (ByteOffset && ByteOffset->QuadPart >= 0 &&
+        lseek(fd, (off_t)ByteOffset->QuadPart, SEEK_SET) < 0) {
+        w32_file_unlock(FileHandle);
+        IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
+        IoStatusBlock->Information = 0;
+        return STATUS_UNSUCCESSFUL;
+    }
 
     ssize_t n = host_write(fd, Buffer, Length);
+    int write_error = errno;
+    w32_file_unlock(FileHandle);
     if (n < 0) {
-        XBOX_TRACE(XBOX_LOG_FILE, "NtWriteFile(handle=%p) errno=%d", FileHandle, errno);
+        XBOX_TRACE(XBOX_LOG_FILE, "NtWriteFile(handle=%p) errno=%d", FileHandle, write_error);
         IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
         IoStatusBlock->Information = 0;
         return STATUS_UNSUCCESSFUL;
@@ -1214,7 +1230,9 @@ NTSTATUS __stdcall xbox_NtQueryInformationFile(
         }
         case XboxFilePositionInformation: {
             PXBOX_FILE_POSITION_INFORMATION info = (PXBOX_FILE_POSITION_INFORMATION)FileInformation;
+            if (!w32_file_lock(FileHandle)) return STATUS_INVALID_HANDLE;
             off_t pos = lseek(fd, 0, SEEK_CUR);
+            w32_file_unlock(FileHandle);
             if (pos < 0) return STATUS_UNSUCCESSFUL;
             info->CurrentByteOffset.QuadPart = pos;
             IoStatusBlock->Status = STATUS_SUCCESS;
@@ -1269,14 +1287,20 @@ NTSTATUS __stdcall xbox_NtSetInformationFile(
     switch (FileInformationClass) {
         case XboxFilePositionInformation: {
             PXBOX_FILE_POSITION_INFORMATION info = (PXBOX_FILE_POSITION_INFORMATION)FileInformation;
-            if (lseek(fd, (off_t)info->CurrentByteOffset.QuadPart, SEEK_SET) < 0)
+            if (!w32_file_lock(FileHandle)) return STATUS_INVALID_HANDLE;
+            off_t pos = lseek(fd, (off_t)info->CurrentByteOffset.QuadPart, SEEK_SET);
+            w32_file_unlock(FileHandle);
+            if (pos < 0)
                 return STATUS_UNSUCCESSFUL;
             IoStatusBlock->Status = STATUS_SUCCESS;
             return STATUS_SUCCESS;
         }
         case XboxFileEndOfFileInformation: {
             PXBOX_FILE_END_OF_FILE_INFORMATION info = (PXBOX_FILE_END_OF_FILE_INFORMATION)FileInformation;
-            if (ftruncate(fd, (off_t)info->EndOfFile.QuadPart) != 0)
+            if (!w32_file_lock(FileHandle)) return STATUS_INVALID_HANDLE;
+            int result = ftruncate(fd, (off_t)info->EndOfFile.QuadPart);
+            w32_file_unlock(FileHandle);
+            if (result != 0)
                 return STATUS_UNSUCCESSFUL;
             IoStatusBlock->Status = STATUS_SUCCESS;
             return STATUS_SUCCESS;

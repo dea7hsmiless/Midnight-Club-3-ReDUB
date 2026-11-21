@@ -85,6 +85,14 @@ The semaphore-overflow fallback now returns the correct NTSTATUS `0xC0000047`
 regression checks the numeric status and that a rejected release leaves the
 semaphore count unchanged; this does not repair an underlying over-release.
 
+The follow-up concurrency findings are fixed in source: POSIX file operations
+serialize seek/read/write and cursor updates per handle (including duplicates).
+Guest suspension now parks at execution-lock safe points, preserves nested and
+initial suspend counts, and defers parking across kernel callbacks. Both Nt and
+Ke suspend/resume routes use that mechanism. Windows and Linux regression jobs
+cover the reproduced lock freeze, queued/self suspension, and interleaved file
+reads/writes/position changes without disc data.
+
 Regression checks: `tools/windows/Test-Stability.ps1` (pass `-ClangPath` for the
 Unicode-path test), `tools/windows/Test-DiscSaveData.java`, and the native harness
 at `xboxrecomp/tests/stability`. CI runs these without disc data. No version, tag,

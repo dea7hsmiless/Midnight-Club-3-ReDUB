@@ -813,8 +813,15 @@ void    xbox_IrqlDumpHolders(void);
 VOID    __fastcall xbox_KfLowerIrql(KIRQL NewIrql);
 
 /* This thread entering (+1) or leaving (-1) kernel code that may hold host
- * locks; NtSuspendThread only leaves a thread suspended outside it. */
+ * locks; cooperative suspension is deferred until those locks are released. */
 void    xbox_kernel_busy(int delta);
+/* Guest suspension is cooperative. Checkpoints require the guest lock to be
+ * released, and defer parking while this thread holds kernel/dispatch locks. */
+BOOL    xbox_kernel_guest_prepare(HANDLE thread);
+void    xbox_kernel_guest_register(void);
+void    xbox_kernel_guest_unregister(void);
+int     xbox_kernel_suspend_pending(void);
+void    xbox_kernel_suspend_checkpoint(void);
 KIRQL   __stdcall xbox_KeRaiseIrqlToDpcLevel(void);
 
 VOID    __stdcall xbox_KeStallExecutionProcessor(ULONG MicroSeconds);

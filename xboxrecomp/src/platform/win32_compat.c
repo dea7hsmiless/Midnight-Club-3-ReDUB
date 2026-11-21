@@ -1,4 +1,4 @@
-/*
+﻿/*
  * win32_compat.c - POSIX implementation of generic Win32 host primitives.
  *
  * See win32_compat.h. This is deliberately a *generic* OS-primitive layer
@@ -332,7 +332,6 @@ typedef struct w32_object {
 /* pseudo handles for "current thread"/"current process" */
 #define PSEUDO_CURRENT_PROCESS ((HANDLE)(LONG_PTR)-1)
 #define PSEUDO_CURRENT_THREAD  ((HANDLE)(LONG_PTR)-2)
-#define STILL_ACTIVE 259u
 
 static __thread w32_object *t_self_obj = NULL;
 static __thread DWORD       t_tid      = 0;
@@ -475,6 +474,20 @@ int w32_handle_fd(HANDLE h)
 {
     w32_object *o = obj_from(h);
     return (o && o->kind == K_FILE) ? o->fd : -1;
+}
+
+BOOL w32_file_lock(HANDLE h)
+{
+    w32_object *o = obj_from(h);
+    if (!o || o->kind != K_FILE || o->fd < 0) return FALSE;
+    pthread_mutex_lock(&o->lock);
+    return TRUE;
+}
+
+void w32_file_unlock(HANDLE h)
+{
+    w32_object *o = obj_from(h);
+    if (o && o->kind == K_FILE) pthread_mutex_unlock(&o->lock);
 }
 
 const char *w32_handle_path(HANDLE h)
@@ -2077,7 +2090,9 @@ BOOL ReadFile(HANDLE h, LPVOID buf, DWORD len, LPDWORD nread, void *overlapped)
     (void)overlapped;
     int fd = w32_handle_fd(h);
     if (fd < 0) { if (nread) *nread = 0; SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
+    if (!w32_file_lock(h)) { if (nread) *nread = 0; SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
     ssize_t n = read(fd, buf, len);
+    w32_file_unlock(h);
     if (n < 0)  { if (nread) *nread = 0; SetLastError(ERROR_GEN_FAILURE);    return FALSE; }
     if (nread)  *nread = (DWORD)n;
     return TRUE;
@@ -2088,7 +2103,9 @@ BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD len, LPDWORD nwritten, void *overlap
     (void)overlapped;
     int fd = w32_handle_fd(h);
     if (fd < 0) { if (nwritten) *nwritten = 0; SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
+    if (!w32_file_lock(h)) { if (nwritten) *nwritten = 0; SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
     ssize_t n = write(fd, buf, len);
+    w32_file_unlock(h);
     if (n < 0)  { if (nwritten) *nwritten = 0; SetLastError(ERROR_GEN_FAILURE);    return FALSE; }
     if (nwritten) *nwritten = (DWORD)n;
     return TRUE;
