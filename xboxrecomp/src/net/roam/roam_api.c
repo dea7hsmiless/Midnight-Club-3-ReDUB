@@ -180,3 +180,6 @@ uint32_t roam_self_id(void){
     if (!g_on) return 0;
     return g_s.conf.self_id;
 }
+int64_t roam_now_us(void){
+    return roam_plat_now_us();
+}

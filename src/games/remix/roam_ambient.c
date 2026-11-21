@@ -682,16 +682,123 @@ static uint8_t  s_amb_slot_epoch[64];
 /* receive counters, logged once a second */
 /* The received entities, newest by id: the list milestone 4 will draw. */
 #define AMB_RX_MAX 64
+/* Received entity samples. Only two entity kinds exist and both need just a
+ * position and a yaw, so the core's rc_interp (built around rc_state) would be
+ * all overhead. At 15 Hz a 100 ms render delay needs samples spanning more
+ * than 100 ms, so keep eight: that is ~530 ms of history, enough for the
+ * default delay and for a stalled packet or two. */
+#define AMB_SAMP 8
+
 typedef struct {
-    uint16_t id;
-    uint8_t  kind, model, used;
     float    p[3];
     uint16_t yaw;
-    double   t;                        /* roam_now() when it arrived */
+    int64_t  t;                        /* sender-clock estimate, us */
+} amb_samp;
+
+typedef struct {
+    uint16_t  id;
+    uint8_t   kind, model, used, n;
+    amb_samp  s[AMB_SAMP];             /* ring, oldest first by t */
+    float     p[3];                    /* interpolated this frame (what we draw) */
+    uint16_t  yaw;
+    double    t;                       /* roam_now() when last received */
 } amb_rx_ent;
 
 static amb_rx_ent s_amb_rx[AMB_RX_MAX];
 static int s_amb_rx_n;
+
+/* A received sample: stamped with our own clock, since the wire carries no
+ * sender time for ambient entities (they are not rc_state). Arrival time is a
+ * good enough stamp: the stream is paced, and jitter averages out over three
+ * samples. */
+static void amb_samp_push(amb_rx_ent *e, float x, float y, float z, uint16_t yaw)
+{
+    amb_samp *s = &e->s[e->n % AMB_SAMP];
+    s->p[0] = x;
+    s->p[1] = y;
+    s->p[2] = z;
+    s->yaw = yaw;
+    s->t = roam_now_us();
+    e->n++;
+    if (e->n > 255)
+        e->n = AMB_SAMP;               /* keep the ring index bounded */
+}
+
+/* The sample with the largest t strictly before `t`, and the one after it.
+ * Returns 0 when there is nothing to interpolate between. */
+static int amb_samp_bracket(const amb_rx_ent *e, int64_t t, amb_samp *lo, amb_samp *hi)
+{
+    int i, nlo = -1, nhi = -1;
+    for (i = 0; i < AMB_SAMP; i++) {
+        const amb_samp *s = &e->s[i];
+        if (s->t <= 0)
+            continue;
+        if (s->t <= t && (nlo < 0 || s->t > e->s[nlo].t))
+            nlo = i;
+        if (s->t > t && (nhi < 0 || s->t < e->s[nhi].t))
+            nhi = i;
+    }
+    if (nlo < 0 || nhi < 0)
+        return 0;
+    *lo = e->s[nlo];
+    *hi = e->s[nhi];
+    return 1;
+}
+
+/* Interpolate every entity to (now - delay), so a 15 Hz stream draws smoothly
+ * and the ghost stops lagging the owner by a whole send interval. Beyond the
+ * newest sample the pose holds (interpolating into the future would guess).
+ * Returns how many entities were actually bracketed (i.e. smoothed). */
+static int amb_rx_interp_all(int delay_ms)
+{
+    int64_t now = roam_now_us();
+    int64_t t = now - (int64_t)delay_ms * 1000;
+    int i, smoothed = 0;
+
+    for (i = 0; i < s_amb_rx_n; i++) {
+        amb_rx_ent *e = &s_amb_rx[i];
+        amb_samp lo, hi;
+        double span;
+        float f;
+        int yaw_a, yaw_b, dyaw;
+        if (!e->used)
+            continue;
+        if (!amb_samp_bracket(e, t, &lo, &hi)) {
+            /* only one side: draw the newest sample we have */
+            int j, best = -1;
+            for (j = 0; j < AMB_SAMP; j++)
+                if (e->s[j].t > 0 && (best < 0 || e->s[j].t > e->s[best].t))
+                    best = j;
+            if (best >= 0) {
+                e->p[0] = e->s[best].p[0];
+                e->p[1] = e->s[best].p[1];
+                e->p[2] = e->s[best].p[2];
+                e->yaw = e->s[best].yaw;
+            }
+            continue;
+        }
+        span = (double)(hi.t - lo.t);
+        f = span > 0.0 ? (float)((double)(t - lo.t) / span) : 1.0f;
+        if (f < 0.0f) f = 0.0f;
+        if (f > 1.0f) f = 1.0f;
+        e->p[0] = lo.p[0] + (hi.p[0] - lo.p[0]) * f;
+        e->p[1] = lo.p[1] + (hi.p[1] - lo.p[1]) * f;
+        e->p[2] = lo.p[2] + (hi.p[2] - lo.p[2]) * f;
+        /* yaw wraps: take the short way round */
+        yaw_a = lo.yaw;
+        yaw_b = hi.yaw;
+        if (yaw_a == (int)AMB_YAW_UNKNOWN || yaw_b == (int)AMB_YAW_UNKNOWN) {
+            e->yaw = lo.yaw;
+        } else {
+            dyaw = yaw_b - yaw_a;
+            if (dyaw > 32767) dyaw -= 65536;
+            if (dyaw < -32768) dyaw += 65536;
+            e->yaw = (uint16_t)(yaw_a + (int)((float)dyaw * f));
+        }
+        smoothed++;
+    }
+    return smoothed;
+}
 
 static amb_rx_ent *amb_rx_slot(uint16_t id, uint8_t kind)
 {
@@ -867,6 +974,7 @@ static void amb_rx_drain(void)
             e->p[0] = x; e->p[1] = y; e->p[2] = z;
             e->yaw = (uint16_t)yaw;
             e->t = roam_now();
+            amb_samp_push(e, x, y, z, (uint16_t)yaw);
             if (k == 0 && chunk == 0) {
                 s_amb_rx_first.id = id;
                 s_amb_rx_first.kind = (uint8_t)kind;
@@ -902,6 +1010,8 @@ static int s_amb_nghost;
 static int s_amb_ghost_held;
 static uint32_t s_amb_ghost_parked;
 static uint32_t s_amb_ghost_live;
+static double   s_amb_err_sum, s_amb_err_max;
+static unsigned s_amb_err_n;
 static int s_amb_takeover_on = -1;
 
 /* MC3_ROAM_AMBIENT_LOOP=1: feed this instance's own transmit list straight
@@ -932,6 +1042,8 @@ static void amb_loop_feed(void)
         if (drop >= 0 && s_amb_tx[i].kind == AMB_KIND_CAR && (int)s_amb_tx[i].model == drop)
             continue;
         e = amb_rx_slot(s_amb_tx[i].id, s_amb_tx[i].kind);
+        if (!e->used || e->id != s_amb_tx[i].id || e->kind != s_amb_tx[i].kind)
+            e->n = 0;                       /* a fresh entity starts its ring */
         e->used = 1;
         e->id = s_amb_tx[i].id;
         e->kind = s_amb_tx[i].kind;
@@ -941,6 +1053,7 @@ static void amb_loop_feed(void)
         e->p[2] = s_amb_tx[i].p[2];
         e->yaw = s_amb_tx[i].yaw;
         e->t = now;
+        amb_samp_push(e, s_amb_tx[i].p[0], s_amb_tx[i].p[1], s_amb_tx[i].p[2], s_amb_tx[i].yaw);
         s_amb_rx_ents++;
     }
     s_amb_rx_msgs++;
@@ -1013,22 +1126,51 @@ static void amb_net_log(void)
                       gz = MEMF(rec + AMB_REC_POS + 8u);
                 uint32_t j;
                 double d = -1.0;
+                double dx = 0.0, dy = 0.0, dz = 0.0;
                 for (j = 0; j < (uint32_t)s_amb_rx_n; j++)
                     if (s_amb_rx[j].used && s_amb_rx[j].kind == AMB_KIND_CAR &&
                         s_amb_rx[j].model == s_amb_ghost[i].slot) {
-                        double dx = s_amb_rx[j].p[0] - gx, dy = s_amb_rx[j].p[1] - gy,
-                               dz = s_amb_rx[j].p[2] - gz;
+                        /* Compare against the NEWEST RAW sample, not the
+                         * interpolated pose we also draw from - otherwise the
+                         * two are the same value and the metric is circular.
+                         * This measures how far our smoothing sits from the
+                         * freshest fact we have. */
+                        const amb_rx_ent *re = &s_amb_rx[j];
+                        int b, best = -1;
+                        float rp[3];
+                        for (b = 0; b < AMB_SAMP; b++)
+                            if (re->s[b].t > 0 && (best < 0 || re->s[b].t > re->s[best].t))
+                                best = b;
+                        if (best >= 0) {
+                            rp[0] = re->s[best].p[0];
+                            rp[1] = re->s[best].p[1];
+                            rp[2] = re->s[best].p[2];
+                        } else {
+                            rp[0] = re->p[0];
+                            rp[1] = re->p[1];
+                            rp[2] = re->p[2];
+                        }
+                        dx = rp[0] - gx; dy = rp[1] - gy; dz = rp[2] - gz;
                         d = sqrt(dx * dx + dy * dy + dz * dz);
                         break;
                     }
                 fprintf(stderr, "[AMBIENT] takeover: slot %u ghost %.2f %.2f %.2f (net err %.2f m)%s\n",
                         (unsigned)s_amb_ghost[i].slot, gx, gy, gz, (float)d,
                         d >= 0.0 ? "" : " (no stream for this slot)");
+                if (d >= 0.0) {
+                    s_amb_err_sum += d;
+                    s_amb_err_n++;
+                    if (d > s_amb_err_max)
+                        s_amb_err_max = d;
+                }
             }
         }
         fprintf(stderr, "[AMBIENT] takeover: %d ghost(s), %d holding their pose at the draw hook%s\n",
                 s_amb_nghost, s_amb_ghost_held,
                 getenv("MC3_ROAM_AMBIENT_NEAR") ? " (near mode: net err is meaningless)" : "");
+        s_amb_err_sum = 0.0;
+        s_amb_err_n = 0;
+        s_amb_err_max = 0.0;
         if (getenv("MC3_ROAM_AMBIENT_SUPPRESS") && getenv("MC3_ROAM_AMBIENT_SUPPRESS")[0] == '1')
             fprintf(stderr, "[AMBIENT] suppress: %u of %u local car(s) parked out of sight\n",
                     (unsigned)s_amb_ghost_parked, (unsigned)s_amb_ghost_live);
@@ -1346,12 +1488,60 @@ static void amb_model_walk(uint32_t o)
 static void dri_ambient_draw(void)
 {
     static int on = -1;
+    static int delay_ms = -1;
     if (on < 0) {
         const char *e = getenv("MC3_ROAM_AMBIENT_GHOST");
+        const char *d = getenv("MC3_ROAM_AMBIENT_DELAY");
         on = e && e[0] == '1';
+        delay_ms = (d && d[0]) ? atoi(d) : 100;   /* the player-car default */
+        if (delay_ms < 0)
+            delay_ms = 0;
+        if (delay_ms > 500)
+            delay_ms = 500;
     }
     if (!on || amb_level() <= 0)
         return;
+    amb_rx_interp_all(delay_ms);
+    {
+        /* Report the smoothing honestly: how many entities were actually
+         * bracketed (a 100 ms delay needs samples older than 100 ms, so a
+         * freshly spawned entity is not smoothed until its ring fills), and
+         * the raw step between consecutive samples, which is the jump the
+         * renderer would show without any smoothing. */
+        static double last_log;
+        double now = roam_now();
+        if (now - last_log >= 1.0) {
+            int i, smoothed = 0, steps = 0;
+            double sum = 0.0, worst = 0.0;
+            last_log = now;
+            for (i = 0; i < s_amb_rx_n; i++) {
+                const amb_rx_ent *e = &s_amb_rx[i];
+                int a = -1, b = -1, k;
+                if (!e->used || e->n < 2)
+                    continue;
+                if (e->p[0] == e->s[e->n % AMB_SAMP].p[0])
+                    smoothed++;              /* bracketed: drawn != newest */
+                for (k = 0; k < AMB_SAMP; k++) {
+                    if (e->s[k].t <= 0)
+                        continue;
+                    if (a < 0 || e->s[k].t < e->s[a].t) a = k;
+                    if (b < 0 || e->s[k].t > e->s[b].t) b = k;
+                }
+                if (a >= 0 && b >= 0 && a != b) {
+                    double dx = e->s[b].p[0] - e->s[a].p[0];
+                    double dy = e->s[b].p[1] - e->s[a].p[1];
+                    double dz = e->s[b].p[2] - e->s[a].p[2];
+                    double d = sqrt(dx * dx + dy * dy + dz * dz);
+                    sum += d;
+                    if (d > worst) worst = d;
+                    steps++;
+                }
+            }
+            if (steps)
+                fprintf(stderr, "[AMBIENT] interp: %d/%d smoothed, raw step mean %.2f m worst %.2f m\n",
+                        smoothed, s_amb_rx_n, (float)(sum / (double)steps), (float)worst);
+        }
+    }
     amb_ghost_apply();
     {   /* prove this hook runs, and how often relative to the AI's pass */
         static unsigned n, shown;

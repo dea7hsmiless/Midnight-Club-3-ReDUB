@@ -131,6 +131,10 @@ int  roam_recv_msg(uint32_t *from, void *out, int cap);
  * use it to elect one owner deterministically (lowest id wins), so "who
  * simulates the ambient population" needs no extra handshake. */
 uint32_t roam_self_id(void);
+/* The same monotonic clock the core uses (microseconds).  A game layer that
+ * carries its own interpolated entities needs it; the roam_plat_* headers are
+ * not part of the public surface. */
+int64_t  roam_now_us(void);
 
 #ifdef __cplusplus
 }
