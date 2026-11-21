@@ -905,6 +905,8 @@ static struct {
 } s_amb_ghost[AMB_GHOST_MAX];
 static int s_amb_nghost;
 static int s_amb_ghost_held;
+static uint32_t s_amb_ghost_parked;
+static uint32_t s_amb_ghost_live;
 static int s_amb_takeover_on = -1;
 
 /* MC3_ROAM_AMBIENT_LOOP=1: feed this instance's own transmit list straight
@@ -915,18 +917,26 @@ static int s_amb_takeover_on = -1;
 static void amb_loop_feed(void)
 {
     static int on = -1;
+    static int drop = -1;
     int i;
     double now;
 
     if (on < 0) {
         const char *e = getenv("MC3_ROAM_AMBIENT_LOOP");
+        const char *d = getenv("MC3_ROAM_AMBIENT_DROP");
         on = e && e[0] == '1';
+        drop = (d && d[0]) ? atoi(d) : -1;
     }
     if (!on || !s_amb_ntx)
         return;
     now = roam_now();
     for (i = 0; i < s_amb_ntx; i++) {
-        amb_rx_ent *e = amb_rx_slot(s_amb_tx[i].id, s_amb_tx[i].kind);
+        amb_rx_ent *e;
+        /* MC3_ROAM_AMBIENT_DROP=<slot>: pretend the streamer did not send that
+         * slot, so the suppression path can be tested with one instance */
+        if (drop >= 0 && s_amb_tx[i].kind == AMB_KIND_CAR && (int)s_amb_tx[i].model == drop)
+            continue;
+        e = amb_rx_slot(s_amb_tx[i].id, s_amb_tx[i].kind);
         e->used = 1;
         e->id = s_amb_tx[i].id;
         e->kind = s_amb_tx[i].kind;
@@ -1024,6 +1034,9 @@ static void amb_net_log(void)
         fprintf(stderr, "[AMBIENT] takeover: %d ghost(s), %d holding their pose at the draw hook%s\n",
                 s_amb_nghost, s_amb_ghost_held,
                 getenv("MC3_ROAM_AMBIENT_NEAR") ? " (near mode: net err is meaningless)" : "");
+        if (getenv("MC3_ROAM_AMBIENT_SUPPRESS") && getenv("MC3_ROAM_AMBIENT_SUPPRESS")[0] == '1')
+            fprintf(stderr, "[AMBIENT] suppress: %u of %u local car(s) parked out of sight\n",
+                    (unsigned)s_amb_ghost_parked, (unsigned)s_amb_ghost_live);
     }
     s_amb_tx_msgs = s_amb_rx_msgs = s_amb_rx_ents = s_amb_rx_bad = 0;
     s_amb_tx_peers = 0;
@@ -1142,6 +1155,57 @@ static void amb_ghost_apply(void)
     }
     s_amb_ghost_cars = (uint32_t)applied;
     s_amb_ghost_slots = cnt;
+
+    /* Slots the streamer never sends are still running this machine's own AI,
+     * so the two cities diverge there. Park them out of sight, using the
+     * technique roam_pool.c already proved for spare player slots: hidden,
+     * 30 km off and 500 m down, per slot so they never share a spot.
+     * MC3_ROAM_AMBIENT_SUPPRESS=1 and only while a stream is arriving. */
+    {
+        static int sup_on = -1;
+        uint32_t parked = 0;
+        int j;
+        if (sup_on < 0) {
+            const char *v = getenv("MC3_ROAM_AMBIENT_SUPPRESS");
+            sup_on = v && v[0] == '1';
+        }
+        if (sup_on) {
+            for (i = 0; i < cnt; i++) {
+                uint32_t o = MEM32(arr + i * 4u), rec;
+                int ours = 0, streamed = 0;
+                uint32_t k;
+                if (!o || !online_ram(o))
+                    continue;
+                for (j = 0; j < s_amb_nghost; j++)
+                    if (s_amb_ghost[j].obj == o) {
+                        ours = 1;
+                        break;
+                    }
+                /* The real question is "did the streamer send this slot", not
+                 * "have we adopted it yet": adoption lags the receive table by
+                 * a frame, and parking a slot that is about to become a ghost
+                 * would fight the pose write. */
+                for (k = 0; k < (uint32_t)s_amb_rx_n; k++)
+                    if (s_amb_rx[k].used && s_amb_rx[k].kind == AMB_KIND_CAR &&
+                        s_amb_rx[k].model == i) {
+                        streamed = 1;
+                        break;
+                    }
+                if (ours || streamed)
+                    continue;                  /* the ghost handler owns it */
+                if (!online_ram_n(rec = MEM32(o + 0x1Cu), AMB_REC_POS + 12u))
+                    continue;
+                if (MEM8(o + 0x60u) != 1)          /* the parked flag roam_pool.c uses */
+                    MEM8(o + 0x60u) = 1;
+                MEMF(rec + AMB_REC_POS) = 30000.0f + 50.0f * (float)i;
+                MEMF(rec + AMB_REC_POS + 4u) = -500.0f;
+                MEMF(rec + AMB_REC_POS + 8u) = 0.0f;
+                parked++;
+            }
+            s_amb_ghost_parked = parked;
+            s_amb_ghost_live = cnt;
+        }
+    }
 }
 
 /* ── Milestone 5, first slice: take the slot away from the AI ──
