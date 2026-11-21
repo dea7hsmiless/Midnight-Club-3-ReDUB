@@ -889,6 +889,10 @@ static void amb_rx_drain(void)
     }
 }
 
+/* Milestone 4's pose takeover, defined below (used by amb_net_frame). */
+static void amb_ghost_apply(void);
+static uint32_t s_amb_ghost_cars, s_amb_ghost_slots;
+
 /* Called every frame from the probe entry point. Sends at ~15 Hz of wall
  * time, not of frames, so a slow frame does not thin the stream. */
 static void amb_net_frame(void)
@@ -898,6 +902,7 @@ static void amb_net_frame(void)
     if (!roam_running() || !s_roam_cruise || !s_online)
         return;
     amb_rx_drain();
+    amb_ghost_apply();
     now = roam_now();
     if (now < next)
         return;
@@ -935,8 +940,84 @@ static void amb_net_log(void)
         fprintf(stderr, "[AMBIENT] net table: %d live of %d (rx from %08X)\n",
                 live, s_amb_rx_n, (unsigned)s_amb_rx_from);
     }
+    if (s_amb_ghost_slots)
+        fprintf(stderr, "[AMBIENT] ghost: posed %u car(s) in %u slots\n",
+                s_amb_ghost_cars, s_amb_ghost_slots);
     s_amb_tx_msgs = s_amb_rx_msgs = s_amb_rx_ents = s_amb_rx_bad = 0;
     s_amb_tx_peers = 0;
+}
+
+/* ── Milestone 4, first slice: pose takeover ──────────────────
+ *
+ * Building a ghost object from scratch is the risky part; before that, prove
+ * the received pose can drive a *local* ambient car. For each streamed car
+ * (kind 0), take the local traffic owner's slot s = model, and write the
+ * record the game itself uses: rotation at rec+0x24, position at rec+0x48,
+ * and the interpolation copy 0x40 later. If the local car exists, the game
+ * draws it at the peer's pose - that is the ghost, minus suppression.
+ *
+ * MC3_ROAM_AMBIENT_GHOST=1 turns it on (a client). It is a write, but only
+ * into a car the game already owns, in the fields its own update writes.
+ */
+static void amb_ghost_apply(void)
+{
+    static int on = -1;
+    uint32_t owner = 0, arr, cnt, i;
+    int applied = 0;
+
+    if (on < 0) {
+        const char *e = getenv("MC3_ROAM_AMBIENT_GHOST");
+        on = e && e[0] == '1';
+    }
+    if (!on || !s_amb_rx_n)
+        return;
+    for (i = 0; i < (uint32_t)s_amb_nseen; i++)
+        if (s_amb_tag[i] != AMB_TAG_GLOBAL && s_amb_tag[i] < AMB_TAG_PEDTYPE && s_amb_seen[i]) {
+            owner = s_amb_seen[i];
+            break;
+        }
+    if (!owner || !online_ram_n(owner, 0x40u))
+        return;
+    cnt = ZX16(MEM16(owner + 0x34u));
+    arr = MEM32(owner + 0x30u);
+    if (!online_ram(arr) || cnt > 64u)
+        return;
+
+    for (i = 0; i < (uint32_t)s_amb_rx_n; i++) {
+        amb_rx_ent *e = &s_amb_rx[i];
+        uint32_t slot, o, rec;
+        float yaw, s, c;
+        if (!e->used || e->kind != AMB_KIND_CAR)
+            continue;
+        slot = e->model;
+        if (slot >= cnt)
+            continue;
+        o = MEM32(arr + slot * 4u);
+        if (!online_ram(o) || !online_ram_n(rec = MEM32(o + 0x1Cu), AMB_REC_POS + 12u))
+            continue;
+        yaw = (e->yaw == AMB_YAW_UNKNOWN) ? 0.0f : (float)e->yaw * (6.283185307179586f / 65535.0f);
+        s = sinf(yaw);
+        c = cosf(yaw);
+        /* rotation: right (c,0,-s), up (0,1,0), forward (s,0,c) */
+        MEMF(rec + 0x24u) = c;  MEMF(rec + 0x28u) = 0.0f; MEMF(rec + 0x2Cu) = -s;
+        MEMF(rec + 0x30u) = 0.0f; MEMF(rec + 0x34u) = 1.0f; MEMF(rec + 0x38u) = 0.0f;
+        MEMF(rec + 0x3Cu) = s;  MEMF(rec + 0x40u) = 0.0f; MEMF(rec + 0x44u) = c;
+        MEMF(rec + AMB_REC_POS) = e->p[0];
+        MEMF(rec + AMB_REC_POS + 4u) = e->p[1];
+        MEMF(rec + AMB_REC_POS + 8u) = e->p[2];
+        /* the interpolation copy the renderer may pick from */
+        MEMF(rec + 0x40u + 0x24u) = c;
+        MEMF(rec + 0x40u + 0x2Cu) = -s;
+        MEMF(rec + 0x40u + 0x34u) = 1.0f;
+        MEMF(rec + 0x40u + 0x3Cu) = s;
+        MEMF(rec + 0x40u + 0x44u) = c;
+        MEMF(rec + 0x40u + AMB_REC_POS) = e->p[0];
+        MEMF(rec + 0x40u + AMB_REC_POS + 4u) = e->p[1];
+        MEMF(rec + 0x40u + AMB_REC_POS + 8u) = e->p[2];
+        applied++;
+    }
+    s_amb_ghost_cars = (uint32_t)applied;
+    s_amb_ghost_slots = cnt;
 }
 
 /* One ambient owner: its slot list and the live cars in it. */
