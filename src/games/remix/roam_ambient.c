@@ -670,6 +670,21 @@ static void amb_owner(const char *tag, uint32_t c)
         if (shown++ >= AMB_SLOT_LOG)
             continue;
         amb_car_line(i, o, have_me ? me : (const float[3]){ 0, 0, 0 });
+        {   /* the pool row for this slot: the slot index is the model, and the
+             * model name is an inline string at row+4 (verified: row 19 =
+             * "va_civic_sh", which is also the tune/traffic file name). The
+             * dword at row+0 is not the name length; it is still unknown. */
+            static uint32_t rows_done[2];
+            uint32_t row = MEM32(pool + 4u) + i * 0x68u;
+            int bit = (int)(i & 31u), word = (int)(i >> 5);
+            if (word < 2 && !(rows_done[word] & (1u << bit)) && online_ram_n(row, 0x68u)) {
+                char name[40];
+                rows_done[word] |= 1u << bit;
+                amb_str(row + 4u, name, sizeof name);
+                fprintf(stderr, "[AMBIENT]   slot %u is model %u \"%s\" (row %08X, id word %08X)\n",
+                        (unsigned)i, (unsigned)i, name, (unsigned)row, (unsigned)MEM32(row));
+            }
+        }
     }
     fprintf(stderr, "[AMBIENT]  %u live, %u slots\n", (unsigned)live, (unsigned)cnt);
     for (i = 0; i < (uint32_t)s_amb_npedrec; i++)
@@ -787,6 +802,8 @@ static void dri_ambient_pass(void)
                     amb_heap_dump(ref - 0x60u, 0x140u);
                 amb_census_vt(MEM32(own));
                 amb_census_shape();
+                amb_vtable("helicopter flight model", 0x46BD30u);
+                amb_census_vt(0x46BD30u);
             }
         }
     }
