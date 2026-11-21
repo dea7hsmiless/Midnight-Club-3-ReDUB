@@ -136,8 +136,11 @@ Still to do:
     (frame 1, XPP thunks) while the first is in Cruise, so the two-instance
     test needs a clean machine or two PCs. Remaining: verify the body in the
     open, map blips, particle-budget stress, radius tuning.
-11. **Port Options row for Display shape** (issue #6) — the launcher row
-    exists; the in-game page is full (17 rows + BACK). Decision needed.
+11. **Display shape (issue #6) — done 2026-11-20.** `RECOMP_GL_ASPECT`
+    (`auto` / `4:3` / `fill`, restart to apply) is on the launcher's Display
+    page, in both `recomplauncher.json` manifests, and now in the in-game Port
+    Options row id 8, replacing Restore Graphics Defaults. The preset row still
+    covers Performance / Balanced / Quality.
 12. **Rebuild the AppImage** so the ISO reader and the messages land, then
     repackage the Windows zip for the env-file/log changes.
 

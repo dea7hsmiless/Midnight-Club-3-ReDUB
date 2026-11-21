@@ -14,8 +14,8 @@ VSync, sharpening and the FPS/frame-time overlay change live. FXAA applies
 only while driving so menu and loading text remain sharp; DLSS bypasses FXAA
 instead of stacking a second anti-aliasing pass. Sharpening also works with
 FXAA off. Manual graphics changes mark the preset
-Custom. Restore Balanced Defaults resets graphics and disables the FPS overlay;
-it preserves fullscreen, PC Music, saves and unrelated settings.
+Custom. The Preset row cycles Performance, Balanced and Quality; it preserves
+fullscreen, PC Music, saves and unrelated settings.
 
 ## Display adjustments
 
@@ -23,8 +23,15 @@ HUD Textures selects 1x, 2x, 3x or 5x texture upscaling independently of world
 render resolution and requires a restart. Gamma (0.8–1.4) and Brightness
 (80–120%) apply live in the final presentation pass, including with FXAA off.
 Defaults are gamma 1.0 and brightness 100%, preserving the original picture.
-Graphics presets preserve these adjustments; Restore Graphics Defaults resets
-HUD textures to 2x and both image adjustments to neutral.
+Graphics presets preserve these adjustments.
+
+## Display shape
+
+Display shape selects Auto (16:9), 4:3 or Stretch and applies on the next
+start. Auto shows a widescreen game at 16:9; 4:3 keeps the original shape with
+bars at the sides; Stretch fills the window. The same option is on the
+launcher's Display page (Display shape) and in the RecompLauncher manifest as
+`RECOMP_GL_ASPECT`.
 
 ## PC Music / Now Playing
 
