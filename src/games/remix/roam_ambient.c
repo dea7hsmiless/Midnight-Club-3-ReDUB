@@ -286,6 +286,152 @@ static void amb_car_line(uint32_t slot, uint32_t o, const float me[3])
     }
 }
 
+/* Where does the game keep this owner? Scanning .data for the pointer finds
+ * the registry it lives in - and the pedestrian/cop owners are likely the
+ * neighbouring entries. One scan per run, no writes. */
+#define AMB_DATA_LO 0x004A8140u
+#define AMB_DATA_HI 0x0056DE60u
+
+static void amb_find_refs(const char *what, uint32_t value)
+{
+    uint32_t a, shown = 0;
+    if (!value)
+        return;
+    for (a = AMB_DATA_LO; a + 4u <= AMB_DATA_HI && shown < 8u; a += 4u) {
+        if (MEM32(a) != value)
+            continue;
+        shown++;
+        fprintf(stderr, "[AMBIENT] %s %08X stored at %08X (nearby:", what, (unsigned)value, (unsigned)a);
+        {   uint32_t k, b = a - 0x10u;
+            for (k = 0; k < 0x30u; k += 4u)
+                fprintf(stderr, " %08X", (unsigned)MEM32(b + k));
+        }
+        fprintf(stderr, ")\n");
+    }
+    if (!shown)
+        fprintf(stderr, "[AMBIENT] %s %08X: no .data reference\n", what, (unsigned)value);
+}
+
+/* Where does the game keep this owner? It is not in .data, so it lives in a
+ * heap list: scan the contiguous window for a pointer to it and dump the
+ * owner of that list. One pass per run. */
+#define AMB_HEAP_LO 0x82000000u
+#define AMB_HEAP_HI 0x84000000u
+
+static uint32_t amb_find_refs_heap(const char *what, uint32_t value)
+{
+    uint32_t a, shown = 0, first = 0;
+    if (!value)
+        return 0;
+    for (a = AMB_HEAP_LO; a + 4u <= AMB_HEAP_HI && shown < 6u; a += 4u) {
+        if (MEM32(a) != value)
+            continue;
+        shown++;
+        if (!first)
+            first = a;
+        fprintf(stderr, "[AMBIENT] %s %08X referenced at %08X (nearby:", what, (unsigned)value, (unsigned)a);
+        {   uint32_t k, b = a - 0x10u;
+            for (k = 0; k < 0x30u; k += 4u)
+                fprintf(stderr, " %08X", (unsigned)MEM32(b + k));
+        }
+        fprintf(stderr, ")\n");
+    }
+    if (!shown)
+        fprintf(stderr, "[AMBIENT] %s %08X: no heap reference found\n", what, (unsigned)value);
+    return first;
+}
+
+/* A range of guest memory as dwords, with every plausible object pointer
+ * annotated by its vtable: enough to spot the sibling managers (each has a
+ * .rdata vtable and the same owner shape at +0x30/+0x34). One pass. */
+static void amb_heap_dump(uint32_t base, uint32_t len)
+{
+    uint32_t a, i;
+    if (!online_ram_n(base, len))
+        return;
+    fprintf(stderr, "[AMBIENT] heap %08X..%08X:\n", (unsigned)base, (unsigned)(base + len));
+    for (a = base & ~0xFu; a < base + len; a += 16u) {
+        fprintf(stderr, "[AMBIENT]  %08X:", (unsigned)a);
+        for (i = 0; i < 16u; i += 4u) {
+            uint32_t v = MEM32(a + i);
+            fprintf(stderr, " %08X", (unsigned)v);
+        }
+        fprintf(stderr, "  |");
+        for (i = 0; i < 16u; i += 4u) {
+            uint32_t v = MEM32(a + i), vt;
+            if (!online_ram_n(v, 0x40u))
+                continue;
+            vt = MEM32(v);
+            if (vt >= 0x004476E0u && vt < 0x004A8140u)
+                fprintf(stderr, " +%X:vt%08X/30:%u/34:%u", (unsigned)i, (unsigned)vt,
+                        (unsigned)MEM32(v + 0x30u), (unsigned)ZX16(MEM16(v + 0x34u)));
+        }
+        fprintf(stderr, "\n");
+    }
+}
+
+/* Every object in the heap whose first dword is `vt`: if the pedestrians and
+ * police use the same owner class as traffic, they are all here, and the
+ * count/array/lane fields say which is which. One pass. */
+static void amb_census_vt(uint32_t vt)
+{
+    uint32_t a, shown = 0;
+    for (a = AMB_HEAP_LO; a + 0x140u <= AMB_HEAP_HI && shown < 12u; a += 4u) {
+        if (MEM32(a) != vt)
+            continue;
+        shown++;
+        fprintf(stderr, "[AMBIENT] census %08X: +04 %08X +08 %08X +0C %08X | city %u time %u"
+                        " slots %u arr %08X | lanes %u tab %08X | tune %08X/%08X +128 %08X +130 %08X\n",
+                (unsigned)a, (unsigned)MEM32(a + 4u), (unsigned)MEM32(a + 8u), (unsigned)MEM32(a + 0xCu),
+                (unsigned)MEM32(a + 0x38u + 0x14u), (unsigned)MEM32(a + 0x38u + 0x18u),
+                (unsigned)ZX16(MEM16(a + 0x34u)), (unsigned)MEM32(a + 0x30u),
+                (unsigned)ZX16(MEM16(a + 0x12Cu)), (unsigned)MEM32(a + 0x130u),
+                (unsigned)MEM32(a + 0x11Cu), (unsigned)MEM32(a + 0x124u),
+                (unsigned)MEM32(a + 0x128u), (unsigned)MEM32(a + 0x130u));
+    }
+    fprintf(stderr, "[AMBIENT] census vt %08X: %u object(s)\n", (unsigned)vt, (unsigned)shown);
+}
+
+/* Scan the heap for objects with the *owner shape*, whatever their vtable:
+ * a populated pointer array at +0x30 with a small u16 count at +0x34 and a
+ * city/time pair at +0x4C/+0x50 (pool+0x14/+0x18). Pedestrians and police do
+ * not share the traffic vtable, so this is the way to find their owners. */
+static void amb_census_shape(void)
+{
+    uint32_t a, shown = 0, me_city = 0;
+    {   /* the city the traffic owner reports, so unrelated pools don't match */
+        uint32_t i;
+        for (i = 0; i < (uint32_t)s_amb_nseen; i++)
+            if (s_amb_tag[i] != AMB_TAG_GLOBAL && s_amb_seen[i]) {
+                me_city = MEM32(s_amb_seen[i] + 0x38u + 0x14u);
+                break;
+            }
+    }
+    for (a = AMB_HEAP_LO; a + 0x140u <= AMB_HEAP_HI && shown < 16u; a += 4u) {
+        uint32_t vt = MEM32(a), arr, count, city, time, pvt;
+        if (vt < 0x004476E0u || vt >= 0x004A8140u)
+            continue;
+        pvt = MEM32(a + 0x38u);
+        if (pvt < 0x004476E0u || pvt >= 0x004A8140u)
+            continue;                    /* the owner embeds its pool here */
+        count = ZX16(MEM16(a + 0x34u));
+        arr = MEM32(a + 0x30u);
+        if (count < 1u || count > 64u || !online_ram_n(arr, count * 4u))
+            continue;
+        city = MEM32(a + 0x38u + 0x14u);
+        time = MEM32(a + 0x38u + 0x18u);
+        if (city != me_city || time > 4u)
+            continue;
+        shown++;
+        fprintf(stderr, "[AMBIENT] shape %08X: vt %08X poolvt %08X slots %u arr %08X first %08X"
+                        " | city %u time %u lanes %u\n",
+                (unsigned)a, (unsigned)vt, (unsigned)pvt, (unsigned)count, (unsigned)arr,
+                (unsigned)MEM32(arr), (unsigned)city, (unsigned)time,
+                (unsigned)ZX16(MEM16(a + 0x12Cu)));
+    }
+    fprintf(stderr, "[AMBIENT] shape scan: %u candidate owner(s)\n", (unsigned)shown);
+}
+
 /* One ambient owner: its slot list and the live cars in it. */
 static void amb_owner(const char *tag, uint32_t c)
 {
@@ -412,6 +558,27 @@ static void dri_ambient_pass(void)
         fprintf(stderr, "[AMBIENT] no ambient object captured yet"
                         " (sub_0006C840 / sub_0006A7D0 not seen)\n");
         return;
+    }
+    {   /* level 2: where the traffic owner (or its pool) is registered */
+        static int refs_done;
+        uint32_t own = 0, k;
+        if (lvl >= 2 && !refs_done) {
+            for (k = 0; k < (uint32_t)s_amb_nseen; k++)
+                if (s_amb_tag[k] != AMB_TAG_GLOBAL && s_amb_seen[k]) {
+                    own = s_amb_seen[k];
+                    break;
+                }
+            if (own) {
+                uint32_t ref;
+                refs_done = 1;
+                amb_find_refs("owner", own);
+                ref = amb_find_refs_heap("owner", own);
+                if (ref)
+                    amb_heap_dump(ref - 0x60u, 0x140u);
+                amb_census_vt(MEM32(own));
+                amb_census_shape();
+            }
+        }
     }
     for (i = 0; i < s_amb_nseen; i++) {
         uint32_t cnt, arr;
