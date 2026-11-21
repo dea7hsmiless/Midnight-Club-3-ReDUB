@@ -62,6 +62,7 @@ static void roam_tag_frame(void);               /* roam_tagdraw.c: name tags thi
 static void roam_tag_projection(uint32_t vp);   /* roam_tagdraw.c: the main view's projection */
 static void roam_blips(uint32_t map, uint32_t top);     /* roam_blips.c: the map's peer blips */
 static void dri_ambient_pass(void);                     /* roam_ambient.c: the ambient probe */
+static void amb_note(int tag, uint32_t va, uint32_t arg);  /* roam_ambient.c: capture the live ambient objects */
 
 /* ── Native replacements ───────────────────────────────────── */
 
@@ -1844,6 +1845,48 @@ extern void sub_0006CC90_gen(void);
 void sub_0006CC90(void) { cam_call(52, 0x0006CC90u, sub_0006CC90_gen); }
 extern void sub_000EC910_gen(void);
 void sub_000EC910(void) { cam_call(53, 0x000EC910u, sub_000EC910_gen); }
+
+/* Ambient traffic (MC3_ROAM_AMBIENT): the wrappers that hand the probe the
+ * live objects. The disassembly puts the city's traffic in a container with
+ * the cars at +0x30/+0x34, built by sub_0006C840 from the tune nodes
+ * (sub_000807A0 -> sub_0006BD20), spawned per frame by sub_0006A7D0. The
+ * global manager at [0x5587E0] is captured too, so the probe can show which
+ * of the two actually holds the cars. Nothing here runs unless the env var
+ * is set (amb_note checks it), and none of it changes a register. */
+extern void sub_0006C840_gen(void);
+void sub_0006C840(void)                         /* the city traffic owner, once per load */
+{
+    uint32_t self = g_ecx;
+    sub_0006C840_gen();
+    amb_note(0, self, 0);
+}
+
+extern void sub_0006BD20_gen(void);
+void sub_0006BD20(void)                         /* the cruise load's feed of it */
+{
+    uint32_t self = g_ecx;
+    sub_0006BD20_gen();
+    amb_note(1, self, 0);
+}
+
+extern void sub_0006A7D0_gen(void);
+void sub_0006A7D0(void)                         /* its per-frame spawn pass */
+{
+    uint32_t r[8] = { g_eax, g_ecx, g_edx, g_ebx, g_esp, g_ebp, g_esi, g_edi };
+    uint32_t self = g_ecx, arg = MEM32(g_esp + 4u);
+    amb_note(2, self, arg);
+    g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3];
+    g_esp = r[4]; g_ebp = r[5]; g_esi = r[6]; g_edi = r[7];
+    sub_0006A7D0_gen();
+}
+
+extern void sub_002B8B20_gen(void);
+void sub_002B8B20(void)                         /* [0x5587E0], the global manager */
+{
+    uint32_t self = g_ecx;
+    sub_002B8B20_gen();
+    amb_note(3, self, 0);
+}
 
 /* ── Manual function overrides ─────────────────────────────── */
 
