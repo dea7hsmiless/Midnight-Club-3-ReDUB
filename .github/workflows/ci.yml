@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install runtime test dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libsdl2-dev libgl1-mesa-dev libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build pkg-config libsdl2-dev libepoxy-dev libgl1-mesa-dev libssl-dev
       - name: Native runtime regressions
         run: |
           cmake -S xboxrecomp/tests/stability -B work/native-stability -G Ninja -DCMAKE_BUILD_TYPE=Debug
