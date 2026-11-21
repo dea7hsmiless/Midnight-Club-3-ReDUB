@@ -131,11 +131,22 @@ Still to do:
     The spawn nudge now steps **backward** first (`cc81720`): at the Free
     Roam start spot the car faces the customs/garage wall, so the old +10 m
     "along the road" put the second player inside the building (its tag showed
-    through, its car did not). Not yet re-verified visually: after several
-    runs, a second copy on this machine consistently spins at boot
-    (frame 1, XPP thunks) while the first is in Cruise, so the two-instance
-    test needs a clean machine or two PCs. Remaining: verify the body in the
-    open, map blips, particle-budget stress, radius tuning.
+    through, its car did not). Verified 2026-11-20: the second copy logs
+    `moved -10 m along the road` and its peer's red Jetta is visible ahead with
+    the tag over it (`test\shots\roam-blip-B.png`). On the other screen the
+    peer is the one 10 m **behind** the camera, so it is out of view until the
+    camera turns; it shows on the minimap.
+    Map blips are in (`roam_blips.c`, 2026-11-20): after the game's own
+    `sub_000BF850` walker, every linked peer gets the game's blip primitive
+    through the map's world-to-map transform; away/no-car peers are dimmed and
+    smaller. Both sides log `[ROAM] map: 1 peer(s) drawn as blips`, and the
+    marker sits beside the player arrow on the minimap
+    (`test\shots\roam-blip-mapA.png`). `MC3_ROAM_MAP=0` disables it.
+    The second-instance boot spin turned out to be **shared files**: with the
+    two test installs' `assets_x.dat*`/`banks.dat` hardlinked, one copy could
+    spin at frame 1; giving the second real copies fixed it. A normal install
+    has its own files, so this is a test-harness detail.
+    Remaining: particle-budget stress and radius tuning.
 11. **Aspect ratio (issue #6) - done 2026-11-20.** `RECOMP_GL_ASPECT`
     (`auto` / `4:3` / `fill`, restart to apply) is on the launcher's Display
     page, in both `recomplauncher.json` manifests, and now in the in-game Port

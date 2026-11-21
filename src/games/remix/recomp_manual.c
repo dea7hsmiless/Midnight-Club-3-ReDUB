@@ -60,6 +60,7 @@ static void roam_pool_pass(uint32_t obj, int after);    /* the state machine's p
 static void roam_player(uint32_t p);            /* before a player's update */
 static void roam_tag_frame(void);               /* roam_tagdraw.c: name tags this frame */
 static void roam_tag_projection(uint32_t vp);   /* roam_tagdraw.c: the main view's projection */
+static void roam_blips(uint32_t map, uint32_t top);     /* roam_blips.c: the map's peer blips */
 
 /* ── Native replacements ───────────────────────────────────── */
 
@@ -1759,6 +1760,21 @@ void sub_002C1520(void)
         roam_player(p);
     g_ecx = p;
     cam_call(34, 0x002C1520u, sub_002C1520_gen);
+}
+
+/* The HUD map's player-blip walker (sub_000BF850, thiscall on the map): our
+ * linked peers' blips after the game's own (roam_blips.c). */
+extern void sub_000BF850_gen(void);
+void sub_000BF850(void)
+{
+    uint32_t map = g_ecx, top = g_esp;
+    sub_000BF850_gen();
+    if (roam_running()) {
+        uint32_t r[8] = { g_eax, g_ecx, g_edx, g_ebx, g_esp, g_ebp, g_esi, g_edi };
+        roam_blips(map, top);
+        g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3];
+        g_esp = r[4]; g_ebp = r[5]; g_esi = r[6]; g_edi = r[7];
+    }
 }
 extern void sub_002C5B30_gen(void);
 void sub_002C5B30(void) { cam_call(35, 0x002C5B30u, sub_002C5B30_gen); }
@@ -3774,3 +3790,6 @@ void sub_0028B4E0(void)
 
 /* Free roam: the name tags over the remote cars (roam_tagdraw.c). */
 #include "roam_tagdraw.c"
+
+/* Free roam: the map blips for linked peers (roam_blips.c). */
+#include "roam_blips.c"
