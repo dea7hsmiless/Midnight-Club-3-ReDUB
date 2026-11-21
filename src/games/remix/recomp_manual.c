@@ -61,6 +61,7 @@ static void roam_player(uint32_t p);            /* before a player's update */
 static void roam_tag_frame(void);               /* roam_tagdraw.c: name tags this frame */
 static void roam_tag_projection(uint32_t vp);   /* roam_tagdraw.c: the main view's projection */
 static void roam_blips(uint32_t map, uint32_t top);     /* roam_blips.c: the map's peer blips */
+static void dri_ambient_pass(void);                     /* roam_ambient.c: the ambient probe */
 
 /* ── Native replacements ───────────────────────────────────── */
 
@@ -1750,6 +1751,7 @@ void sub_002BDEC0(void)
     if (roam_running()) {               /* after the physics step (roam_pool.c) */
         roam_pool_frame();
         roam_tag_frame();               /* and the name tags over the remote cars */
+        dri_ambient_pass();             /* MC3_ROAM_AMBIENT: the ambient pools, once */
     }
 }
 extern void sub_002C1520_gen(void);
@@ -3793,3 +3795,6 @@ void sub_0028B4E0(void)
 
 /* Free roam: the map blips for linked peers (roam_blips.c). */
 #include "roam_blips.c"
+
+/* Free roam: the ambient traffic/police/pedestrian probe (roam_ambient.c). */
+#include "roam_ambient.c"

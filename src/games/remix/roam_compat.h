@@ -30,6 +30,12 @@ static inline int online_ram(uint32_t va)
            (va >= 0x80000000u && va < 0x84000000u);
 }
 
+/* online_ram for a block of `n` bytes (headers and pools use this). */
+static inline int online_ram_n(uint32_t va, uint32_t n)
+{
+    return online_ram(va) && n <= 0x04000000u - va;
+}
+
 /* Their Online session flag. Free roam treats the session as Online while it
  * runs, so the pool takes the remote path and the career paths stay out. */
 static int s_online = 1;
