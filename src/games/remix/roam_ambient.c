@@ -894,17 +894,53 @@ static void amb_ghost_apply(void);
 static void amb_ghost_takeover(void);
 static void amb_ghost_check(void);
 static void amb_model_walk(uint32_t o);
+static void dri_ambient_draw(void);
 static uint32_t s_amb_ghost_cars, s_amb_ghost_slots;
 
 #define AMB_GHOST_MAX 32
 static struct {
     uint32_t obj;
     uint32_t slot;
-    uint32_t rec;      /* last record, to show whether anything rewrites it */
-    uint32_t rec_seen; /* unchanged frame count */
+    float    pose[3];  /* the pose we last wrote */
 } s_amb_ghost[AMB_GHOST_MAX];
 static int s_amb_nghost;
+static int s_amb_ghost_held;
 static int s_amb_takeover_on = -1;
+
+/* MC3_ROAM_AMBIENT_LOOP=1: feed this instance's own transmit list straight
+ * into the receive table, as if a peer had sent it. It exercises the whole
+ * receive + ghost path with one process, which matters because the two-instance
+ * boot is flaky. The entities are real (they come from the same collection
+ * code), so the ghost behaviour is the same as with a peer. */
+static void amb_loop_feed(void)
+{
+    static int on = -1;
+    int i;
+    double now;
+
+    if (on < 0) {
+        const char *e = getenv("MC3_ROAM_AMBIENT_LOOP");
+        on = e && e[0] == '1';
+    }
+    if (!on || !s_amb_ntx)
+        return;
+    now = roam_now();
+    for (i = 0; i < s_amb_ntx; i++) {
+        amb_rx_ent *e = amb_rx_slot(s_amb_tx[i].id, s_amb_tx[i].kind);
+        e->used = 1;
+        e->id = s_amb_tx[i].id;
+        e->kind = s_amb_tx[i].kind;
+        e->model = s_amb_tx[i].model;
+        e->p[0] = s_amb_tx[i].p[0];
+        e->p[1] = s_amb_tx[i].p[1];
+        e->p[2] = s_amb_tx[i].p[2];
+        e->yaw = s_amb_tx[i].yaw;
+        e->t = now;
+        s_amb_rx_ents++;
+    }
+    s_amb_rx_msgs++;
+    s_amb_rx_from = 0x10C0FFEEu;
+}
 
 /* Called every frame from the probe entry point. Sends at ~15 Hz of wall
  * time, not of frames, so a slow frame does not thin the stream. */
@@ -916,7 +952,6 @@ static void amb_net_frame(void)
         return;
     amb_rx_drain();
     amb_ghost_takeover();
-    amb_ghost_apply();
     amb_ghost_check();
     now = roam_now();
     if (now < next)
@@ -926,6 +961,7 @@ static void amb_net_frame(void)
         next = now + (1.0 / 15.0);
     amb_tx_collect();
     amb_tx_send();
+    amb_loop_feed();
 }
 
 /* One line a second: the transport is working end to end. */
@@ -959,17 +995,14 @@ static void amb_net_log(void)
         fprintf(stderr, "[AMBIENT] ghost: posed %u car(s) in %u slots\n",
                 s_amb_ghost_cars, s_amb_ghost_slots);
     if (s_amb_nghost) {
-        int i, stable = 0;
+        int i;
+        static int walked;
+        if (!walked) {
+            walked = 1;
+            amb_model_walk(s_amb_ghost[0].obj);
+        }
         for (i = 0; i < s_amb_nghost; i++) {
-            uint32_t rec;
-            static int walked;
-            if (!walked && i == 0) {
-                walked = 1;
-                amb_model_walk(s_amb_ghost[0].obj);
-            }
-            if (s_amb_ghost[i].rec_seen > 60)
-                stable++;
-            rec = online_ram_n(s_amb_ghost[i].obj, 0x20u) ? MEM32(s_amb_ghost[i].obj + 0x1Cu) : 0;
+            uint32_t rec = online_ram_n(s_amb_ghost[i].obj, 0x20u) ? MEM32(s_amb_ghost[i].obj + 0x1Cu) : 0;
             if (online_ram_n(rec, AMB_REC_POS + 12u)) {
                 float gx = MEMF(rec + AMB_REC_POS), gy = MEMF(rec + AMB_REC_POS + 4u),
                       gz = MEMF(rec + AMB_REC_POS + 8u);
@@ -983,12 +1016,13 @@ static void amb_net_log(void)
                         d = sqrt(dx * dx + dy * dy + dz * dz);
                         break;
                     }
-                fprintf(stderr, "[AMBIENT] takeover: slot %u ghost %.2f %.2f %.2f (net err %.2f m)\n",
-                        (unsigned)s_amb_ghost[i].slot, gx, gy, gz, (float)d);
+                fprintf(stderr, "[AMBIENT] takeover: slot %u ghost %.2f %.2f %.2f (net err %.2f m)%s\n",
+                        (unsigned)s_amb_ghost[i].slot, gx, gy, gz, (float)d,
+                        d >= 0.0 ? "" : " (no stream for this slot)");
             }
         }
-        fprintf(stderr, "[AMBIENT] takeover: %d ghost(s), %d with a stable record%s\n",
-                s_amb_nghost, stable,
+        fprintf(stderr, "[AMBIENT] takeover: %d ghost(s), %d holding their pose at the draw hook%s\n",
+                s_amb_nghost, s_amb_ghost_held,
                 getenv("MC3_ROAM_AMBIENT_NEAR") ? " (near mode: net err is meaningless)" : "");
     }
     s_amb_tx_msgs = s_amb_rx_msgs = s_amb_rx_ents = s_amb_rx_bad = 0;
@@ -1099,6 +1133,11 @@ static void amb_ghost_apply(void)
             }
         }
         amb_write_pose(o, &copy);
+        for (j = 0; j < s_amb_nghost; j++)
+            if (s_amb_ghost[j].slot == slot) {
+                memcpy(s_amb_ghost[j].pose, copy.p, sizeof copy.p);
+                break;
+            }
         applied++;
     }
     s_amb_ghost_cars = (uint32_t)applied;
@@ -1169,8 +1208,6 @@ static void amb_ghost_takeover(void)
             continue;                      /* already ours */
         s_amb_ghost[s_amb_nghost].obj = o;
         s_amb_ghost[s_amb_nghost].slot = slot;
-        s_amb_ghost[s_amb_nghost].rec = MEM32(o + 0x1Cu);
-        s_amb_ghost[s_amb_nghost].rec_seen = 0;
         s_amb_nghost++;
         if (deslot)
             MEM32(arr + slot * 4u) = 0;    /* comparison mode only */
@@ -1188,21 +1225,25 @@ static void amb_ghost_takeover(void)
     }
 }
 
-/* One ghost's stability: is anything still rewriting its record? */
+/* A ghost's pose survived a whole frame (write, AI pass, next draw) only if
+ * the record still holds what we wrote. Called from the probe hook, which runs
+ * in the physics pass - i.e. after the AI's turn but before our next write. */
 static void amb_ghost_check(void)
 {
-    int i;
+    int i, held = 0;
     for (i = 0; i < s_amb_nghost; i++) {
+        float p[3];
         uint32_t rec = online_ram_n(s_amb_ghost[i].obj, 0x20u) ? MEM32(s_amb_ghost[i].obj + 0x1Cu) : 0;
-        if (rec == s_amb_ghost[i].rec)
-            s_amb_ghost[i].rec_seen++;
-        else {
-            s_amb_ghost[i].rec = rec;
-            s_amb_ghost[i].rec_seen = 0;
-            fprintf(stderr, "[AMBIENT] takeover: slot %u record moved to %08X\n",
-                    (unsigned)s_amb_ghost[i].slot, (unsigned)rec);
-        }
+        if (!online_ram_n(rec, AMB_REC_POS + 12u))
+            continue;
+        p[0] = MEMF(rec + AMB_REC_POS);
+        p[1] = MEMF(rec + AMB_REC_POS + 4u);
+        p[2] = MEMF(rec + AMB_REC_POS + 8u);
+        if (p[0] == s_amb_ghost[i].pose[0] && p[1] == s_amb_ghost[i].pose[1] &&
+            p[2] == s_amb_ghost[i].pose[2])
+            held++;
     }
+    s_amb_ghost_held = held;
 }
 
 /* Where is an ambient car's *render* object? The player car keeps it at
@@ -1237,6 +1278,29 @@ static void amb_model_walk(uint32_t o)
                     what[j], (unsigned)i, (unsigned)p, (unsigned)vt,
                     (unsigned)MEM8(p + 0x12Du), (unsigned)MEM8(p + 0x12Cu));
         }
+    }
+}
+
+/* The ghost poses, written from the draw path (the projection builder runs
+ * after the frame's simulation, so this is the last write before the
+ * renderer reads the records - which is what makes the ghost win). */
+static void dri_ambient_draw(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("MC3_ROAM_AMBIENT_GHOST");
+        on = e && e[0] == '1';
+    }
+    if (!on || amb_level() <= 0)
+        return;
+    amb_ghost_apply();
+    {   /* prove this hook runs, and how often relative to the AI's pass */
+        static unsigned n, shown;
+        if (++n <= 2 || n % 600u == 0) {
+            fprintf(stderr, "[AMBIENT] draw hook: call %u, %u applied\n", n, s_amb_ghost_cars);
+            shown++;
+        }
+        (void)shown;
     }
 }
 

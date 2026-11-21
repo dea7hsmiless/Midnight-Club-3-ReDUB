@@ -62,6 +62,7 @@ static void roam_tag_frame(void);               /* roam_tagdraw.c: name tags thi
 static void roam_tag_projection(uint32_t vp);   /* roam_tagdraw.c: the main view's projection */
 static void roam_blips(uint32_t map, uint32_t top);     /* roam_blips.c: the map's peer blips */
 static void dri_ambient_pass(void);                     /* roam_ambient.c: the ambient probe */
+static void dri_ambient_draw(void);                     /* roam_ambient.c: ghost poses at draw time */
 static void amb_note(int tag, uint32_t va, uint32_t arg);  /* roam_ambient.c: capture the live ambient objects */
 
 /* ── Native replacements ───────────────────────────────────── */
@@ -1817,8 +1818,10 @@ void sub_002D4AE0(void)
                 this_vp, MEMF(g_esp + 4), MEMF(g_esp + 8), MEMF(g_esp + 12), MEMF(g_esp + 16), MEM32(g_esp));
     }
     cam_call(42, 0x002D4AE0u, sub_002D4AE0_gen);
-    if (roam_running())                 /* the main view's projection, for name tags */
+    if (roam_running()) {               /* the main view's projection, for name tags */
         roam_tag_projection(this_vp);
+        dri_ambient_draw();             /* MC3_ROAM_AMBIENT: ghost poses, last write before the draw */
+    }
 }
 
 /* The rest of the race's frame update (the dispatcher at 0x0001EEDE calls
