@@ -25,12 +25,12 @@ render resolution and requires a restart. Gamma (0.8–1.4) and Brightness
 Defaults are gamma 1.0 and brightness 100%, preserving the original picture.
 Graphics presets preserve these adjustments.
 
-## Display shape
+## Aspect ratio
 
-Display shape selects Auto (16:9), 4:3 or Stretch and applies on the next
+Aspect ratio selects Auto (16:9), 4:3 or Stretch and applies on the next
 start. Auto shows a widescreen game at 16:9; 4:3 keeps the original shape with
 bars at the sides; Stretch fills the window. The same option is on the
-launcher's Display page (Display shape) and in the RecompLauncher manifest as
+launcher's Display page (Aspect ratio) and in the RecompLauncher manifest as
 `RECOMP_GL_ASPECT`.
 
 ## PC Music / Now Playing

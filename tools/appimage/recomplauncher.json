@@ -107,7 +107,7 @@
       "defaults": { "RECOMP_GL_VSYNC": "0" }
     },    {
       "id": "display_shape",
-      "label": "Display shape",
+      "label": "Aspect ratio",
       "help": "Auto shows a widescreen game at 16:9. 4:3 keeps the original shape with bars at the sides. Stretch fills the window. Restart to apply.",
       "choices": [
         { "label": "Auto (16:9)", "set": { "RECOMP_GL_ASPECT": "auto" } },

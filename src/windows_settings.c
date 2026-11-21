@@ -113,7 +113,7 @@ static void change_on_main(void *p)
     else if(id==5){apply_preset(preset>=3?1:preset+1,0);return;}
     else if(id==6){int n=(sharp+1)%5;const char *v[]={"0","0.25","0.5","0.75","1"};if(save_setting("RECOMP_GL_SHARPEN",v[n]))sharp=n;}
     else if(id==7){if(save_setting("MC3_FPS_OVERLAY",overlay?"0":"1"))overlay=!overlay;return;}
-    else if(id==8){int n=(atomic_load(&display_shape)+1)%3;if(save_setting("RECOMP_GL_ASPECT",shape_values[n])){atomic_store(&display_shape,n);fprintf(stderr,"[PORT] display shape %s saved (restart to apply)\n",shape_values[n]);}return;}
+    else if(id==8){int n=(atomic_load(&display_shape)+1)%3;if(save_setting("RECOMP_GL_ASPECT",shape_values[n])){atomic_store(&display_shape,n);fprintf(stderr,"[PORT] aspect ratio %s saved (restart to apply)\n",shape_values[n]);}return;}
     else if(id==9){int n=!pc_music;char volume[16];snprintf(volume,sizeof volume,"%d",(int)music_restore);const char *keys[]={"MC3_PC_MUSIC","MC3_PC_MUSIC_RESTORE_VOLUME"};const char *vals[]={n?"1":"0",volume};if(save_settings(keys,vals,2)){pc_music=n;windows_media_set(n);}return;}
     else if(id==10){int old=windows_media_volume_get(),n=old<0?50:old>=100?0:((old/10)+1)*10;char v[16];snprintf(v,sizeof v,"%d",n);if(save_setting("MC3_PC_MUSIC_VOLUME",v))windows_media_volume_set(n);return;}
     else if(id==11){int n=!music_hud;if(save_setting("MC3_PC_MUSIC_HUD",n?"1":"0"))music_hud=n;return;}
@@ -150,7 +150,7 @@ void windows_port_setting_label(int id,char *out,size_t size)
     if(id==5){const char *names[]={"CUSTOM","PERFORMANCE","BALANCED","QUALITY"};snprintf(out,size,"PRESET: %s (RESTART)",names[preset]);}
     if(id==6) snprintf(out,size,"SHARPENING: %d%%",sharp*25);
     if(id==7) snprintf(out,size,"FPS OVERLAY: %s",overlay?"ON":"OFF");
-    if(id==8) snprintf(out,size,"DISPLAY SHAPE: %s (RESTART)",shape_names[atomic_load(&display_shape)%3]);
+    if(id==8) snprintf(out,size,"ASPECT RATIO: %s (RESTART)",shape_names[atomic_load(&display_shape)%3]);
     if(id==9) snprintf(out,size,"PC MUSIC (DRIVING): %s",pc_music?"ON":"OFF");
     if(id==10){int n=windows_media_volume_get();if(n<0)snprintf(out,size,"PC MUSIC VOLUME: AUTO");else snprintf(out,size,"PC MUSIC VOLUME: %d%%",n);}
     if(id==11)snprintf(out,size,"SONG DISPLAY: %s",music_hud?"RADIO + FALLBACK":"OVERLAY");
