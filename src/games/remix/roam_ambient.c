@@ -987,8 +987,9 @@ static void amb_net_log(void)
                         (unsigned)s_amb_ghost[i].slot, gx, gy, gz, (float)d);
             }
         }
-        fprintf(stderr, "[AMBIENT] takeover: %d ghost(s), %d with a stable record\n",
-                s_amb_nghost, stable);
+        fprintf(stderr, "[AMBIENT] takeover: %d ghost(s), %d with a stable record%s\n",
+                s_amb_nghost, stable,
+                getenv("MC3_ROAM_AMBIENT_NEAR") ? " (near mode: net err is meaningless)" : "");
     }
     s_amb_tx_msgs = s_amb_rx_msgs = s_amb_rx_ents = s_amb_rx_bad = 0;
     s_amb_tx_peers = 0;
@@ -1116,10 +1117,20 @@ static void amb_ghost_apply(void)
  * MC3_ROAM_AMBIENT_TAKEOVER=1 turns it on (a client). A slot the sender has
  * no entity for is left alone, so the local population still fills it.
  */
+/* ── Milestone 5, second slice: keep the slot, take only the pose ──
+ *
+ * De-slotting was disproven (a car out of owner+0x30 is not drawn). So the
+ * adopted car must stay in the array and only its pose must be ours. That is
+ * exactly what MC3_ROAM_AMBIENT_GHOST already does; this slice marks the slot
+ * as adopted (for the log) and leaves the membership alone.
+ *
+ * MC3_ROAM_AMBIENT_TAKEOVER=1 marks slots as adopted. MC3_ROAM_AMBIENT_DESLOT=1
+ * restores the old behaviour (zero the slot) for comparison.
+ */
 static void amb_ghost_takeover(void)
 {
     uint32_t owner = 0, arr, cnt, i;
-    int j;
+    int j, deslot;
 
     if (s_amb_takeover_on < 0) {
         const char *e = getenv("MC3_ROAM_AMBIENT_TAKEOVER");
@@ -1127,6 +1138,7 @@ static void amb_ghost_takeover(void)
     }
     if (!s_amb_takeover_on)
         return;
+    deslot = getenv("MC3_ROAM_AMBIENT_DESLOT") && getenv("MC3_ROAM_AMBIENT_DESLOT")[0] == '1';
     for (i = 0; i < (uint32_t)s_amb_nseen; i++)
         if (s_amb_tag[i] != AMB_TAG_GLOBAL && s_amb_tag[i] < AMB_TAG_PEDTYPE && s_amb_seen[i]) {
             owner = s_amb_seen[i];
@@ -1160,9 +1172,19 @@ static void amb_ghost_takeover(void)
         s_amb_ghost[s_amb_nghost].rec = MEM32(o + 0x1Cu);
         s_amb_ghost[s_amb_nghost].rec_seen = 0;
         s_amb_nghost++;
-        MEM32(arr + slot * 4u) = 0;        /* out of the AI's slot list */
-        fprintf(stderr, "[AMBIENT] takeover: slot %u obj %08X rec %08X\n",
-                (unsigned)slot, (unsigned)o, (unsigned)MEM32(o + 0x1Cu));
+        if (deslot)
+            MEM32(arr + slot * 4u) = 0;    /* comparison mode only */
+        else if (getenv("MC3_ROAM_AMBIENT_FREEZE") && getenv("MC3_ROAM_AMBIENT_FREEZE")[0] == '1') {
+            /* +0x60 is the same "active" byte the player car uses (roam_pool.c
+             * hides a ghost with it, and this ctor zeroes it). Try it here:
+             * the car stays in the slot list (so it is drawn) but its own
+             * update may skip it. */
+            MEM8(o + 0x60u) = 1;
+        }
+        fprintf(stderr, "[AMBIENT] takeover: slot %u obj %08X rec %08X (%s)\n",
+                (unsigned)slot, (unsigned)o, (unsigned)MEM32(o + 0x1Cu),
+                deslot ? "de-slotted"
+                       : (MEM8(o + 0x60u) ? "kept, frozen at +0x60" : "kept in the slot list"));
     }
 }
 
