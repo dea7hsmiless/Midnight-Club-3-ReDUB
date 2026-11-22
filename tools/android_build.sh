@@ -10,8 +10,10 @@
 #             not install over the old one.
 #
 # The version is ANDROID_VERSION in config/<game>/app.env (APP_VERSION where
-# there is none). MC3_BETA=<n>: a beta, <version>-beta.<n>. The Android SDK,
-# NDK and SDL2 source live in work-dub/tools/ (android-sdk/, SDL2-2.32.10/),
+# there is none). MC3_BETA=<n>: a beta, <version>-beta.<n>. MC3_ABI=universal
+# bundles arm64-v8a, armeabi-v7a and x86_64 (the default is arm64-v8a alone,
+# which is every phone of the last decade and half the download). The Android
+# SDK, NDK and SDL2 source live in work-dub/tools/ (android-sdk/, SDL2-2.32.10/),
 # shared by both games; a build runner names its own: ANDROID_HOME,
 # MC3_SDL_DIR, MC3_ANDROID_KEYS (the folder with the release key, which a
 # runner never makes: CI=true and no key is an error).
@@ -60,7 +62,8 @@ if [ "$kind" = release ]; then
 fi
 
 task=$([ "$kind" = release ] && echo assembleRelease || echo assembleDebug)
-(cd "$MC3_REPO/android" && ./gradlew --console=plain "$task" -PMC3_GAME="$MC3_GAME" ${beta:+-PMC3_BETA="$beta"})
+(cd "$MC3_REPO/android" && ./gradlew --console=plain "$task" -PMC3_GAME="$MC3_GAME" \
+    ${beta:+-PMC3_BETA="$beta"} ${MC3_ABI:+-PMC3_ABI="$MC3_ABI"})
 
 name="$app-$version$([ "$kind" = release ] || echo -debug).apk"
 src="$MC3_REPO/android/app/build/outputs/apk/$kind/$name"

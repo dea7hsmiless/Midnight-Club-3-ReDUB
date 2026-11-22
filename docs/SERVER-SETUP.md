@@ -114,8 +114,38 @@ Then both players enter free roam the same way (Online → Free Roam). Each shou
 ```
 [roam] relay <ip>:47210 (room 1): datagrams go through it
 [roam] <name> joined
-[ROAM] pool: 1 peers, 1 cars
+[ROAM] pool: 1 peers, 1 cars (1 slots + 0 standalone), 0 dimmed, heap 900 KB
 ```
+
+## From a phone (Android)
+
+The APK is the same game and reads the same settings, so a phone can join a relay
+from anywhere. Two things are different from a PC.
+
+**Where the settings file goes.** Put `mcdub3remix_env.txt` in
+
+```
+/storage/emulated/0/mcdub3remix-nx/
+```
+
+which any file manager can open, with the same lines as above. (The app also reads its own
+`Android/data/io.github.laureladastra.mcdub3remix/files/` folder, but that one is awkward to
+reach on newer Android.) The log is `mcdub3remix_log.txt` in the same folder — that is where
+`[roam] relay …` and `[relay] joined` appear.
+
+**Use the relay, not broadcast discovery.** Android does not hand broadcast datagrams to an
+app just because it joined the Wi-Fi, so hubless LAN discovery is unreliable on a phone. The
+relay is plain unicast to one address and works over mobile data as well as Wi-Fi.
+
+If the log says
+
+```
+[ROAM] transport did not start (port busy, or no network)
+```
+
+the build is older than 0.2.5 and carries no `android.permission.INTERNET`, with which
+Android refuses `socket()` outright. No setting can work around that; the APK has to be the
+new one.
 
 ## Running it as a service
 
