@@ -53,10 +53,11 @@ enum {
     SEEN_ARCADE   = 1 << 4,
     SEEN_LOADING  = 1 << 5,
     SEEN_WRONG    = 1 << 6,
+    SEEN_NETWORK  = 1 << 7,
 };
-enum { ST_BOOT, ST_TITLE, ST_PROFILE, ST_MAIN, ST_ARCADE, ST_LOADING, ST_DONE };
+enum { ST_BOOT, ST_TITLE, ST_PROFILE, ST_MAIN, ST_ARCADE, ST_LOADING, ST_NETWORK, ST_DONE };
 static const char *const k_stage[] = {
-    "boot", "title", "profile", "main menu", "Arcade", "loading", "done"
+    "boot", "title", "profile", "main menu", "Arcade", "loading", "Networking", "done"
 };
 
 static int s_seen;                  /* SEEN_*, set from any thread */
@@ -68,6 +69,20 @@ static uint32_t now_ms(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint32_t)(ts.tv_sec * 1000u + ts.tv_nsec / 1000000u);
+}
+
+/* MC3_ONLINE_SESSION=1: the walk goes in through Networking, not Arcade.
+ * Read here rather than asking the game layer, which this file does not link
+ * against (it is included into the game's translation unit, not the other way
+ * round). */
+static int online_wanted(void)
+{
+    static int want = -1;
+    if (want < 0) {
+        const char *e = getenv("MC3_ONLINE_SESSION");
+        want = e && e[0] == '1';
+    }
+    return want;
 }
 
 static void on_path(const char *p)
@@ -85,6 +100,8 @@ static void on_path(const char *p)
         bit = SEEN_MAIN;
     else if (!strcasecmp(base, "bg_arcade.xbck"))
         bit = SEEN_ARCADE;
+    else if (!strcasecmp(base, "bg_network.xbck"))
+        bit = SEEN_NETWORK;
     else if (!strncasecmp(base, "loadscreen_arcade", 17))
         bit = SEEN_LOADING;
     else if (!strncasecmp(base, "bg_", 3) || !strncasecmp(base, "loadscreen_", 11)) {
@@ -150,6 +167,19 @@ static int ready(uint32_t now, uint32_t settle_ms, uint32_t again_ms)
         && s_release_frames >= 5 && now - s_release_ms >= again_ms;
 }
 
+/* The same, for screens that keep reading files while they are up.
+ *
+ * The networking screen polls, so the "front end is quiet" clause above never
+ * becomes true and no press is ever made -- the walk sits there for ever. These
+ * screens only need their transition and the press spacing; the bounded press
+ * count in the caller still stops a screen that never answers. */
+static int ready_busy(uint32_t now, uint32_t settle_ms, uint32_t again_ms)
+{
+    return !s_holding
+        && now - s_stage_ms >= settle_ms && s_stage_frames >= 30
+        && s_release_frames >= 5 && now - s_release_ms >= again_ms;
+}
+
 void mc3_autostart_frame(int in_game, int downs_to_arcade)
 {
     uint32_t now;
@@ -166,7 +196,8 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
         /* state 2/3 begins with the cruise: from the loading screen, or
          * straight from Arcade's setup screens when that Flash file never
          * opens (MC3_SKIP_MOVIES=hard). */
-        finish(s_stage == ST_LOADING || (s_stage == ST_ARCADE && s_presses)
+        finish(s_stage == ST_LOADING ||
+               ((s_stage == ST_ARCADE || s_stage == ST_NETWORK) && s_presses)
                ? "in Cruise" : "in game: stopped");
         return;
     }
@@ -182,13 +213,22 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
     }
 
     seen = __atomic_load_n(&s_seen, __ATOMIC_RELAXED);
-    if (seen & SEEN_WRONG) {
+    /* MC3_ONLINE_SESSION: the way in is the Networking screen, then its first
+     * item (Xbox Live, which a session uses as Free Roam), then the setup
+     * screens behind it. Those are screens this walker does not know by name,
+     * so in a session it presses A through them instead of refusing them:
+     * bounded by s_presses, and it still stops on the first screen that never
+     * responds. Outside a session nothing changes. */
+    if ((seen & SEEN_WRONG) && !(online_wanted() && (s_stage == ST_NETWORK ||
+                                                     (seen & SEEN_NETWORK)))) {
         char msg[96];
         snprintf(msg, sizeof msg, "stopped: %s opened, not the way to Cruise", s_wrong);
         finish(msg);
         return;
     }
-    to = seen & SEEN_LOADING ? ST_LOADING : seen & SEEN_ARCADE ? ST_ARCADE
+    to = seen & SEEN_LOADING ? ST_LOADING
+       : seen & SEEN_ARCADE ? ST_ARCADE
+       : (seen & SEEN_NETWORK) && online_wanted() ? ST_NETWORK
        : seen & SEEN_MAIN ? ST_MAIN : s_stage;
     if (to == s_stage && s_stage == ST_BOOT && (seen & SEEN_TITLE))
         to = ST_TITLE;
@@ -248,6 +288,19 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
         if (ready(now, 3000, 3000)) {
             if (s_presses >= 6) {
                 finish("stopped: Arcade did not start the cruise");
+                return;
+            }
+            press(0, PAD_A, now);
+        }
+        break;
+    case ST_NETWORK:                /* A through Networking's screens */
+        /* Free Roam is behind the screen's first item; each press opens the
+         * next screen, and the last of them loads the cruise (which the game
+         * reports as in_game, ending this walk). A screen that never answers
+         * still stops the walk, so this cannot spin for ever. */
+        if (ready_busy(now, 2500, 2500)) {
+            if (s_presses >= 8) {
+                finish("stopped: Networking did not start the cruise");
                 return;
             }
             press(0, PAD_A, now);
