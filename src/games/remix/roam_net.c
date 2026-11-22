@@ -39,11 +39,21 @@ static void roam_net_boot(void)
         setenv("MC3_ROAM_HUB", "0", 0);
 #endif
     }
-    if (roam_start("MC3", 0) != 0) {
+    /* The name every other player sees, from the same sources roam_game.c
+     * uses: MC3_ROAM_NAME, then MC3_PLAYER_NAME. This used to pass "MC3"
+     * unconditionally, and because roam_begin() only starts a session when
+     * none is running, that placeholder won: every player in a city was
+     * called "MC3", in the player list and over their car. The transport has
+     * to be up early, so the name has to be chosen here. */
+    e = getenv("MC3_ROAM_NAME");
+    if (!e || !*e)
+        e = getenv("MC3_PLAYER_NAME");
+    if (roam_start(e && *e ? e : "Player", 0) != 0) {
         fprintf(stderr, "[ROAM] transport did not start (port %u busy, or no network)\n",
                 (unsigned)ROAM_PORT);
         return;
     }
     atexit(roam_stop);
-    fprintf(stderr, "[ROAM] transport up; peers' cars are built at the cruise (MC3_ROAM=1)\n");
+    fprintf(stderr, "[ROAM] transport up as \"%s\"; peers' cars are built at the cruise"
+            " (MC3_ROAM=1)\n", e && *e ? e : "Player");
 }
