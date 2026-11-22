@@ -72,6 +72,22 @@ mkdir -p "$MC3_WORK/android"
 cp "$src" "$MC3_WORK/android/$name"
 py=python3
 command -v "$py" >/dev/null 2>&1 || py=python
+
+# An APK is a zip, so its file size should be the sum of its entries plus a
+# small directory. One packaging run rewrote the output without truncating and
+# left 17 MB of zeros between two entries: still a valid zip, still installable,
+# 69 MB instead of 52, and nothing in the build said a word. Cheap to check.
+"$py" - "$src" <<'PY' || mc3_fail "the APK has dead space between entries; repack it (rm -rf android/app/build/outputs/apk) and build again"
+import os, sys, zipfile
+p = sys.argv[1]
+z = zipfile.ZipFile(p)
+entries = sum(i.compress_size + 30 + len(i.filename.encode()) for i in z.infolist())
+size = os.path.getsize(p)
+if size - entries > 1 << 20:
+    print(f"  {size >> 20} MB on disk, {entries >> 20} MB of entries")
+    sys.exit(1)
+PY
+
 "$py" "$MC3_REPO/tools/check-release-package.py" "$MC3_WORK/android/$name" \
     || mc3_fail "the APK carries a player settings file or a PC-music default"
 echo "  APK: ${MC3_WORK#$MC3_REPO/}/android/$name ($(du -h "$src" | cut -f1 | tr -d ' '), version $version)"
