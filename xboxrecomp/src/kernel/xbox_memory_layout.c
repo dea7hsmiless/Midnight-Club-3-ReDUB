@@ -2748,10 +2748,22 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
             PAGE_READWRITE
         );
         /* The pushbuffer survey rides on the same poll, so either
-         * variable arms it. */
+         * variable arms it.
+         *
+         * The survey and the per-write trace are two different things and
+         * must not share one switch. RECOMP_PB_EXEC=1 is a *runtime default*
+         * (src/main.c: set_runtime_defaults), so every player has it set.
+         * Arming the trace from it made the port print, and flush, two lines
+         * per pushbuffer write for the whole session: a 322 MB log and 5.0
+         * million lines in one short test run, 168,813 of them the same
+         * "(GPU behind)" line. On a player's machine that is unbounded disk
+         * use during play, and the flush on every write is pure overhead in
+         * the hottest path the port has.
+         *
+         * The survey still follows PB_EXEC (it is what makes the executor
+         * run); the trace now needs somebody to ask for it. */
         s_nv2a_trace = getenv("RECOMP_NV2A_TRACE") != NULL
-                    || getenv("RECOMP_PB_SCAN") != NULL
-                    || getenv("RECOMP_PB_EXEC") != NULL;
+                    || getenv("RECOMP_PB_SCAN") != NULL;
         if (g_nv2a_memory) {
             fprintf(stderr, "  NV2A register aperture: %u MB at Xbox VA "
                     "0x%08X (zeroed, no register semantics)\n",
