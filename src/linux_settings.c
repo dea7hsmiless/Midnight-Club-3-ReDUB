@@ -190,7 +190,7 @@ void windows_port_settings_attach(SDL_Window *win)
     v=getenv("MC3_PC_MUSIC_RESTORE_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)s_music_restore=n;}
     v=getenv("MC3_PC_MUSIC_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)windows_media_volume_set(n);}
     v=getenv("MC3_PC_MUSIC");s_pc_music=windows_media_available()&&v&&atoi(v)!=0;windows_media_set(s_pc_music);
-    v=getenv("RECOMP_GL_ASPECT");atomic_store(&s_display_shape,v&&!strcmp(v,"4:3")?1:v&&!strcmp(v,"fill")?2:0);
+    v=getenv("RECOMP_GL_ASPECT");atomic_store(&s_display_shape,v&&!strcmp(v,"4:3")?1:(v&&(!strcmp(v,"fill")||!strcmp(v,"stretch")))?2:0);
     v=getenv("MC3_RUMBLE_STRENGTH");int r=v?atoi(v):100;if(r<0)r=0;if(r>200)r=200;s_rumble=r;xbox_InputSetRumbleStrength(r);
     SDL_SetWindowTitle(win,MC3_GAME_TITLE);
     v=getenv("MC3_RESOLUTION");if(v&&strcmp(v,"auto")){unsigned w=0,h=0;char t;if(sscanf(v,"%ux%u%c",&w,&h,&t)==2&&w>=640&&w<=7680&&h>=360&&h<=4320)SDL_SetWindowSize(win,(int)w,(int)h);}

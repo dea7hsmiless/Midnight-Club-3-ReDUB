@@ -201,7 +201,7 @@ void windows_port_settings_attach(SDL_Window *win)
         atomic_store(&frame_rate, n);
     }
     v=getenv("MC3_PC_MUSIC");pc_music=v&&atoi(v)!=0;windows_media_set(pc_music);
-    v=getenv("RECOMP_GL_ASPECT");atomic_store(&display_shape,v&&!strcmp(v,"4:3")?1:v&&!strcmp(v,"fill")?2:0);
+    v=getenv("RECOMP_GL_ASPECT");atomic_store(&display_shape,v&&!strcmp(v,"4:3")?1:(v&&(!strcmp(v,"fill")||!strcmp(v,"stretch")))?2:0);
     v=getenv("MC3_PC_MUSIC_RESTORE_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)music_restore=n;}
     v=getenv("MC3_PC_MUSIC_VOLUME");if(v){int n=atoi(v);if(n>=0&&n<=100)windows_media_volume_set(n);}
     v=getenv("MC3_PC_MUSIC_HUD");music_hud=!v||atoi(v)!=0;

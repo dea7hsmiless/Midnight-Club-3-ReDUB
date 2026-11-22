@@ -20,17 +20,33 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 int xbox_video_widescreen(void);
 
 /* 0 = widescreen (16:9) as above, 1 = stretch to the whole window,
- * 2 = the title's 4:3 shape. Read once from RECOMP_GL_ASPECT. */
+ * 2 = the title's 4:3 shape. Read once from RECOMP_GL_ASPECT.
+ *
+ * `stretch` is accepted as well as `fill`: the UI calls the choice "Stretch"
+ * and the stored value was `fill`, so anybody editing the env file by hand
+ * wrote the word the UI showed, got 16:9 instead, and had no way to tell. An
+ * unrecognised value now says so instead of silently meaning Auto. */
 static inline int nv2a_aspect_mode(void)
 {
     static int mode = -1;
     if (mode < 0) {
         const char *e = getenv("RECOMP_GL_ASPECT");
-        mode = e && !strcmp(e, "fill") ? 1 : e && !strcmp(e, "4:3") ? 2 : 0;
+        if (!e || !*e || !strcmp(e, "auto")) {
+            mode = 0;
+        } else if (!strcmp(e, "fill") || !strcmp(e, "stretch")) {
+            mode = 1;
+        } else if (!strcmp(e, "4:3")) {
+            mode = 2;
+        } else {
+            mode = 0;
+            fprintf(stderr, "[present] RECOMP_GL_ASPECT=%s is not auto, 4:3 or stretch"
+                            " (fill also works); showing 16:9\n", e);
+        }
     }
     return mode;
 }

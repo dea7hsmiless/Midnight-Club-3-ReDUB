@@ -15,6 +15,8 @@
  */
 
 #include "kernel.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 /* ============================================================================
  * Helper: Convert NT 100ns interval to Win32 milliseconds
@@ -252,6 +254,39 @@ NTSTATUS __stdcall xbox_NtWaitForMultipleObjectsEx(
     DWORD ms = xbox_nt_timeout_to_ms(Timeout);
     BOOL bWaitAll;
     DWORD result;
+
+    /* MC3_MOVIE_WAIT_MS: cap an INFINITE multi-object wait.
+     *
+     * Bink fetches a frame through sub_003ADBA0, which waits on two of its own
+     * handles with an INFINITE timeout. If one never signals, that guest
+     * thread is gone and nothing in the port can reach it -- a permanent
+     * freeze, observed while the intro movies play ("[WATCHDOG] hang: no frame
+     * presented for 12s (frame 208)", stack through sub_003ADBA0 into
+     * NtWaitForMultipleObjectsEx). A frame-progress watchdog cannot help there:
+     * the guest is inside a host wait, so the port's wrappers are never called
+     * again.
+     *
+     * Opt-in, because changing wait semantics is not free: a caller that
+     * treats WAIT_TIMEOUT as fatal would break. Off unless asked for, so the
+     * default build is unchanged. Set MC3_MOVIE_WAIT_MS=2000 to test whether
+     * bounding it recovers a hang. */
+    if (ms == INFINITE) {
+        static long cap = -2;
+        if (cap == -2) {
+            const char *e = getenv("MC3_MOVIE_WAIT_MS");
+            cap = e && *e ? atol(e) : -1;
+            if (cap > 0)
+                fprintf(stderr, "[SYNC] INFINITE %lu-object waits capped at %ld ms"
+                                " (MC3_MOVIE_WAIT_MS)\n", (unsigned long)Count, cap);
+        }
+        if (cap > 0) {
+            static unsigned n;
+            if (n++ < 8)
+                fprintf(stderr, "[SYNC] INFINITE wait on %lu object(s) -> %ld ms\n",
+                        (unsigned long)Count, cap);
+            ms = (DWORD)cap;
+        }
+    }
 
     /* WaitType: 0 = WaitAll, 1 = WaitAny (matches NT definitions) */
     bWaitAll = (WaitType == 0) ? TRUE : FALSE;
