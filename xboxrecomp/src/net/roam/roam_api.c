@@ -6,10 +6,28 @@
  * Environment: MC3_ROAM_K (links wanted from the hub, default 7),
  * MC3_ROAM_DELAY (render delay ms, default 100), MC3_ROAM_HUB=0 (no hub:
  * discovery by broadcast and gossip, groups of up to 8). */
+/* Name resolution for MC3_ROAM_HUB_IP / MC3_ROAM_RELAY_IP.
+ *
+ * Winsock's legacy `far` macro rewrites every `far` identifier -- including the
+ * `far` field of rc_session in roam_core.h -- into `0x3535`, so it has to go
+ * before any of the roam headers. Windows headers must also come first, and
+ * winsock2.h before windows.h. */
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
+#ifdef far
+#undef far
+#endif
 #include "roam_plat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#endif
 
 #define EXTRAP_CAP_US 500000        /* past the newest state a car goes on this long, then holds */
 
@@ -32,6 +50,33 @@ static int env_int(const char *k, int def, int lo, int hi){
     int x = atoi(v);
     return x < lo ? lo : x > hi ? hi : x;
 }
+
+/* A server address from the environment: a dotted quad or a host name.
+ *
+ * A name is what people are given ("server.dea7hsmiles.com"), so refusing one
+ * would mean every player has to look up an IP that can change under them. The
+ * result is the host-order IPv4 address the core stores, or 0 if the name does
+ * not resolve. Resolved once, at start: a relay's address is not expected to
+ * move mid-session, and a failed lookup then falls back to the caller's
+ * default instead of silently pointing at nothing. */
+static uint32_t resolve_host(const char *host, const char *what)
+{
+    unsigned a, b, cc, d;
+    struct hostent *he;
+    if (!host || !*host)
+        return 0;
+    if (sscanf(host, "%u.%u.%u.%u", &a, &b, &cc, &d) == 4 &&
+        a < 256u && b < 256u && cc < 256u && d < 256u)
+        return (a << 24) | (b << 16) | (cc << 8) | d;
+    he = gethostbyname(host);
+    if (he && he->h_addrtype == AF_INET && he->h_length == 4 && he->h_addr_list[0]) {
+        uint32_t ip;
+        memcpy(&ip, he->h_addr_list[0], 4);
+        return ntohl(ip);
+    }
+    fprintf(stderr, "[roam] %s=%s does not resolve: using the built-in address\n", what, host);
+    return 0;
+}
 static void on_event(void *user, int ev, int peer, const char *text){
     (void)user; (void)ev; (void)peer;
     fprintf(stderr, "[roam] %s\n", text);
@@ -51,22 +96,19 @@ int roam_start(const char *name, uint32_t vip){
     c.rate_hz = 20;
     c.snap_states = 1;               /* the WebSocket loses nothing (nfsu2-web: one state per SNAP) */
     if (env_int("MC3_ROAM_HUB", 1, 0, 1)) {
-        /* The hub's address, overridable so one can be run anywhere: without
+        /* The server's address, overridable so one can be run anywhere: without
          * this the only hub is the compile-time ROAM_HUB_VIP (10.77.0.253),
          * which means nobody can test a hub without assigning that address to
-         * an interface. MC3_ROAM_HUB_IP takes a dotted quad, and
+         * an interface. MC3_ROAM_HUB_IP takes a dotted quad or a host name (a
+         * name is what a host actually hands out; see resolve_host), and
          * MC3_ROAM_HUB_PORT a port. */
         const char *hip = getenv("MC3_ROAM_HUB_IP");
         c.hub_ip = ROAM_HUB_VIP;
         c.hub_port = ROAM_PORT;
         if (hip && *hip) {
-            unsigned a, b, cc, d;
-            if (sscanf(hip, "%u.%u.%u.%u", &a, &b, &cc, &d) == 4 &&
-                a < 256u && b < 256u && cc < 256u && d < 256u)
-                c.hub_ip = (a << 24) | (b << 16) | (cc << 8) | d;
-            else
-                fprintf(stderr, "[roam] MC3_ROAM_HUB_IP=%s is not a dotted quad, "
-                        "using the built-in hub\n", hip);
+            uint32_t ip = resolve_host(hip, "MC3_ROAM_HUB_IP");
+            if (ip)
+                c.hub_ip = ip;
         }
         c.hub_port = (uint16_t)env_int("MC3_ROAM_HUB_PORT", c.hub_port, 1, 65535);
         fprintf(stderr, "[roam] hub %u.%u.%u.%u:%u\n",
@@ -95,12 +137,9 @@ int roam_start(const char *name, uint32_t vip){
         c.relay_ip = c.hub_ip;
         c.relay_port = c.hub_port;
         if (rip && *rip) {
-            unsigned a, b, cc, d;
-            if (sscanf(rip, "%u.%u.%u.%u", &a, &b, &cc, &d) == 4 &&
-                a < 256u && b < 256u && cc < 256u && d < 256u)
-                c.relay_ip = (a << 24) | (b << 16) | (cc << 8) | d;
-            else
-                fprintf(stderr, "[roam] MC3_ROAM_RELAY_IP=%s is not a dotted quad\n", rip);
+            uint32_t ip = resolve_host(rip, "MC3_ROAM_RELAY_IP");
+            if (ip)
+                c.relay_ip = ip;
         }
         c.relay_port = (uint16_t)env_int("MC3_ROAM_RELAY_PORT", c.relay_port, 1, 65535);
         if (!c.relay_ip || !c.relay_port) {
