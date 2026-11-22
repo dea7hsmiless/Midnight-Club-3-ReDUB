@@ -65,7 +65,7 @@ task=$([ "$kind" = release ] && echo assembleRelease || echo assembleDebug)
 (cd "$MC3_REPO/android" && ./gradlew --console=plain "$task" -PMC3_GAME="$MC3_GAME" \
     ${beta:+-PMC3_BETA="$beta"} ${MC3_ABI:+-PMC3_ABI="$MC3_ABI"})
 
-name="$app-$version$([ "$kind" = release ] || echo -debug).apk"
+name="$app-$version$([ "${MC3_ABI:-}" = universal ] && echo -universal)$([ "$kind" = release ] || echo -debug).apk"
 src="$MC3_REPO/android/app/build/outputs/apk/$kind/$name"
 [ -f "$src" ] || mc3_fail "no $src after the build"
 mkdir -p "$MC3_WORK/android"
