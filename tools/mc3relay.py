@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import socket
 import struct
 import sys
@@ -63,11 +64,37 @@ from mc3hub import HDR, MAX_DGRAM, PROTO_VER, build, crc32, parse, parse_hello
 # never hands out somebody the sender has already dropped.
 EXPIRE_S = 30.0
 
+# Per-source flood guard. The client caps what it accepts (100 dgrams/s), but a
+# relay that accepts everything can be pointed at by anyone who knows the
+# address. Generous enough for a real client (20 snapshots/s per player, plus
+# HELLOs and pings) and low enough that a flood is cheap to drop.
+MAX_DGRAMS_PER_S = 300
+MAX_MEMBERS_PER_ROOM = 8        # the game's own player-slot count; docs/0.2.6-PLAN.md
+
 # A client this quiet is not "gone" yet, but it must not be relayed to for ever.
 T_HELLO = 1
 T_PING = 6
 T_PONG = 7
 T_BYE = 8
+
+
+def key_hash(text: str) -> int:
+    """The low 32 bits of FNV-1a, as rc_key_hash() in roam_core.h computes it.
+
+    Access control, not encryption: a short key can be brute-forced from a
+    captured hash. It keeps strangers who know the address out of a room.
+
+    An empty key is 0 -- "no key" -- matching the C side. Without that guard the
+    empty string hashes to the FNV basis (0x811c9dc5), which is a *key* the
+    relay would then demand, so an open relay and a client with no key would
+    disagree. tools/test_room_key.py checks this case.
+    """
+    if not text:
+        return 0
+    h = 0x811C9DC5
+    for b in text.encode("utf-8"):
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
 
 
 class Member:
@@ -90,11 +117,16 @@ class Member:
 
 
 class Relay:
-    def __init__(self, verbose: bool = False) -> None:
+    def __init__(self, verbose: bool = False, key: str = "") -> None:
         self.verbose = verbose
+        self.key = key_hash(key) if key else 0
         self.members: dict[int, Member] = {}
         self.relayed = 0
         self.dropped = 0
+        self.refused_key = 0
+        self.refused_full = 0
+        self.refused_flood = 0
+        self._flood: dict[tuple, list] = {}     # source -> [window_start, count]
 
     def say(self, text: str) -> None:
         print(f"[relay] {text}", flush=True)
@@ -112,8 +144,25 @@ class Relay:
     def room_of(self, room: int, except_id: int) -> list[Member]:
         return [m for m in self.members.values() if m.room == room and m.id != except_id]
 
+    def room_full(self, room: int, except_id: int) -> bool:
+        return len(self.room_of(room, except_id)) >= MAX_MEMBERS_PER_ROOM
+
+    def flooding(self, addr) -> bool:
+        """True when this source is over its datagram budget for the second."""
+        now = time.monotonic()
+        slot = self._flood.get(addr)
+        if slot is None or now - slot[0] >= 1.0:
+            self._flood[addr] = [now, 1]
+            return False
+        slot[1] += 1
+        return slot[1] > MAX_DGRAMS_PER_S
+
     def handle(self, data: bytes, addr) -> list[tuple[bytes, tuple]]:
         """One datagram in; the datagrams to send out (payload, address)."""
+        if self.flooding(addr):
+            self.refused_flood += 1
+            return []
+
         got = parse(data)
         if got is None:
             self.dropped += 1
@@ -143,8 +192,24 @@ class Relay:
             if hello is None:
                 self.dropped += 1
                 return []
-            _core_ver, _platform, _status, _port, _cfg_rev, room, name, _links = hello
+            (_core_ver, _platform, _status, _port, _cfg_rev, room, name,
+             _links, key) = hello
+
+            # The room key, when this relay has one. A client that does not send
+            # one is an older build: refused too, because an open door defeats
+            # the point of having a key.
+            if self.key and key != self.key:
+                self.refused_key += 1
+                if known is not None:
+                    self.members.pop(sender, None)
+                self.log(f"refused  {name or '?'} {sender:08x}: wrong room key")
+                return []
+
             if known is None:
+                if self.room_full(room, sender):
+                    self.refused_full += 1
+                    self.log(f"refused  {name or '?'} {sender:08x}: room {room} is full")
+                    return []
                 m = Member(sender, addr, room, name)
                 self.members[sender] = m
                 self.say(f"joined   {name or '?'} {sender:08x} {addr[0]}:{addr[1]}"
@@ -224,13 +289,23 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--bind", default="0.0.0.0", help="address to listen on")
     ap.add_argument("--port", type=int, default=47210, help="UDP port (the roam port)")
     ap.add_argument("--verbose", action="store_true", help="log every relayed datagram")
+    ap.add_argument("--key", default=os.environ.get("MC3_RELAY_KEY", ""),
+                    help="room key every client must send (or MC3_RELAY_KEY); "
+                         "empty: an open relay, for testing only")
     args = ap.parse_args(argv)
 
-    relay = Relay(args.verbose)
+    relay = Relay(args.verbose, args.key)
+    if relay.key:
+        relay.say("room key required: clients need the same MC3_ROAM_KEY")
+    else:
+        relay.say("NO ROOM KEY: anyone who knows this address and a room number can join.")
+        relay.say("set --key (or MC3_RELAY_KEY) before sharing the address")
     try:
         asyncio.run(serve(relay, args.bind, args.port))
     except KeyboardInterrupt:
         relay.say(f"stopped: {relay.relayed} datagrams relayed, {relay.dropped} dropped, "
+                  f"{relay.refused_key} wrong key, {relay.refused_full} full, "
+                  f"{relay.refused_flood} over rate, "
                   f"{len(relay.members)} player(s) still listed")
     return 0
 

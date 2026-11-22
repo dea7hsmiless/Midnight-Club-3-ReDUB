@@ -155,6 +155,15 @@ int roam_start(const char *name, uint32_t vip){
         }
     }
     c.room = g_room;
+    /* MC3_ROAM_KEY: the room key, if the server has one. Sent hashed in HELLO;
+     * the relay compares it and drops a room whose key differs. Set the same
+     * text on every player and in the server's --key. */
+    {
+        const char *k = getenv("MC3_ROAM_KEY");
+        c.key = (k && *k) ? rc_key_hash(k) : 0;
+        if (c.key)
+            fprintf(stderr, "[roam] room key set (%08x)\n", (unsigned)c.key);
+    }
     /* MC3_ROAM_RELAY=1: the server forwards between players, so two people
      * behind different NATs can meet without a port forward. The relay uses the
      * hub's address unless MC3_ROAM_RELAY_IP/PORT say otherwise. */

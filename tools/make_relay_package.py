@@ -56,7 +56,8 @@ No dependencies. No install. Python 3.8 or newer (standard library only).
 **Linux / macOS**
 
 ```sh
-bash start.sh
+bash start.sh                                   # open room - testing only
+MC3_RELAY_KEY='some-long-key' bash start.sh     # keyed - what you want with other players
 ```
 
 Use `bash start.sh`, not `./start.sh`: a zip carries no Unix permission bits, so the script
@@ -65,9 +66,8 @@ prefer the shorter form, run `chmod +x start.sh` once.
 
 **Windows**
 
-Double-click `start.bat`, or:
-
 ```bat
+set MC3_RELAY_KEY=some-long-key
 start.bat
 ```
 
@@ -75,9 +75,21 @@ You should see:
 
 ```
 [relay] listening on 0.0.0.0:47210 (UDP), relaying by room
+[relay] room key required: clients need the same MC3_ROAM_KEY
 ```
 
 Leave it running. `bash start.sh 50000` uses another port.
+
+### The room key
+
+With a key, every client must set the same `MC3_ROAM_KEY`, or it is refused. Without one the
+room is **open to anyone** who knows the address and a room number.
+
+Pick something long and unguessable — 20+ random characters. It is sent hashed, so it cannot
+be read off the wire, but a short key can be brute-forced from the hash. It is access control,
+not encryption: it keeps strangers out of your room.
+
+Changing the key means every player changes theirs.
 
 ## 2. Open the port
 
@@ -161,15 +173,21 @@ something to advertise as a public service.
 """
 
 START_SH = """#!/usr/bin/env bash
-# Run the ReDUB relay. Port: first argument, or MC3_RELAY_PORT, or 47210.
+# Run the ReDUB relay.
+#   ./start.sh                     open room, testing only
+#   MC3_RELAY_KEY=... ./start.sh   keyed: every client needs the same MC3_ROAM_KEY
+# Port: first argument, or MC3_RELAY_PORT, or 47210.
 set -euo pipefail
 cd "$(dirname "$0")"
 PORT="${1:-${MC3_RELAY_PORT:-47210}}"
-exec python3 mc3relay.py --port "$PORT" "$@"
+exec python3 mc3relay.py --port "$PORT"
 """
 
 START_BAT = """@echo off
-rem Run the ReDUB relay. Port: first argument, or MC3_RELAY_PORT, or 47210.
+rem Run the ReDUB relay.
+rem   start.bat                  open room, testing only
+rem   set MC3_RELAY_KEY=... first, to require a key from every client
+rem Port: first argument, or MC3_RELAY_PORT, or 47210.
 setlocal
 cd /d "%~dp0"
 set "PORT=%~1"

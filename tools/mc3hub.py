@@ -130,7 +130,12 @@ def parse(data: bytes):
 
 
 def parse_hello(payload: bytes, flags: int):
-    """(core_ver, platform, status, port, cfg_rev, room, name, links) or None."""
+    """(core_ver, platform, status, port, cfg_rev, room, name, links, key) or None.
+
+    `key` is the optional room key (0 when absent). It is the last 4 bytes a
+    current client sends; see rc_key_hash() in roam_core.h. Anything after it
+    belongs to a newer core and is ignored.
+    """
     try:
         (core_ver, platform, status, port, cfg_rev, room) = struct.unpack_from("<HBBHHI", payload, 0)
         off = 12
@@ -152,7 +157,11 @@ def parse_hello(payload: bytes, flags: int):
                 off += 1 + clen
         if off < len(payload):
             links = payload[off]
-        return core_ver, platform, status, port, cfg_rev, room, name, links
+            off += 1
+        key = 0
+        if len(payload) - off >= 4:
+            key = struct.unpack_from("<I", payload, off)[0]
+        return core_ver, platform, status, port, cfg_rev, room, name, links, key
     except (IndexError, struct.error):
         return None
 
@@ -225,7 +234,7 @@ class Hub:
         hello = parse_hello(payload, flags)
         if hello is None:
             return None
-        core_ver, platform, status, port, cfg_rev, room, name, links = hello
+        core_ver, platform, status, port, cfg_rev, room, name, links, _key = hello
         ip = addr[0]
 
         known = self.players.get(sender)

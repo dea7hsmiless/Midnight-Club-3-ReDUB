@@ -206,6 +206,10 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
             if (!(m->h.flags & RC_HF_CREW) || m->u.hello.links > RC_MAX_PEERS) return -1;
             rc_put8(&w, 0); rc_put8(&w, m->u.hello.links);
         }
+        /* Last field, only when set: a peer that does not send it is an older
+         * build, and an open relay still accepts it. */
+        if (m->u.hello.has_key && m->u.hello.key)
+            rc_put32(&w, m->u.hello.key);
         break; }
     case RC_MSG_PEERS:
         if (m->u.peers.n > RC_LIST_MAX) return -1;
@@ -292,6 +296,12 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
             if (nc > 4) return RC_E_FIELD;
             r.n += 4 * nc < r.len - r.n ? 4 * nc : r.len - r.n;   /* crews: not used here */
             if (r.n < r.len) m->u.hello.links = (uint8_t)rc_get8(&r);
+            /* The optional room key is the next 4 bytes; anything after it is a
+             * newer core's addition and is ignored, as before. */
+            if (!r.err && r.len - r.n >= 4){
+                m->u.hello.key = rc_get32(&r);
+                m->u.hello.has_key = 1;
+            }
             r.n = r.len;                                          /* a newer core's additions */
         }
         break; }
@@ -652,6 +662,10 @@ static void fill_hello(rc_session *s, rc_msg *m, const rc_peer *to){
     hdr(s, m, RC_MSG_HELLO);
     m->h.flags = RC_HF_STATEX | RC_HF_CREW;
     if (!to){ m->h.flags |= RC_HF_ALL; m->u.hello.links = (uint8_t)s->conf.links; }
+    /* Our room key rides on every HELLO, to a peer as well as to the relay:
+     * the relay is what enforces it, and a peer can check it too. */
+    m->u.hello.key = s->conf.key;
+    m->u.hello.has_key = s->conf.key != 0;
     m->u.hello.core_ver = RC_CORE_VER; m->u.hello.platform = s->conf.platform; m->u.hello.status = s->status;
     m->u.hello.listen_port = s->conf.port; m->u.hello.cfg_rev = s->cfg_rev; m->u.hello.room = s->conf.room;
     memcpy(m->u.hello.name, s->conf.name, sizeof m->u.hello.name);
@@ -796,6 +810,15 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
     switch (m.h.type){
     case RC_MSG_HELLO: {
         if (m.u.hello.room != s->conf.room){ s->rx_room++; if (p->state == RC_PS_EST) drop_peer(s, i, "other room"); return; }
+        /* A room key, when we have one: a peer that sends a different one is
+         * in another room by intent, whatever its room number says. A peer
+         * that sends none is an older build; the relay is what enforces the
+         * key for those, so it is not refused here. */
+        if (s->conf.key && m.u.hello.has_key && m.u.hello.key != s->conf.key){
+            s->rx_policy++;
+            if (p->state == RC_PS_EST) drop_peer(s, i, "wrong key");
+            return;
+        }
         int first = !p->name[0];
         memcpy(p->name, m.u.hello.name, sizeof p->name);
         p->platform = m.u.hello.platform; p->status = m.u.hello.status; p->cfg_rev_seen = m.u.hello.cfg_rev;
