@@ -255,29 +255,34 @@ NTSTATUS __stdcall xbox_NtWaitForMultipleObjectsEx(
     BOOL bWaitAll;
     DWORD result;
 
-    /* MC3_MOVIE_WAIT_MS: cap an INFINITE multi-object wait.
+    /* Bound an INFINITE multi-object wait.
      *
      * Bink fetches a frame through sub_003ADBA0, which waits on two of its own
      * handles with an INFINITE timeout. If one never signals, that guest
      * thread is gone and nothing in the port can reach it -- a permanent
-     * freeze, observed while the intro movies play ("[WATCHDOG] hang: no frame
-     * presented for 12s (frame 208)", stack through sub_003ADBA0 into
-     * NtWaitForMultipleObjectsEx). A frame-progress watchdog cannot help there:
-     * the guest is inside a host wait, so the port's wrappers are never called
-     * again.
+     * freeze, observed while the intro movies play and also with
+     * MC3_SKIP_MOVIES=hard (which skips playback, not Bink's setup):
+     * "[WATCHDOG] hang: no frame presented for 12s (frame 208)", stack through
+     * sub_003ADBA0 into NtWaitForMultipleObjectsEx. A frame-progress watchdog
+     * cannot help there: the guest is inside a host wait, so the port's
+     * wrappers are never called again.
      *
-     * Opt-in, because changing wait semantics is not free: a caller that
-     * treats WAIT_TIMEOUT as fatal would break. Off unless asked for, so the
-     * default build is unchanged. Set MC3_MOVIE_WAIT_MS=2000 to test whether
-     * bounding it recovers a hang. */
+     * Default 2 s. A wait that legitimately completes does so long before
+     * that (a normal boot crosses this three times with no delay), and a wait
+     * that cannot complete now returns WAIT_TIMEOUT so the caller's own loop
+     * decides what to do, instead of the process stopping for ever.
+     * MC3_MOVIE_WAIT_MS=0 turns it off; a positive value sets the ceiling. */
     if (ms == INFINITE) {
         static long cap = -2;
         if (cap == -2) {
             const char *e = getenv("MC3_MOVIE_WAIT_MS");
-            cap = e && *e ? atol(e) : -1;
+            cap = e && *e ? atol(e) : 2000;
             if (cap > 0)
                 fprintf(stderr, "[SYNC] INFINITE %lu-object waits capped at %ld ms"
-                                " (MC3_MOVIE_WAIT_MS)\n", (unsigned long)Count, cap);
+                                " (MC3_MOVIE_WAIT_MS=0 disables)\n", (unsigned long)Count, cap);
+            else
+                fprintf(stderr, "[SYNC] INFINITE %lu-object waits uncapped"
+                                " (MC3_MOVIE_WAIT_MS=0)\n", (unsigned long)Count);
         }
         if (cap > 0) {
             static unsigned n;

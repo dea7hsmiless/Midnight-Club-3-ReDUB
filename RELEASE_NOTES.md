@@ -53,10 +53,12 @@ that contains one.
 ### Known issues
 
 - **Start-up time is intermittent on the machine used for testing.** Runs reached the title
-  in 11.4-11.6 s, while a few sat on a frozen frame for minutes. Two different freezes were
-  found: two in the GPU command walker (both fixed above) and one while Bink sets up a
-  movie, which is **not** fixed and is not avoided by skipping the movies. If you get one,
-  `work-remix/logs/latest.log` tells them apart: the walker ones log `[PB] decode abort` or
+  in 11.4-11.6 s, while a few sat on a frozen frame for minutes. Three separate freezes were
+  found and all three are addressed: two in the GPU command walker, and one where the movie
+  layer waited for ever on a thread that stopped signalling. The last is bounded now — an
+  infinite wait times out after 2 seconds so the game continues. `MC3_MOVIE_WAIT_MS=0` turns
+  that protection off if it ever causes trouble. If you still get a freeze,
+  `work-remix/logs/latest.log` says which one: the walker ones log `[PB] decode abort` or
   `[PB] bad target`.
 - The **0.2.4a report of "does not get past the first race" did not reproduce** here: a
   career race was completed at 60 FPS, past RESULTS and back into the cruise. If you can
