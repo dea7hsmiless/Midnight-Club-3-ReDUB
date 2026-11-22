@@ -443,10 +443,12 @@ static void roam_begin(uint32_t cfg)
     if (roam_fake())
         return;
     if (!roam_running()) {
-        const char *name = getenv("MC3_ROAM_NAME");
         rc_state st;
-        if (!name || !*name)
-            name = getenv("MC3_PLAYER_NAME");   /* the page's 'Your name' */
+        /* The name every other player sees, and the transport itself, come
+         * from roam_net.c: it reads MC3_ROAM_NAME / MC3_PLAYER_NAME the same
+         * way, and it is the one place that knows when the transport starts
+         * (here, at the cruise - not at boot, which cost minutes). */
+        extern void roam_net_start_now(void);
         /* The links asked of the hub (MC3_ROAM_K overrides): 32 at least, more
          * than the cars we show. The hub links a pair only while both are under
          * their K, so a phone's 7 (MC3_ROAM_CARS 7) left every player beyond its
@@ -454,7 +456,7 @@ static void roam_begin(uint32_t cfg)
          * both ways (2026-11-11, 10 players in a city); a linked peer we have
          * no car for still gets a live blip. */
         roam_set_k(roam_cars_total() > 32 ? roam_cars_total() : 32);
-        roam_start(name && *name ? name : "Player", 0);
+        roam_net_start_now();
         /* "Not placed yet" (the origin, status menus): the hub links only
          * players with a position, and ours used to come with the cruise's
          * first frame, ~3 s after its cars were built ("0 peers driving at

@@ -116,6 +116,8 @@ static void on_path(const char *p)
         __atomic_fetch_or(&s_seen, bit, __ATOMIC_RELAXED);
 }
 
+static const char *stamp(void);
+
 int mc3_autostart_on(void)
 {
     static int on = -1;
@@ -123,11 +125,12 @@ int mc3_autostart_on(void)
         const char *e = getenv("MC3_AUTOSTART");
         on = e && !strcasecmp(e, "cruise");
         if (e && *e && strcmp(e, "0") && !on)
-            fprintf(stderr, "[AUTOSTART] MC3_AUTOSTART=%s: unknown, only \"cruise\"\n", e);
+            fprintf(stderr, "[AUTOSTART] %s MC3_AUTOSTART=%s: unknown, only \"cruise\"\n",
+                    stamp(), e);
         if (on) {
             xbox_path_hook = on_path;
-            fprintf(stderr, "[AUTOSTART] pressing the way to Arcade, Cruise on pad 1"
-                    " (MC3_AUTOSTART); any input of yours stops it\n");
+            fprintf(stderr, "[AUTOSTART] %s pressing the way to Arcade, Cruise on pad 1"
+                    " (MC3_AUTOSTART); any input of yours stops it\n", stamp());
         }
     }
     return on;
@@ -138,6 +141,20 @@ static uint32_t s_stage_ms, s_press_ms, s_release_ms;
 static unsigned s_stage_frames, s_press_frames, s_release_frames;
 static int s_holding, s_presses, s_downs;
 
+/* Seconds since the walker started, as "123.4s ". Boot time is the thing
+ * people report and the thing this session kept misjudging, and a log that
+ * carries only the order of the stages cannot measure it. */
+static const char *stamp(void)
+{
+    static uint32_t t0;
+    static char buf[24];
+    uint32_t now = now_ms();
+    if (!t0)
+        t0 = now;
+    snprintf(buf, sizeof buf, "%6.1fs", (now - t0) / 1000.0);
+    return buf;
+}
+
 static void finish(const char *why)
 {
     if (s_holding)
@@ -145,7 +162,7 @@ static void finish(const char *why)
     s_holding = 0;
     s_stage = ST_DONE;
     xbox_path_hook = NULL;
-    fprintf(stderr, "[AUTOSTART] %s\n", why);
+    fprintf(stderr, "[AUTOSTART] %s %s\n", stamp(), why);
 }
 
 static void press(uint8_t digital, uint8_t analog, uint32_t now)
@@ -241,7 +258,7 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
         s_stage_frames = 0;
         s_presses = 0;
         s_downs = 0;
-        fprintf(stderr, "[AUTOSTART] %s\n", k_stage[to]);
+        fprintf(stderr, "[AUTOSTART] %s %s\n", stamp(), k_stage[to]);
     }
 
     switch (s_stage) {

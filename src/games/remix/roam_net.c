@@ -1,17 +1,35 @@
-/* roam_net.c -- MC3_ROAM=1: bring the free-roam transport up.
+/* roam_net.c -- MC3_ROAM=1: the free-roam transport, and when to start it.
  *
- * Only the transport for now: the game layer (the remote-car pool) is the
- * next piece. With no hub (MC3_ROAM_HUB=0, the default here) the core
- * discovers peers by broadcast and links up to 8 players -- a LAN of two or
- * more copies, or the same across a VPN with RECOMP_NET_PEERS.
+ * With no hub (MC3_ROAM_HUB=0, the default here) the core discovers peers by
+ * broadcast and links up to 8 players -- a LAN of two or more copies, or the
+ * same across a VPN with RECOMP_NET_PEERS.
  *
- * Off unless MC3_ROAM=1, so the default build is unchanged. */
+ * Off unless MC3_ROAM=1, so the default build is unchanged.
+ *
+ * WHEN. The transport starts on the first frame after boot, and that is
+ * where the start-up cost is. Measured on one install afterwards:
+ *
+ *   MC3_ROAM=0   51 s to the cruise
+ *   MC3_ROAM=1   a black window at 200 % CPU for 5+ minutes, no front end
+ *
+ * Ruled out: the hub (nothing bound to its port), the movies (the skip is
+ * honoured and the log says so), the disc, and RECOMP_NET_ADDR (MC3_ROAM=0
+ * with the same 127.0.0.1 booted in 51 s and never even resolved the address).
+ *
+ * Moving the start to the cruise was tried and does not work: roam_begin()
+ * (roam_game.c) is the only late starter and the Online path does not go
+ * through it, so the cruise came up with no transport at all. The early start
+ * stays. MC3_ROAM_EARLY=0 still asks for the late start, which is useful for
+ * measuring the boot cost but leaves the Online path without a session.
+ */
 
 #include "net/roam/roam_api.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+void roam_net_start_now(void);
 
 static void roam_net_boot(void)
 {
@@ -39,13 +57,17 @@ static void roam_net_boot(void)
         setenv("MC3_ROAM_HUB", "0", 0);
 #endif
     }
-    /* The name every other player sees, from the same sources roam_game.c
-     * uses: MC3_ROAM_NAME, then MC3_PLAYER_NAME. This used to pass "MC3"
-     * unconditionally, and because roam_begin() only starts a session when
-     * none is running, that placeholder won: every player in a city was
-     * called "MC3", in the player list and over their car. The transport has
-     * to be up early, so the name has to be chosen here. */
-    e = getenv("MC3_ROAM_NAME");
+    e = getenv("MC3_ROAM_EARLY");
+    if (e && e[0] == '0')
+        return;                         /* late start: only the native free roam reaches roam_begin */
+    roam_net_start_now();
+}
+
+/* The transport, now. Called from here with MC3_ROAM_EARLY=1, and from
+ * roam_begin() at the cruise, which is the normal path. */
+void roam_net_start_now(void)
+{
+    const char *e = getenv("MC3_ROAM_NAME");
     if (!e || !*e)
         e = getenv("MC3_PLAYER_NAME");
     if (roam_start(e && *e ? e : "Player", 0) != 0) {
