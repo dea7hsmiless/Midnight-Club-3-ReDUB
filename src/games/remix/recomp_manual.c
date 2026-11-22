@@ -2969,7 +2969,48 @@ void sub_00222F00(void)
 }
 
 extern void sub_0020B6F0_gen(void);
+/* The Online session (online_session.c is included near the end of this file,
+ * with the other free-roam sources): MC3_ONLINE_SESSION=1. */
+static void online_session_pass(void);
+static void online_leave(const char *why);
 static void unlock_all_pass(void);      /* unlock_all.c, included at the end */
+
+/* Leaving the session. Arcade, Career and Tokyo all end it: each of the three
+ * main-menu callbacks restores the career's state before the game changes mode,
+ * so a session can never leak its money or unlocks into a career save.
+ *
+ * These are added only when the override exists in the lift; LIFT_ONLY=1
+ * tools/regen.sh keeps them. */
+extern void sub_0018C530_gen(void);
+void sub_0018C530(void) { online_leave("Arcade"); sub_0018C530_gen(); }
+extern void sub_0018C560_gen(void);
+void sub_0018C560(void) { online_leave("Career"); sub_0018C560_gen(); }
+extern void sub_0018C580_gen(void);
+void sub_0018C580(void) { online_leave("Tokyo Challenge"); sub_0018C580_gen(); }
+
+/* ── Entering: the main menu's "Networking" item ──
+ *
+ * sub_0018C5A0 is CM_Networking: it opens the Xbox Live / System Link screen
+ * (FE -> sub_00154B30(0x1E)). In a session we first take the career's money,
+ * garage and unlock flags aside, then let the original screen open.
+ *
+ * Native builds deliberately keep the original screen: Free Roam is then picked
+ * there, and the cruise that loads runs inside the session. The upstream's
+ * "skip straight to the cruise" shortcut was browser-only because the browser
+ * had no way through that screen; our autostart already walks menus, so we do
+ * not need a second path that fakes the front end's state.
+ *
+ * With MC3_ONLINE_SESSION unset this is the untouched menu item. */
+extern void sub_0018C5A0_gen(void);
+void sub_0018C5A0(void)
+{
+    extern int online_session_wanted(void);
+    extern void online_enter(const char *why);
+    if (online_session_wanted())
+        online_enter("main menu Networking");
+    sub_0018C5A0_gen();
+}
+
 static void roam_net_boot(void);        /* roam_net.c, included at the end */
 static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
 void sub_0020B6F0(void)
@@ -3019,12 +3060,23 @@ void sub_0020B6F0(void)
         MEMF(0x004B2D58u) = 1.0f / 60.0f;
 #endif
     unlock_all_pass();      /* MC3_UNLOCK_ALL: before the game reads its flags */
+    online_session_pass();  /* MC3_ONLINE_SESSION: keep the session's money and unlocks */
     roam_net_boot();        /* MC3_ROAM=1: free-roam transport, once */
     roam_caps_pass();       /* MC3_ROAM=1: vehicle registry, once */
     sub_0020B6F0_gen();
     if (s_state_obj) {      /* states 2 and 3: a race or cruise (sub_0001EDB0) */
         extern void mc3_autostart_frame(int in_game, int downs_to_arcade);
-        mc3_autostart_frame(MEM32(s_state_obj + 4) == 2 || MEM32(s_state_obj + 4) == 3, 2);
+        extern int online_session_wanted(void);
+        /* MC3_ONLINE_SESSION: the main menu's fourth item is Networking (after
+         * Career, Tokyo Challenge, Arcade), so a session needs Down x3 instead
+         * of Arcade's Down x2. That is the whole reason this is a parameter.
+         *
+         * This must ask whether a session is WANTED, not whether one is on:
+         * the session only turns on when A is pressed on Networking, which is
+         * the press this count is steering towards. Asking online_session_on()
+         * here would always read 0 and send the player to Arcade instead. */
+        mc3_autostart_frame(MEM32(s_state_obj + 4) == 2 || MEM32(s_state_obj + 4) == 3,
+                            online_session_wanted() ? 3 : 2);
     }
     {
         static int time_trace = -1;
@@ -3861,6 +3913,9 @@ void sub_0028B4E0(void)
 
 /* Free roam: the transport (roam_net.c); the car pool comes next. */
 #include "roam_net.c"
+
+/* The Online session: money, garage and unlocks kept aside and put back. */
+#include "online_session.c"
 
 /* Free roam: the engine capacity it needs (roam_caps.c). */
 #include "roam_caps.c"
