@@ -235,8 +235,27 @@ static int pb_bad_target(uint32_t w, uint32_t at, uint32_t target, uint32_t put)
     }
     return 1;
 }
+
 static uint32_t s_get = 0xFFFFFFFFu, s_ret;
 static int      s_in_call;
+
+/* Drop the rest of the current batch and resume at the producer's position.
+ *
+ * Used wherever the walk has lost the command boundaries: a bad jump target,
+ * or a run of zero words. It must move s_get. An earlier version left it at
+ * the offending word ("s_get=at"), which made no progress at all: the next
+ * call read the same word, resynced to the same address, and looped. Observed
+ * as "[PB] bad target #4887500" -- 4.88 million resyncs to one address -- with
+ * the frame count frozen: a permanent hang, not a slow frame.
+ *
+ * PUT is the producer's write pointer and is always a boundary the producer
+ * will continue from, so skipping to it loses this batch and nothing else. */
+static void pb_drop_batch(uint32_t at, uint32_t put)
+{
+    pb_flow(at, 0xFFFFFFFFu, put);
+    nv2a_pb_note_desync();
+    s_get = put;
+}
 
 /* The title moved GET itself: XDK D3D resets the ring by writing DMA_PUT and
  * DMA_GET together (CDevice::KickOff's restart path). Walking on from the old
@@ -342,29 +361,21 @@ uint32_t nv2a_pb_scan(uint32_t put_phys)
                 unsigned i=(s_flow_n-1-k)%PB_HIST;
                 fprintf(stderr,"  [PB] abort flow %08X at %08X -> %08X\n",s_flow[i].w,s_flow[i].at,s_flow[i].to);
             }
-            /* Resynchronise, as the header above says and as a bad jump
-             * already does (pb_bad_target): the walk has lost the command
-             * boundaries and is reading parameter data as headers. Leaving
-             * s_get at the desync point was a permanent hang -- every later
-             * call saw the same GET, walked the same zeros until the word
-             * budget ran out, aborted again, and executed nothing in
-             * between. The fence the frame was waiting on was among the
-             * commands skipped, so the guest thread waited on it for ever.
-             *
-             * Snapping to PUT discards the rest of this batch, which is the
-             * same trade a bad jump makes: the frame is lost, the stream is
-             * not. PUT is the producer's position and is always a boundary
-             * the producer will continue from. */
-            pb_flow(at, 0xFFFFFFFFu, put);
-            nv2a_pb_note_desync();
-            s_get = put;
+            /* Resynchronise: the walk has lost the command boundaries and is
+             * reading parameter data as headers. Leaving s_get at the desync
+             * point was a permanent hang -- every later call saw the same
+             * GET, walked the same zeros until the word budget ran out,
+             * aborted again, and executed nothing in between. The fence the
+             * frame was waiting on was among the commands skipped, so the
+             * guest thread waited on it for ever. */
+            pb_drop_batch(at, put);
             break;
         }
         s_get = (s_get + 4) & PB_PHYS_MASK;
 
         if ((w & 0xE0000003u) == 0x20000000u) {         /* old-style jump */
             target = w & 0x1FFFFFFCu;
-            if (pb_bad_target(w, at, target, put)) { s_get=at; break; }
+            if (pb_bad_target(w, at, target, put)) { pb_drop_batch(at, put); break; }
             pb_flow(at, w, target);
             s_get = target;
             jumps++;
@@ -372,7 +383,7 @@ uint32_t nv2a_pb_scan(uint32_t put_phys)
         }
         if ((w & 3u) == 1u) {                            /* jump */
             target = w & 0xFFFFFFFCu;
-            if (pb_bad_target(w, at, target, put)) { s_get=at; break; }
+            if (pb_bad_target(w, at, target, put)) { pb_drop_batch(at, put); break; }
             pb_flow(at, w, target);
             s_get = target;
             jumps++;
@@ -380,7 +391,7 @@ uint32_t nv2a_pb_scan(uint32_t put_phys)
         }
         if ((w & 3u) == 2u) {                            /* call */
             target = w & 0xFFFFFFFCu;
-            if (pb_bad_target(w, at, target, put)) { s_get=at; break; }
+            if (pb_bad_target(w, at, target, put)) { pb_drop_batch(at, put); break; }
             s_ret = s_get;
             s_in_call = 1;
             pb_flow(at, w, target);

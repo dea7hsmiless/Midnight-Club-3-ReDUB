@@ -10,10 +10,14 @@ live viewports with their own cameras and HUDs.
 
 ### A freeze that needed a kill is fixed
 
-Some sessions froze on a single frame and had to be killed. Found and fixed: the GPU
-command stream could desynchronise, the port discarded the rest of that frame, and then
-waited for ever on a fence the discarded commands were supposed to raise. It now resyncs and
-drops one frame instead of the session.
+Some sessions froze on a single frame and had to be killed. The port's GPU command walker
+could lose track of the command stream and then refuse to move on: it re-read the same word
+every frame, thousands of times a second, executing nothing. In one run it logged
+**4.88 million resyncs to a single address** with the frame count frozen. The game was then
+waiting for a fence that the skipped commands were supposed to raise, and waited for ever.
+
+The walker now always moves forward when it loses the stream, and a fence that can no longer
+arrive is released: one frame is dropped instead of the session.
 
 ### Mods: unlock everything
 

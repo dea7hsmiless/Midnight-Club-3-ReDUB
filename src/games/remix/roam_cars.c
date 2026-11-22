@@ -54,8 +54,14 @@ static uint32_t s_cars_said;                    /* reasons already logged */
 enum { CARS_SAY_HEAP = 1, CARS_SAY_MAX = 2, CARS_SAY_POOL = 4, CARS_SAY_PHYS = 8, CARS_SAY_FAIL = 16,
        CARS_SAY_PAGEIN = 32, CARS_SAY_BIKE = 64 };
 
-/* Remote cars shown at most, slots included: MC3_ROAM_CARS, else by the window.
- * The page's in-game Settings change it live (mc3_live MC3_LIVE_CARS, -1 auto). */
+/* Remote cars shown at most, slots included: MC3_ROAM_CARS, else by the window
+ * (8 at 64 MB, 32 at 128 MB). The page's in-game Settings change it live
+ * (mc3_live MC3_LIVE_CARS, -1 auto).
+ *
+ * The 64 MB figure is what the heap actually supports, not what the protocol
+ * allows: ~741 KB per remote car and ~5.5 MB free after the cruise's own cars
+ * (measured 2026-11-22). Asking for 12 asked for cars the pool could not
+ * build; see the note in roam_caps.c. */
 static int roam_cars_total(void)
 {
     static int n = -1;
@@ -65,12 +71,12 @@ static int roam_cars_total(void)
         return s_roam_slots;
     if (n < 0) {
         const char *e = getenv("MC3_ROAM_CARS");
-        n = e && *e && strcmp(e, "auto") ? atoi(e) : XBOX_CONTIG_SIZE >= (128u << 20) ? 32 : 12;
+        n = e && *e && strcmp(e, "auto") ? atoi(e) : XBOX_CONTIG_SIZE >= (128u << 20) ? 32 : 8;
         n = n < ROAM_SLOTS ? ROAM_SLOTS : n > ROAM_K_MAX ? ROAM_K_MAX : n;
     }
     if (!l)
         return n;
-    v = l > 0 ? l : XBOX_CONTIG_SIZE >= (128u << 20) ? 32 : 12;
+    v = l > 0 ? l : XBOX_CONTIG_SIZE >= (128u << 20) ? 32 : 8;
     return v < ROAM_SLOTS ? ROAM_SLOTS : v > ROAM_K_MAX ? ROAM_K_MAX : v;
 }
 

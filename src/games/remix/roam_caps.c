@@ -41,15 +41,21 @@ static int caps_ram(uint32_t p, uint32_t n)
                                 (p >= 0x80000000u && p <= 0x84000000u - n));
 }
 
-/* Remote cars wanted, which sets the registry size: MC3_ROAM_CARS, else 12
- * with a 64 MB window and 32 with 128 MB (the same rule as the pool). */
+/* Remote cars wanted, which sets the registry size: MC3_ROAM_CARS, else 8
+ * with a 64 MB window and 32 with 128 MB (the same rule as the pool).
+ *
+ * 8, not 12, because 12 was never reachable: measured 2026-11-22 on a cruise,
+ * remote cars cost ~741 KB of heap each, and after the cruise's own cars only
+ * ~5.5 MB was free -- about 7 more cars. 12 therefore asked for cars the pool
+ * could not build, and the log showed a shortfall rather than a limit. 8 is
+ * the game's own player-slot count (RC_SLOTS) and the most the heap supports. */
 static unsigned roam_cars_wanted(void)
 {
     static unsigned n;
     if (!n) {
         const char *e = getenv("MC3_ROAM_CARS");
         unsigned v = e && *e && strcmp(e, "auto") ? (unsigned)atoi(e)
-                   : XBOX_CONTIG_SIZE >= (128u << 20) ? 32u : 12u;
+                   : XBOX_CONTIG_SIZE >= (128u << 20) ? 32u : 8u;
         n = v < RC_SLOTS ? RC_SLOTS : v > 64u ? 64u : v;
     }
     return n;
