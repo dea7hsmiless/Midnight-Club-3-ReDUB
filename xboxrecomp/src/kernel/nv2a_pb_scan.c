@@ -46,7 +46,6 @@ extern void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
 extern void nv2a_pb_exec_report(void);
 /* Declared in nv2a_backend.h; repeated here so this file stays standalone
  * for the survey-only build. */
-int nv2a_pb_release_lost_fence(uint32_t watermark);
 void nv2a_pb_note_desync(void);
 static int s_exec_enabled = -1;
 

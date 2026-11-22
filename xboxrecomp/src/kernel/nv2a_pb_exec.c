@@ -449,32 +449,11 @@ static uint32_t s_vtx_epoch;            /* Nv2aRawBatch.vtx_epoch */
 void nv2a_pb_set_semaphore_target(uint32_t guest_va) { s_sem_va = guest_va; }
 
 /* nv2a_pb_scan.c lost the command stream and discarded the rest of the
- * batch. Any semaphore release in that remainder will never execute, and
- * XDK D3D waits on it with no timeout -- a permanent hang, not a dropped
- * frame. Publish the watermark the walk had reached instead. See the
- * declaration in nv2a_backend.h for the failure this was taken from. */
-int nv2a_pb_release_lost_fence(uint32_t watermark)
-{
-    static unsigned n;
-    uint32_t have;
-    uint8_t *mem;
-
-    if (!s_sem_va || !watermark)
-        return 0;
-    mem = (uint8_t *)xbox_GetMemoryOffset();
-    have = *(volatile uint32_t *)(mem + s_sem_va);
-    /* Never move the guest's progress backwards: a release already
-     * published is further on than anything we are guessing at. */
-    if ((int32_t)(watermark - have) <= 0)
-        return 0;
-    *(volatile uint32_t *)(mem + s_sem_va) = watermark;
-    __atomic_store_n(&s_sem_last_release, watermark, __ATOMIC_RELEASE);
-    if (n++ < 8)
-        fprintf(stderr, "  [PB] desync: fence released to %08X (was %08X) so the "
-                        "wait ends; this frame's remaining commands are lost\n",
-                watermark, have);
-    return 1;
-}
+ * batch. The fence release that would have followed is gone, so the walk bumps
+ * s_desync_count instead; recomp_manual.c's fence wait sees it change and
+ * releases the target itself. One mechanism, in the layer that owns the fence
+ * (there used to be a second, nv2a_pb_release_lost_fence, which nothing called).
+ */
 
 /* Slot + 1 of each method in s_unhandled: this runs millions of times a
  * second, so no search. The report sorts s_unhandled and rebuilds it. */
