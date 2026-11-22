@@ -1643,11 +1643,19 @@ static int amb_owner_elect(void)
  * do is adopt its own walkers by proximity: nearest local creature to the
  * streamed position takes the pose and is frozen.
  *
- * The catch, found the hard way: parking a walker 30 km away puts it outside
- * the match radius, so it can never be adopted again. So this keeps a small
- * pool of walkers *at* their last known place and only parks the ones that
- * stay unmatched - which means matching has to run on positions we remember,
- * not on where the objects currently are.
+ * The catch, found the hard way: the obvious implementation parks a walker 30 km
+ * away, which puts it outside the match radius, so it can never be adopted
+ * again. Worse, `amb_creature_active()` refuses any creature whose frozen bit
+ * is set, so a parked walker is not even a *candidate*. That made the pass a
+ * one-way latch: the first frame that carried stream data parked all 50 local
+ * walkers, and every later frame reported "0 adopted of N streamed".
+ *
+ * So "park" now means **freeze in place**, not "teleport out of the world":
+ * the walker keeps its position (so proximity matching still finds it) and
+ * only stops being simulated. Every frame starts by clearing the freeze again,
+ * which makes each walker a candidate anew. Unmatched walkers are re-frozen
+ * after matching, so they stand still instead of idling through the scene, and
+ * nothing is ever moved or destroyed.
  *
  * Freezing uses the game's own switch: sub_00223ED0 tests bit 0x20 of +0x134
  * and returns before it touches +0xF4. So a frozen creature keeps the pose we
@@ -1658,16 +1666,27 @@ static int amb_owner_elect(void)
 #define AMB_PED_FROZEN 0x20u
 #define AMB_PED_ADOPT_MAX 32
 #define AMB_PED_MATCH_MAX 15.0f     /* metres: how far a local walker may be */
+#define AMB_PED_PARK_MAX  64
 
 typedef struct {
     uint32_t creature;
     float    home[3];    /* where it stood when we took it, for re-matching */
     float    p[3];       /* the pose we last wrote */
     int      live;
+    int      ours;       /* we wrote a streamed pose here at least once */
 } amb_ped_ghost;
 
 static amb_ped_ghost s_amb_ped[AMB_PED_ADOPT_MAX];
 static int s_amb_nped_ghost;
+
+/* Creatures we froze ourselves, so the thaw can be exact.
+ *
+ * The frozen bit is the title's own switch, and ~40 of the 50 census objects
+ * are prototypes with it already set. A blanket thaw would start simulating
+ * the game's own prototypes, so only pointers recorded here are ever cleared,
+ * and only creatures that were actually walking are ever recorded. */
+static uint32_t s_amb_park[AMB_PED_PARK_MAX];
+static int s_amb_npark;
 
 static void amb_ped_ghost_apply(void)
 {
@@ -1699,12 +1718,23 @@ static void amb_ped_ghost_apply(void)
     }
     memset(claimed, 0, sizeof claimed);
 
+    /* Thaw the walkers WE froze, and only those. See s_amb_park: the frozen
+     * bit belongs to the title, and clearing it on the game's own prototypes
+     * would start simulating them. */
+    for (i = 0; i < s_amb_npark; i++) {
+        uint32_t c = s_amb_park[i];
+        if (online_ram_n(c, 0x138u))
+            MEM8(c + 0x134u) = (uint8_t)(MEM8(c + 0x134u) & ~AMB_PED_FROZEN);
+    }
+    s_amb_npark = 0;
+
     /* Remember where each adopted walker stands, so it can be matched again
      * even after we have moved it to the streamed position. */
     for (i = 0; i < s_amb_nped_ghost; i++) {
         amb_ped_ghost *g = &s_amb_ped[i];
         if (!online_ram_n(g->creature, 0x138u)) {
             g->live = 0;
+            g->ours = 0;
             continue;
         }
         g->live = 1;
@@ -1768,36 +1798,46 @@ static void amb_ped_ghost_apply(void)
             if (s_amb_creature[k] == best->creature)
                 claimed[k & 63u] = 1;
         /* freeze first, so nothing overwrites the pose after us */
-        if (!(MEM8(best->creature + 0x134u) & AMB_PED_FROZEN))
+        if (!(MEM8(best->creature + 0x134u) & AMB_PED_FROZEN)) {
             MEM8(best->creature + 0x134u) = (uint8_t)(MEM8(best->creature + 0x134u) | AMB_PED_FROZEN);
+            if (s_amb_npark < AMB_PED_PARK_MAX)
+                s_amb_park[s_amb_npark++] = best->creature;
+        }
         MEMF(best->creature + AMB_CREATURE_POS) = e->p[0];
         MEMF(best->creature + AMB_CREATURE_POS + 4u) = e->p[1];
         MEMF(best->creature + AMB_CREATURE_POS + 8u) = e->p[2];
         memcpy(best->p, e->p, sizeof best->p);
+        best->ours = 1;
         adopted++;
     }
 
-    /* Walkers the owner never sent: freeze and put them away. Only ones we
-     * have never adopted, since an adopted one is ours to hold. */
+    /* Walkers the owner never sent: freeze them where they stand.
+     *
+     * They are NOT moved. Moving them is what made this a one-way latch: a
+     * walker 30 km away is outside AMB_PED_MATCH_MAX for ever, and a walker
+     * with the frozen bit set is refused by `amb_creature_active()`. Freezing
+     * in place keeps both the position (so the next frame can still match it)
+     * and the world looking right, and the thaw at the top of the next frame
+     * undoes it. A previously adopted walker that the owner no longer sends is
+     * thawed instead: it belongs to the local simulation again. */
     for (k = 0; k < s_amb_ncreature; k++) {
         uint32_t c = s_amb_creature[k];
-        int ours = 0, g;
+        int g;
         if (claimed[k & 63u])
             continue;
-        for (g = 0; g < s_amb_nped_ghost; g++)
-            if (s_amb_ped[g].creature == c && s_amb_ped[g].live)
-                ours = 1;
-        if (ours)
+        if (!online_ram_n(c, 0x138u))
             continue;
-        if (!online_ram_n(c, AMB_CREATURE_POS + 12u))
+        /* Never touch the title's own prototypes: they already carry the
+         * frozen bit, and they are parked at the 100,0,0 sentinel rather than
+         * standing in the world. Only a walker that is actually moving is
+         * ours to stop. */
+        if (MEM8(c + 0x134u) & AMB_PED_FROZEN)
             continue;
-        if (MEMF(c + AMB_CREATURE_POS) > 20000.0f || MEMF(c + AMB_CREATURE_POS) < -20000.0f)
-            continue;                       /* already parked */
-        if (!(MEM8(c + 0x134u) & AMB_PED_FROZEN))
-            MEM8(c + 0x134u) = (uint8_t)(MEM8(c + 0x134u) | AMB_PED_FROZEN);
-        MEMF(c + AMB_CREATURE_POS) = 30000.0f + 20.0f * (float)k;
-        MEMF(c + AMB_CREATURE_POS + 4u) = -500.0f;
-        MEMF(c + AMB_CREATURE_POS + 8u) = 0.0f;
+        if (!amb_creature_active(c))
+            continue;
+        MEM8(c + 0x134u) = (uint8_t)(MEM8(c + 0x134u) | AMB_PED_FROZEN);
+        if (s_amb_npark < AMB_PED_PARK_MAX)
+            s_amb_park[s_amb_npark++] = c;
     }
     s_amb_ped_adopted = (uint32_t)adopted;
 }
