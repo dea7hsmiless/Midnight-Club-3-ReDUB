@@ -1702,7 +1702,8 @@ static int s_amb_npark;
 static void amb_ped_ghost_apply(void)
 {
     int i, k, adopted = 0;
-    uint8_t claimed[AMB_CREATURE_MAX];
+    uint8_t claimed_c[AMB_CREATURE_MAX];      /* by census index */
+    uint8_t claimed_g[AMB_PED_ADOPT_MAX];     /* by ghost-pool index */
 
     if (s_amb_pedghost_on < 0) {
         const char *e = getenv("MC3_ROAM_AMBIENT_PEDGHOST");
@@ -1727,11 +1728,13 @@ static void amb_ped_ghost_apply(void)
                     s_amb_ncreature);
         return;
     }
-    memset(claimed, 0, sizeof claimed);
+    memset(claimed_c, 0, sizeof claimed_c);
+    memset(claimed_g, 0, sizeof claimed_g);
 
     /* Thaw the walkers WE froze, and only those. See s_amb_park: the frozen
      * bit belongs to the title, and clearing it on the game's own prototypes
-     * would start simulating them. */
+     * would start simulating them. Thawing first is also what makes the pass
+     * repeatable - a walker frozen by an earlier frame is a candidate again. */
     for (i = 0; i < s_amb_npark; i++) {
         uint32_t c = s_amb_park[i];
         if (online_ram_n(c, 0x138u))
@@ -1739,137 +1742,177 @@ static void amb_ped_ghost_apply(void)
     }
     s_amb_npark = 0;
 
-    /* Remember where each adopted walker stands, so it can be matched again
-     * even after we have moved it to the streamed position. */
-    for (i = 0; i < s_amb_nped_ghost; i++) {
+    /* Drop pool entries whose creature went away, and compact the pool.
+     *
+     * The pool used to only ever grow (`s_amb_nped_ghost++` with no -=), so a
+     * client that had adopted 32 different walkers over a session could never
+     * adopt another one, even after all of them despawned. Compacting keeps
+     * the pool proportional to what is actually adopted right now. */
+    for (i = 0, k = 0; i < s_amb_nped_ghost; i++) {
         amb_ped_ghost *g = &s_amb_ped[i];
         if (!online_ram_n(g->creature, 0x138u)) {
-            g->live = 0;
-            g->ours = 0;
-            continue;
+            continue;                       /* stale pointer: drop it */
         }
         g->live = 1;
+        if (i != k)
+            s_amb_ped[k] = *g;
+        k++;
     }
-    for (i = 0; i < s_amb_nped_ghost; i++)
-        if (s_amb_ped[i].live)
-            claimed[0] = claimed[0];        /* (indices below are creature slots) */
+    s_amb_nped_ghost = k;
 
-    /* Match each streamed pedestrian to the nearest walker we know of: an
-     * adopted one at its remembered home, or an unadopted one where it stands. */
-    for (i = 0; i < s_amb_rx_n; i++) {
-        amb_rx_ent *e = &s_amb_rx[i];
-        amb_ped_ghost *best = NULL;
-        uint32_t best_c = 0;
-        double bd = (double)AMB_PED_MATCH_MAX * AMB_PED_MATCH_MAX;
-        if (!e->used || e->kind != AMB_KIND_PED)
-            continue;
-        for (k = 0; k < s_amb_nped_ghost; k++) {
-            amb_ped_ghost *g = &s_amb_ped[k];
-            double dx, dy, dz, d;
-            if (!g->live)
+    /* Match nearest-first.
+     *
+     * The old loop walked the streamed list in arrival order, so a far entity
+     * could take the only walker near it before a nearer entity was looked at,
+     * and the two would swap poses. Sorting by distance-to-its-nearest-walker
+     * and claiming greedily is both closer to "the obvious pairing" and stable
+     * between frames.
+     *
+     * Ties fall back to streamed id, so the order is deterministic rather than
+     * dependent on which datagram arrived last. */
+    {
+        typedef struct { float d2; uint16_t id; int idx; } cand;
+        cand order[AMB_RX_MAX];
+        int ncand = 0;
+        for (i = 0; i < s_amb_rx_n && i < (int)AMB_RX_MAX; i++) {
+            amb_rx_ent *e = &s_amb_rx[i];
+            double best = 1e30;
+            if (!e->used || e->kind != AMB_KIND_PED)
                 continue;
-            dx = g->home[0] - e->p[0];
-            dy = g->home[1] - e->p[1];
-            dz = g->home[2] - e->p[2];
-            d = dx * dx + dy * dy + dz * dz;
-            if (d < bd) {
-                bd = d;
-                best = g;
-                best_c = g->creature;
-            }
-        }
-        for (k = 0; k < s_amb_ncreature; k++) {
-            uint32_t c = s_amb_creature[k];
-            double dx, dy, dz, d;
-            if (claimed[k & 63u] || !online_ram_n(c, AMB_CREATURE_POS + 12u))
-                continue;
-            if (!amb_creature_active(c))
-                continue;                   /* frozen already: not a candidate */
-            dx = MEMF(c + AMB_CREATURE_POS) - e->p[0];
-            dy = MEMF(c + AMB_CREATURE_POS + 4u) - e->p[1];
-            dz = MEMF(c + AMB_CREATURE_POS + 8u) - e->p[2];
-            d = dx * dx + dy * dy + dz * dz;
-            if (d < bd) {
-                bd = d;
-                best = NULL;
-                best_c = c;
-            }
-        }
-        if (!best && !best_c) {
-            /* Nothing within AMB_PED_MATCH_MAX. Record how far the closest
-             * live walker actually was, so "0 adopted" can be told apart from
-             * "no walkers exist": the old code reported both the same way and
-             * the difference is the whole diagnosis. */
-            double nd = 1e30;
             for (k = 0; k < s_amb_ncreature; k++) {
                 uint32_t c = s_amb_creature[k];
-                double dx, dy, dz;
+                double dx, dy, dz, d;
                 if (!online_ram_n(c, AMB_CREATURE_POS + 12u))
+                    continue;
+                if (!amb_creature_active(c))
                     continue;
                 dx = MEMF(c + AMB_CREATURE_POS) - e->p[0];
                 dy = MEMF(c + AMB_CREATURE_POS + 4u) - e->p[1];
                 dz = MEMF(c + AMB_CREATURE_POS + 8u) - e->p[2];
-                if (dx * dx + dy * dy + dz * dz < nd * nd)
-                    nd = sqrt(dx * dx + dy * dy + dz * dz);
+                d = dx * dx + dy * dy + dz * dz;
+                if (d < best) best = d;
             }
-            if (nd < s_amb_ped_near) {
-                s_amb_ped_near = nd;
-                s_amb_ped_near_at = roam_now();
+            /* Also consider the walkers we already drive, at their remembered
+             * home: they are frozen, so the scan above skipped them. */
+            for (k = 0; k < s_amb_nped_ghost; k++) {
+                amb_ped_ghost *g = &s_amb_ped[k];
+                double dx, dy, dz, d;
+                if (!g->live)
+                    continue;
+                dx = g->home[0] - e->p[0];
+                dy = g->home[1] - e->p[1];
+                dz = g->home[2] - e->p[2];
+                d = dx * dx + dy * dy + dz * dz;
+                if (d < best) best = d;
             }
-            continue;                       /* nothing near enough yet */
-        }        if (!best) {
-            if (s_amb_nped_ghost >= AMB_PED_ADOPT_MAX)
+            if (best > (double)AMB_PED_MATCH_MAX * AMB_PED_MATCH_MAX) {
+                if (best < 1e29 && best < s_amb_ped_near * s_amb_ped_near) {
+                    s_amb_ped_near = sqrt(best);
+                    s_amb_ped_near_at = roam_now();
+                }
+                continue;                   /* nothing near enough */
+            }
+            order[ncand].d2 = (float)best;
+            order[ncand].id = e->id;
+            order[ncand].idx = i;
+            ncand++;
+        }
+        /* insertion sort: ncand is at most AMB_RX_MAX, usually < 20 */
+        for (i = 1; i < ncand; i++) {
+            cand t = order[i];
+            int j = i - 1;
+            while (j >= 0 && (order[j].d2 > t.d2 ||
+                              (order[j].d2 == t.d2 && order[j].id > t.id))) {
+                order[j + 1] = order[j];
+                j--;
+            }
+            order[j + 1] = t;
+        }
+
+        for (i = 0; i < ncand; i++) {
+            amb_rx_ent *e = &s_amb_rx[order[i].idx];
+            amb_ped_ghost *best = NULL;
+            uint32_t best_c = 0;
+            double bd = (double)AMB_PED_MATCH_MAX * AMB_PED_MATCH_MAX;
+
+            /* An adopted walker keeps its assignment: match by remembered
+             * home first, so a walker does not jump between streamed entities
+             * from frame to frame. */
+            for (k = 0; k < s_amb_nped_ghost; k++) {
+                amb_ped_ghost *g = &s_amb_ped[k];
+                double dx, dy, dz, d;
+                if (!g->live || claimed_g[k])
+                    continue;
+                dx = g->home[0] - e->p[0];
+                dy = g->home[1] - e->p[1];
+                dz = g->home[2] - e->p[2];
+                d = dx * dx + dy * dy + dz * dz;
+                if (d < bd) {
+                    bd = d;
+                    best = g;
+                    best_c = g->creature;
+                }
+            }
+            for (k = 0; k < s_amb_ncreature; k++) {
+                uint32_t c = s_amb_creature[k];
+                double dx, dy, dz, d;
+                if (claimed_c[k & 63u] || !online_ram_n(c, AMB_CREATURE_POS + 12u))
+                    continue;
+                if (!amb_creature_active(c))
+                    continue;               /* frozen already: not a candidate */
+                dx = MEMF(c + AMB_CREATURE_POS) - e->p[0];
+                dy = MEMF(c + AMB_CREATURE_POS + 4u) - e->p[1];
+                dz = MEMF(c + AMB_CREATURE_POS + 8u) - e->p[2];
+                d = dx * dx + dy * dy + dz * dz;
+                if (d < bd) {
+                    bd = d;
+                    best = NULL;
+                    best_c = c;
+                }
+            }
+            if (!best && !best_c)
+                continue;                   /* nothing near enough */
+
+            /* Never let two streamed entities drive the same walker. */
+            if (best && claimed_g[best - s_amb_ped])
                 continue;
-            best = &s_amb_ped[s_amb_nped_ghost++];
-            best->creature = best_c;
-            memcpy(best->home, e->p, sizeof best->home);
-            best->live = 1;
+
+            if (!best) {
+                if (s_amb_nped_ghost >= AMB_PED_ADOPT_MAX)
+                    continue;
+                best = &s_amb_ped[s_amb_nped_ghost++];
+                best->creature = best_c;
+                memcpy(best->home, e->p, sizeof best->home);
+                best->live = 1;
+            }
+            claimed_g[best - s_amb_ped] = 1;
+            for (k = 0; k < s_amb_ncreature; k++)
+                if (s_amb_creature[k] == best->creature)
+                    claimed_c[k & 63u] = 1;
+            /* freeze first, so nothing overwrites the pose after us */
+            if (!(MEM8(best->creature + 0x134u) & AMB_PED_FROZEN)) {
+                MEM8(best->creature + 0x134u) = (uint8_t)(MEM8(best->creature + 0x134u) | AMB_PED_FROZEN);
+                if (s_amb_npark < AMB_PED_PARK_MAX)
+                    s_amb_park[s_amb_npark++] = best->creature;
+            }
+            MEMF(best->creature + AMB_CREATURE_POS) = e->p[0];
+            MEMF(best->creature + AMB_CREATURE_POS + 4u) = e->p[1];
+            MEMF(best->creature + AMB_CREATURE_POS + 8u) = e->p[2];
+            memcpy(best->p, e->p, sizeof best->p);
+            best->ours = 1;
+            adopted++;
         }
-        for (k = 0; k < s_amb_ncreature; k++)
-            if (s_amb_creature[k] == best->creature)
-                claimed[k & 63u] = 1;
-        /* freeze first, so nothing overwrites the pose after us */
-        if (!(MEM8(best->creature + 0x134u) & AMB_PED_FROZEN)) {
-            MEM8(best->creature + 0x134u) = (uint8_t)(MEM8(best->creature + 0x134u) | AMB_PED_FROZEN);
-            if (s_amb_npark < AMB_PED_PARK_MAX)
-                s_amb_park[s_amb_npark++] = best->creature;
-        }
-        MEMF(best->creature + AMB_CREATURE_POS) = e->p[0];
-        MEMF(best->creature + AMB_CREATURE_POS + 4u) = e->p[1];
-        MEMF(best->creature + AMB_CREATURE_POS + 8u) = e->p[2];
-        memcpy(best->p, e->p, sizeof best->p);
-        best->ours = 1;
-        adopted++;
     }
 
-    /* Walkers the owner never sent: freeze them where they stand.
+    /* DO NOT freeze walkers the owner never sent.
      *
-     * They are NOT moved. Moving them is what made this a one-way latch: a
-     * walker 30 km away is outside AMB_PED_MATCH_MAX for ever, and a walker
-     * with the frozen bit set is refused by `amb_creature_active()`. Freezing
-     * in place keeps both the position (so the next frame can still match it)
-     * and the world looking right, and the thaw at the top of the next frame
-     * undoes it. A previously adopted walker that the owner no longer sends is
-     * thawed instead: it belongs to the local simulation again. */
-    for (k = 0; k < s_amb_ncreature; k++) {
-        uint32_t c = s_amb_creature[k];
-        int g;
-        if (claimed[k & 63u])
-            continue;
-        if (!online_ram_n(c, 0x138u))
-            continue;
-        /* Never touch the title's own prototypes: they already carry the
-         * frozen bit, and they are parked at the 100,0,0 sentinel rather than
-         * standing in the world. Only a walker that is actually moving is
-         * ours to stop. */
-        if (MEM8(c + 0x134u) & AMB_PED_FROZEN)
-            continue;
-        if (!amb_creature_active(c))
-            continue;
-        MEM8(c + 0x134u) = (uint8_t)(MEM8(c + 0x134u) | AMB_PED_FROZEN);
-        if (s_amb_npark < AMB_PED_PARK_MAX)
-            s_amb_park[s_amb_npark++] = c;
-    }
+     * The old park pass froze every unclaimed local walker, in place. That is
+     * what a "suppress" mode wants, but this is not that: with 13-25 active
+     * walkers in a city and only 2-6 near enough to match, it turned the whole
+     * local pedestrian population into statues standing in the street. Option A
+     * is "adjacent players see each other's pedestrians", not "the client's
+     * pedestrians stop moving", so unmatched walkers are simply left alone and
+     * keep walking under local simulation. */
     s_amb_ped_adopted = (uint32_t)adopted;
 }
 
