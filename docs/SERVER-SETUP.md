@@ -85,6 +85,9 @@ MC3_ROAM_NAME=<the player's name>
 
 - `MC3_ROAM_ROOM` must be **the same number on both clients**. Different numbers are
   different rooms and never see each other.
+- The room number is a **group**: the game also tags its room with the city it loads, and the
+  city is packed under your group. So two players who pick room 1 stay together at San Diego,
+  and a third in room 2 never appears — which is what you want.
 - `MC3_ROAM_NAME` is what the other player sees in the player list and over the car.
 - `MC3_ROAM_RELAY=1` is what turns on relay behaviour. Without it the client expects to reach
   each peer directly, which only works on a LAN.

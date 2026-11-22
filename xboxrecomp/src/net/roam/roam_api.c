@@ -19,6 +19,12 @@ static int64_t    g_last_eval;
 static float      g_me[3];
 static int        g_k = ROAM_K_DEFAULT;
 static uint32_t   g_room;
+/* MC3_ROAM_ROOM, shifted up: the game sets the room from the city it loads
+ * (roam_set_room(city)), so an explicit room is a *group* the city is packed
+ * into, not a value the game may overwrite. Without this, two players who
+ * picked room 1 were put into different rooms the moment one of them reached
+ * the cruise ("Big left: other room"). */
+static uint32_t   g_room_base;
 
 static int env_int(const char *k, int def, int lo, int hi){
     const char *v = getenv(k);
@@ -70,10 +76,14 @@ int roam_start(const char *name, uint32_t vip){
     }
     g_k = env_int("MC3_ROAM_K", g_k, 1, ROAM_K_MAX);
     c.links = g_k;
-    /* MC3_ROAM_ROOM: which room to join on the server (0 = the default room). */
+    /* MC3_ROAM_ROOM: which room to join on the server (0 = the default room).
+     * Kept as a group so the city the game later loads is packed under it. */
     {
         const char *r = getenv("MC3_ROAM_ROOM");
-        if (r && *r) g_room = (uint32_t)strtoul(r, NULL, 0);
+        if (r && *r) {
+            g_room_base = ((uint32_t)strtoul(r, NULL, 0) & 0xFFFFu) << 16;
+            g_room = g_room_base;
+        }
     }
     c.room = g_room;
     /* MC3_ROAM_RELAY=1: the server forwards between players, so two people
@@ -98,10 +108,10 @@ int roam_start(const char *name, uint32_t vip){
                             "MC3_ROAM_RELAY_PORT (or the hub's)\n");
             c.relay = 0;
         } else {
-            fprintf(stderr, "[roam] relay %u.%u.%u.%u:%u (room %u): datagrams go through it\n",
+            fprintf(stderr, "[roam] relay %u.%u.%u.%u:%u (group %u): datagrams go through it\n",
                     (unsigned)(c.relay_ip >> 24) & 0xFFu, (unsigned)(c.relay_ip >> 16) & 0xFFu,
                     (unsigned)(c.relay_ip >> 8) & 0xFFu, (unsigned)c.relay_ip & 0xFFu,
-                    (unsigned)c.relay_port, (unsigned)c.room);
+                    (unsigned)c.relay_port, (unsigned)(g_room_base >> 16));
         }
     }
     rc_io io = { 0, 0, 0, on_event };
@@ -119,6 +129,11 @@ void roam_stop(void){
 }
 int roam_running(void){ return g_on; }
 void roam_set_room(uint32_t room){
+    /* The game passes the city. With an explicit MC3_ROAM_ROOM the city is
+     * packed under it, so the group survives the cruise load and two players
+     * who chose the same group stay together whatever city each loads. */
+    if (g_room_base)
+        room = g_room_base | (room & 0xFFFFu);
     if (room == g_room) return;
     g_room = room;
     if (!g_on) return;
