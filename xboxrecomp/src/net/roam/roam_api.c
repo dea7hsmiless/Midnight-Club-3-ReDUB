@@ -70,7 +70,40 @@ int roam_start(const char *name, uint32_t vip){
     }
     g_k = env_int("MC3_ROAM_K", g_k, 1, ROAM_K_MAX);
     c.links = g_k;
+    /* MC3_ROAM_ROOM: which room to join on the server (0 = the default room). */
+    {
+        const char *r = getenv("MC3_ROAM_ROOM");
+        if (r && *r) g_room = (uint32_t)strtoul(r, NULL, 0);
+    }
     c.room = g_room;
+    /* MC3_ROAM_RELAY=1: the server forwards between players, so two people
+     * behind different NATs can meet without a port forward. The relay uses the
+     * hub's address unless MC3_ROAM_RELAY_IP/PORT say otherwise. */
+    if (env_int("MC3_ROAM_RELAY", 0, 0, 1)) {
+        const char *rip = getenv("MC3_ROAM_RELAY_IP");
+        c.relay = 1;
+        c.relay_ip = c.hub_ip;
+        c.relay_port = c.hub_port;
+        if (rip && *rip) {
+            unsigned a, b, cc, d;
+            if (sscanf(rip, "%u.%u.%u.%u", &a, &b, &cc, &d) == 4 &&
+                a < 256u && b < 256u && cc < 256u && d < 256u)
+                c.relay_ip = (a << 24) | (b << 16) | (cc << 8) | d;
+            else
+                fprintf(stderr, "[roam] MC3_ROAM_RELAY_IP=%s is not a dotted quad\n", rip);
+        }
+        c.relay_port = (uint16_t)env_int("MC3_ROAM_RELAY_PORT", c.relay_port, 1, 65535);
+        if (!c.relay_ip || !c.relay_port) {
+            fprintf(stderr, "[roam] relay asked for but no address: set MC3_ROAM_RELAY_IP/"
+                            "MC3_ROAM_RELAY_PORT (or the hub's)\n");
+            c.relay = 0;
+        } else {
+            fprintf(stderr, "[roam] relay %u.%u.%u.%u:%u (room %u): datagrams go through it\n",
+                    (unsigned)(c.relay_ip >> 24) & 0xFFu, (unsigned)(c.relay_ip >> 16) & 0xFFu,
+                    (unsigned)(c.relay_ip >> 8) & 0xFFu, (unsigned)c.relay_ip & 0xFFu,
+                    (unsigned)c.relay_port, (unsigned)c.room);
+        }
+    }
     rc_io io = { 0, 0, 0, on_event };
     rc_session_init(&g_s, &c, &io);
     if (roam_plat_start(&g_s, ROAM_PORT) != 0) return -1;

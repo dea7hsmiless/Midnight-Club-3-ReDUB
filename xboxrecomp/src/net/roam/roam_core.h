@@ -204,6 +204,13 @@ typedef struct {
     int      snap_states;          /* states per SNAP (1 .. RC_SNAP_STATES; 0 = all) */
     uint32_t hub_ip;  uint16_t hub_port;   /* the server's hub, or 0 */
     int      links;                /* the players the hub links us with (1 .. RC_MAX_PEERS) */
+    /* Relay mode: the server forwards our datagrams to the other players and
+     * theirs to us, so two players behind different NATs can meet without a
+     * port forward. Peers are then identified by the sender id in the header,
+     * not by source address -- every player's traffic arrives from the relay's
+     * one endpoint. */
+    int      relay;
+    uint32_t relay_ip;  uint16_t relay_port;
 } rc_config;
 
 enum { RC_PS_FREE = 0, RC_PS_CANDIDATE = 1, RC_PS_HEARD = 2, RC_PS_EST = 3 };

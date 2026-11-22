@@ -621,6 +621,14 @@ static int find(rc_session *s, uint32_t ip, uint16_t port){
     for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state != RC_PS_FREE && s->peer[i].ip == ip && s->peer[i].port == port) return i;
     return -1;
 }
+/* Relay mode: every player's traffic arrives from the relay's one endpoint, so
+ * the source address identifies the relay, not the player. The header's sender
+ * id is the only thing that distinguishes them. */
+static int find_id(rc_session *s, uint32_t id){
+    if (!id) return -1;
+    for (int i = 0; i < RC_TABLE; i++) if (s->peer[i].state != RC_PS_FREE && s->peer[i].id == id) return i;
+    return -1;
+}
 static void peer_clear(rc_peer *p, int keep_addr){
     uint32_t ip = p->ip; uint16_t port = p->port; int conf = p->configured; int64_t added = p->added_us;
     memset(p, 0, sizeof *p); rc_interp_reset(&p->mo);
@@ -703,7 +711,7 @@ static int rate_ok(rc_peer *p, int len, int64_t now){
 }
 void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, int len, int64_t now){
     s->rx++;
-    if (!rc_addr_private(ip)){
+    if (!s->conf.relay && !rc_addr_private(ip)){
         int k = find(s, ip, port);
         if (k < 0 || !s->peer[k].configured){ s->rx_policy++; return; }
     }
@@ -711,7 +719,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
     if (e == RC_E_VERSION){ s->rx_version++; return; }
     if (e){ s->rx_bad++; return; }
     if (m.h.sender == s->conf.self_id) return;                 /* our own beacon */
-    if (s->conf.hub_ip && ip == s->conf.hub_ip && port == s->conf.hub_port){
+    if (!s->conf.relay && s->conf.hub_ip && ip == s->conf.hub_ip && port == s->conf.hub_port){
         /* the players beyond our links: map markers only */
         if (m.h.type == RC_MSG_FAR){
             /* in parts (flags part | parts << 8; an older hub: 0, one part), the nearest (0) last: each kept at
@@ -751,13 +759,24 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
     }
     for (int k = 0; k < s->nbye; k++)
         if (s->bye[k].id == m.h.sender && now - s->bye[k].at < 3000000){ s->rx_after_bye++; return; }
-    int i = find(s, ip, port);
+    int i;
+    uint32_t pip = ip;
+    uint16_t pport = port;
+    if (s->conf.relay){
+        /* Everyone arrives from the relay: tell players apart by id, and send
+         * back through the relay rather than to the address we saw. */
+        i = find_id(s, m.h.sender);
+        pip = s->conf.relay_ip;
+        pport = s->conf.relay_port;
+    } else {
+        i = find(s, ip, port);
+    }
     if (i < 0){
         if (m.h.type != RC_MSG_HELLO) return;
-        if (hub_mode(s, now)){ s->rx_unlisted++; return; }        /* with a hub, only the players it lists */
+        if (!s->conf.relay && hub_mode(s, now)){ s->rx_unlisted++; return; }        /* with a hub, only the players it lists */
         if (m.u.hello.room != s->conf.room){ s->rx_room++; return; }
         if (id_elsewhere(s, m.h.sender, -1)){ s->rx_dup_id++; return; }
-        i = rc_add_peer(s, ip, port, 0, now);
+        i = rc_add_peer(s, pip, pport, s->conf.relay ? 1 : 0, now);
         if (i < 0) return;
     }
     rc_peer *p = &s->peer[i];
@@ -770,7 +789,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         note(s, RC_EV_RESTART, i, p->name, " restarted", "");
         int conf = p->configured;
         drop_peer(s, i, "restart");
-        p->state = RC_PS_CANDIDATE; p->configured = conf; p->ip = ip; p->port = port; p->added_us = now;
+        p->state = RC_PS_CANDIDATE; p->configured = conf; p->ip = pip; p->port = pport; p->added_us = now;
     }
     if (!p->id) p->id = m.h.sender;
     p->rx++; p->last_rx_us = now; p->lost = 0;
