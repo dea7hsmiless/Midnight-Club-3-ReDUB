@@ -75,7 +75,51 @@ Only the server needs this. Players need nothing.
 
 ## Client settings
 
-Put these in each player's `mcdub3remix_env.txt` (launcher → Settings writes the same keys):
+**One line** is the whole setup, in each player's `mcdub3remix_env.txt`:
+
+```
+MC3_ROAM_JOIN=<the server's public address or host name>
+```
+
+That is the same as `MC3_ROAM=1` plus `MC3_ROAM_HUB=1` plus `MC3_ROAM_RELAY=1` plus
+`MC3_ROAM_HUB_IP` set to that address. It exists because setting those by hand means
+three chances to leave one out, and a client missing one looks exactly like a server that is
+down. On Windows the file is created on first run from `mcdub3remix_env.example.txt`, so the
+line is the only thing to add.
+
+Then optionally:
+
+- `MC3_ROAM_ROOM=<n>` — which room. 0 is the default, and both players must use the same
+  number: different numbers are different rooms and never see each other.
+- `MC3_ROAM_NAME=<the player's name>` — what the other player sees in the player list and over
+  the car.
+- `MC3_ROAM_HUB_PORT=<port>` — only if the server is not on 47210.
+- `MC3_ROAM_RELAY=0` — turns the relay off for a setup the one line does not cover.
+  A named server implies the relay because a public address is the case it exists for.
+
+The room number is a **group**: the game also tags its room with the city it loads, and the
+city is packed under your group. So two players who pick room 1 stay together at San Diego,
+and a third in room 2 never appears — which is what you want.
+
+### Hiding the address in the file
+
+`MC3_ROAM_JOIN` (and `MC3_ROAM_HUB_IP`) also take an `rd1:` value — the same address
+encoded, so the settings file does not name the server in plain sight:
+
+```
+python tools/redub_addr.py encode 203.0.113.10
+MC3_ROAM_JOIN=rd1:...
+```
+
+This is obfuscation, not encryption. The client must decode it without a secret, so the file
+holds everything needed to reverse it, and the traffic is still plain UDP. It hides the
+address from a glance at the folder, a screenshot, or a shared config — not from anyone who
+reads it on purpose. The log masks the address too; `MC3_ROAM_SHOW_ADDR=1` prints it when you
+are trying to find a wrong one.
+
+### The individual keys
+
+They all still work, and an explicit value wins over what `MC3_ROAM_JOIN` implies:
 
 ```
 MC3_ROAM=1
@@ -87,27 +131,8 @@ MC3_ROAM_ROOM=1
 MC3_ROAM_NAME=<the player's name>
 ```
 
-- `MC3_ROAM_ROOM` must be **the same number on both clients**. Different numbers are
-  different rooms and never see each other.
-- The room number is a **group**: the game also tags its room with the city it loads, and the
-  city is packed under your group. So two players who pick room 1 stay together at San Diego,
-  and a third in room 2 never appears — which is what you want.
-- `MC3_ROAM_NAME` is what the other player sees in the player list and over the car.
-- `MC3_ROAM_RELAY=1` is what turns on relay behaviour. Without it the client expects to reach
-  each peer directly, which only works on a LAN.
-- `MC3_ROAM_HUB_IP` takes a dotted quad, a host name, or an `rd1:` value — the same address
-  encoded, so the settings file does not name the server in plain sight:
-
-  ```
-  python tools/redub_addr.py encode 203.0.113.10
-  rd1:...
-  ```
-
-  This is obfuscation, not encryption. The client must decode it without a secret, so the file
-  holds everything needed to reverse it, and the traffic is still plain UDP. It hides the
-  address from a glance at the folder, a screenshot, or a shared config — not from anyone who
-  reads it on purpose. The log masks the address too; `MC3_ROAM_SHOW_ADDR=1` prints it when you
-  are trying to find a wrong one.
+`MC3_ROAM=1` on its own means a LAN: copies on the same network find each other by broadcast,
+with no server at all.
 
 Then both players enter free roam the same way (Online → Free Roam). Each should log:
 

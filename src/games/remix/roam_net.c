@@ -35,11 +35,21 @@ static void roam_net_boot(void)
 {
     static int done;
     const char *e;
+    const char *join;
     if (done)
         return;
     done = 1;
+    /* MC3_ROAM_JOIN=<server> is one line that means "play online on this
+     * server": it implies MC3_ROAM=1, a hub, and the relay. Saying it seven
+     * ways in a settings file is what has been going wrong -- a missing
+     * MC3_ROAM_HUB=1 or MC3_ROAM_RELAY=1 looks exactly like a server that is
+     * down, and has cost a test run for each. The individual keys still work
+     * and still win where they disagree with each other. */
+    join = getenv("MC3_ROAM_JOIN");
+    if (!join || !*join)
+        join = NULL;
     e = getenv("MC3_ROAM");
-    if (!e || e[0] != '1')
+    if (!(e && e[0] == '1') && !join)
         return;
     /* No hub by default: broadcast discovery, up to 8 players, which is a LAN
      * mesh and exactly the nearest-K the design wants at that size.
@@ -51,10 +61,12 @@ static void roam_net_boot(void)
      * discovery. A default is a default; it must not outrank a setting. */
     e = getenv("MC3_ROAM_HUB");
     if (!e || !*e) {
+        /* A named server needs a hub; a LAN mesh does not. */
+        const char *dflt = join ? "1" : "0";
 #ifdef _WIN32
-        _putenv_s("MC3_ROAM_HUB", "0");
+        _putenv_s("MC3_ROAM_HUB", dflt);
 #else
-        setenv("MC3_ROAM_HUB", "0", 0);
+        setenv("MC3_ROAM_HUB", dflt, 0);
 #endif
     }
     e = getenv("MC3_ROAM_EARLY");

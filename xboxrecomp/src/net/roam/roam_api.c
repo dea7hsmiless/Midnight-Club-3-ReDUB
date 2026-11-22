@@ -129,7 +129,21 @@ static int server_address_given(void)
 {
     const char *h = getenv("MC3_ROAM_HUB_IP");
     const char *r = getenv("MC3_ROAM_RELAY_IP");
-    return (h && *h) || (r && *r);
+    const char *j = getenv("MC3_ROAM_JOIN");
+    return (h && *h) || (r && *r) || (j && *j);
+}
+
+/* MC3_ROAM_JOIN=<server>: one line meaning "play online on this server".
+ *
+ * It is the same request as MC3_ROAM_HUB_IP plus HUB=1 plus RELAY=1, and it
+ * exists because that is three chances to leave one out and get a client that
+ * looks exactly like a server that is down. A player who named a server has
+ * already said what they want, so this is read before any of those and the
+ * individual keys still win where they disagree with it on purpose. */
+static const char *join_addr(void)
+{
+    const char *j = getenv("MC3_ROAM_JOIN");
+    return (j && *j) ? j : NULL;
 }
 
 static void on_event(void *user, int ev, int peer, const char *text){
@@ -168,6 +182,8 @@ int roam_start(const char *name, uint32_t vip){
         const char *hip = getenv("MC3_ROAM_HUB_IP");
         c.hub_ip = ROAM_HUB_VIP;
         c.hub_port = ROAM_PORT;
+        if (!hip || !*hip)
+            hip = join_addr();           /* MC3_ROAM_JOIN is the same address */
         if (hip && *hip) {
             uint32_t ip = resolve_host(hip, "MC3_ROAM_HUB_IP");
             if (ip)
@@ -194,8 +210,13 @@ int roam_start(const char *name, uint32_t vip){
     c.room = g_room;
     /* MC3_ROAM_RELAY=1: the server forwards between players, so two people
      * behind different NATs can meet without a port forward. The relay uses the
-     * hub's address unless MC3_ROAM_RELAY_IP/PORT say otherwise. */
-    if (env_int("MC3_ROAM_RELAY", 0, 0, 1)) {
+     * hub's address unless MC3_ROAM_RELAY_IP/PORT say otherwise.
+     *
+     * MC3_ROAM_JOIN turns this on by itself: a named server on a public address
+     * is exactly the case a relay exists for, and the alternative -- a client
+     * that quietly tries to reach every peer directly -- is indistinguishable
+     * from a server that is down. An explicit MC3_ROAM_RELAY=0 still wins. */
+    if (env_int("MC3_ROAM_RELAY", join_addr() ? 1 : 0, 0, 1)) {
         const char *rip = getenv("MC3_ROAM_RELAY_IP");
         c.relay = 1;
         c.relay_ip = c.hub_ip;

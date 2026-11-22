@@ -267,6 +267,49 @@
 #RECOMP_NET_PORT_BASE=20000
 
 # ============================================================================
+# Free roam online, through a relay server
+# ============================================================================
+# One line is the whole setup:
+#
+#     MC3_ROAM_JOIN=<the server's address>
+#
+# It means MC3_ROAM=1, a hub, the relay, and that address -- the three keys
+# below that used to have to be set by hand, each one a chance to leave one out
+# and get "no free-roam hub answers", which looks exactly like a server that is
+# down. Both players use the same room and meet in free roam
+# (Online -> Free Roam).
+#
+#MC3_ROAM_JOIN=203.0.113.10
+
+# Which room to join. 0 is the default room; players in different rooms never
+# see each other.
+#MC3_ROAM_ROOM=0
+
+# What the other players see in the player list and over the car.
+#MC3_ROAM_NAME=
+
+# The port, if the server is not on the usual one.
+#MC3_ROAM_HUB_PORT=47210
+
+# The address may also be written encoded, so the file does not name the server
+# in plain sight: tools/redub_addr.py encode <address> prints the line. This is
+# obfuscation, not encryption -- the game must decode it with no secret, so
+# anyone who reads the file can too; it keeps the address out of a screenshot,
+# a stream, or a config pasted into a chat. The log masks it as well unless
+# MC3_ROAM_SHOW_ADDR=1.
+#MC3_ROAM_JOIN=rd1:...
+
+# The individual keys, for a setup the one line does not cover. MC3_ROAM=1 on
+# its own means a LAN: copies on the same network find each other by broadcast,
+# with no server at all.
+#MC3_ROAM=0
+#MC3_ROAM_HUB=0
+#MC3_ROAM_HUB_IP=
+#MC3_ROAM_RELAY=0
+#MC3_ROAM_RELAY_IP=
+#MC3_ROAM_RELAY_PORT=47210
+
+# ============================================================================
 # Required: set by the game itself, do not change
 # ============================================================================
 # RECOMP_VBLANK=1  RECOMP_FLIP_VBLANK=1  RECOMP_PB_EXEC=1  RECOMP_USB=1

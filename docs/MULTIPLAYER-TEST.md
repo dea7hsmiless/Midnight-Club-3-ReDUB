@@ -41,24 +41,21 @@ provider's firewall — the most common cause, and there are usually two firewal
 ## 2. Each player
 
 `mcdub3remix_env.txt` in the install folder (PC) or `/storage/emulated/0/mcdub3remix-nx/`
-(Android):
+(Android). **One line** is the whole online setup:
 
 ```
-MC3_ROAM=1
-MC3_ROAM_HUB=1
-MC3_ROAM_HUB_IP=<the server>
-MC3_ROAM_HUB_PORT=47210
-MC3_ROAM_RELAY=1
-MC3_ROAM_ROOM=7
-MC3_ROAM_NAME=<a name>
+MC3_ROAM_JOIN=<the server>
 ```
 
-Both players: **same room number**, and nothing else has to match.
+That is `MC3_ROAM=1`, a hub, the relay, and the address, in one key. On Windows the file is
+created on first run from the example beside the exe, so the line is all you add.
 
-`MC3_ROAM_HUB=1` is not optional on a build from before 2026-11-22. `roam_net.c` writes
-`MC3_ROAM_HUB=0` when it is unset, and a hub of 0 means LAN discovery, which does not reach a
-public address. Later builds treat a server address as a request to use one; older ones need
-the line.
+Optional: `MC3_ROAM_ROOM=<n>` (0 by default; **both players must use the same number**) and
+`MC3_ROAM_NAME=<a name>`.
+
+The seven-key form from earlier builds still works — see `docs/SERVER-SETUP.md` — but there is
+no reason to use it: the failure mode of leaving one out is a client that looks exactly like a
+server that is down.
 
 ## 3. What each side should log
 
@@ -94,7 +91,8 @@ name over it. Nothing else needs to be set up, and there is no lobby to join.
 | What you see | What it is |
 |---|---|
 | `[ROAM] transport did not start (port busy, or no network)` on Android | the APK predates `android.permission.INTERNET`; Android refused `socket()`. Install the 0.2.5 APK. |
-| No `[roam] relay …` line at all | `MC3_ROAM=1` or `MC3_ROAM_RELAY=1` missing, or the address did not resolve (the log says which). |
+| No `[roam] relay …` line at all | `MC3_ROAM_JOIN` missing or misspelled, or on an older build `MC3_ROAM=1` not set. The log says which if the address did not resolve. |
+| `[roam] hub 10.77.0.253:47210` | the address did not resolve and the compile-time fallback was used. The line above it says why. |
 | `no free-roam hub answers` | the packets are not arriving: firewall, wrong port, or the relay is not running. |
 | Both `joined`, no car | different room numbers, or the one player's game is in a different mode than free roam. |
 | Works on one machine, not across two | the client has `RECOMP_NET_ADDR=127.0.0.x` set. A loopback source cannot reach a public address; unset it. |
