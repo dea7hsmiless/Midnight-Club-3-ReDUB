@@ -77,6 +77,25 @@ static uint32_t resolve_host(const char *host, const char *what)
     fprintf(stderr, "[roam] %s=%s does not resolve: using the built-in address\n", what, host);
     return 0;
 }
+/* A server address implies wanting the server.
+ *
+ * roam_net.c defaults MC3_ROAM_HUB to 0 when it is unset (a LAN mesh needs no
+ * hub), so a player who set only MC3_ROAM_HUB_IP -- which is exactly what the
+ * setup guide says to do -- had the address read and then thrown away: the
+ * transport came up with no hub, no relay, and no line in the log saying why.
+ * It cost a test run to find. Setting either address is an unambiguous request
+ * to use one, so it wins over the default.
+ *
+ * Note this has to gate the block itself: the default is already in the
+ * environment by the time we get here, so "is the variable set" cannot tell a
+ * real MC3_ROAM_HUB=0 from the port's own default. */
+static int server_address_given(void)
+{
+    const char *h = getenv("MC3_ROAM_HUB_IP");
+    const char *r = getenv("MC3_ROAM_RELAY_IP");
+    return (h && *h) || (r && *r);
+}
+
 static void on_event(void *user, int ev, int peer, const char *text){
     (void)user; (void)ev; (void)peer;
     fprintf(stderr, "[roam] %s\n", text);
@@ -95,7 +114,15 @@ int roam_start(const char *name, uint32_t vip){
     c.max_players = 8;               /* without a hub; the hub's lists lift it */
     c.rate_hz = 20;
     c.snap_states = 1;               /* the WebSocket loses nothing (nfsu2-web: one state per SNAP) */
-    if (env_int("MC3_ROAM_HUB", 1, 0, 1)) {
+    /* A server address implies wanting the server.
+     *
+     * roam_net.c defaults MC3_ROAM_HUB to 0 when it is unset (a LAN mesh needs
+     * no hub), so a player who set only MC3_ROAM_HUB_IP -- which is exactly
+     * what the setup guide says to do -- had the address read and then thrown
+     * away: the transport came up with no hub, no relay, and no line in the
+     * log saying why. It cost a test run to find. Setting either address is an
+     * unambiguous request to use one, so it wins over the default. */
+    if (env_int("MC3_ROAM_HUB", 1, 0, 1) || server_address_given()) {
         /* The server's address, overridable so one can be run anywhere: without
          * this the only hub is the compile-time ROAM_HUB_VIP (10.77.0.253),
          * which means nobody can test a hub without assigning that address to

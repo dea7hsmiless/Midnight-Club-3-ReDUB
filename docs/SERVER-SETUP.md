@@ -76,7 +76,7 @@ Put these in each player's `mcdub3remix_env.txt` (launcher → Settings writes t
 ```
 MC3_ROAM=1
 MC3_ROAM_HUB=1
-MC3_ROAM_HUB_IP=<the server's public address>
+MC3_ROAM_HUB_IP=<the server's public address or host name>
 MC3_ROAM_HUB_PORT=47210
 MC3_ROAM_RELAY=1
 MC3_ROAM_ROOM=1
