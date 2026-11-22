@@ -999,6 +999,11 @@ static void amb_ped_ghost_apply(void);
 /* pedestrian ghost state (defined with amb_ped_ghost_apply, logged earlier) */
 static uint32_t s_amb_ped_adopted;
 static int  s_amb_pedghost_on = -1;
+/* Match radius and the "how close did a walker actually get" diagnostic,
+ * needed by the reporter above their definitions further down. */
+#define AMB_PED_MATCH_MAX 15.0f     /* metres: how far a local walker may be */
+static double s_amb_ped_near = 1e9;  /* 1e9 = no walker seen this second */
+static double s_amb_ped_near_at;
 static void amb_ghost_takeover(void);
 static void amb_ghost_check(void);
 static void amb_model_walk(uint32_t o);
@@ -1181,9 +1186,16 @@ static void amb_net_log(void)
                     (unsigned)s_amb_ghost_parked, (unsigned)s_amb_ghost_live);
     }
     if (s_amb_pedghost_on == 1)
-        fprintf(stderr, "[AMBIENT] ped ghost: %u adopted of %u streamed, %d local walker(s)%s\n",
+        fprintf(stderr, "[AMBIENT] ped ghost: %u adopted of %u streamed, %d local walker(s), "
+                        "nearest walker to a streamed ped %s%s\n",
                 (unsigned)s_amb_ped_adopted, (unsigned)s_amb_rx_n, s_amb_ncreature,
+                s_amb_ped_near >= 1e8 ? "none found" : "measured",
                 s_amb_creature_scanned ? "" : " (census not run)");
+    if (s_amb_pedghost_on == 1 && s_amb_ped_near < 1e8)
+        fprintf(stderr, "[AMBIENT] ped ghost: nearest %.2f m at %.1f s ago (match radius %.1f m)\n",
+                s_amb_ped_near, roam_now() - s_amb_ped_near_at,
+                (double)AMB_PED_MATCH_MAX);
+    s_amb_ped_near = 1e9;
     s_amb_tx_msgs = s_amb_rx_msgs = s_amb_rx_ents = s_amb_rx_bad = 0;
     s_amb_tx_peers = 0;
 }
@@ -1665,7 +1677,6 @@ static int amb_owner_elect(void)
  */
 #define AMB_PED_FROZEN 0x20u
 #define AMB_PED_ADOPT_MAX 32
-#define AMB_PED_MATCH_MAX 15.0f     /* metres: how far a local walker may be */
 #define AMB_PED_PARK_MAX  64
 
 typedef struct {
@@ -1784,9 +1795,29 @@ static void amb_ped_ghost_apply(void)
                 best_c = c;
             }
         }
-        if (!best && !best_c)
+        if (!best && !best_c) {
+            /* Nothing within AMB_PED_MATCH_MAX. Record how far the closest
+             * live walker actually was, so "0 adopted" can be told apart from
+             * "no walkers exist": the old code reported both the same way and
+             * the difference is the whole diagnosis. */
+            double nd = 1e30;
+            for (k = 0; k < s_amb_ncreature; k++) {
+                uint32_t c = s_amb_creature[k];
+                double dx, dy, dz;
+                if (!online_ram_n(c, AMB_CREATURE_POS + 12u))
+                    continue;
+                dx = MEMF(c + AMB_CREATURE_POS) - e->p[0];
+                dy = MEMF(c + AMB_CREATURE_POS + 4u) - e->p[1];
+                dz = MEMF(c + AMB_CREATURE_POS + 8u) - e->p[2];
+                if (dx * dx + dy * dy + dz * dz < nd * nd)
+                    nd = sqrt(dx * dx + dy * dy + dz * dz);
+            }
+            if (nd < s_amb_ped_near) {
+                s_amb_ped_near = nd;
+                s_amb_ped_near_at = roam_now();
+            }
             continue;                       /* nothing near enough yet */
-        if (!best) {
+        }        if (!best) {
             if (s_amb_nped_ghost >= AMB_PED_ADOPT_MAX)
                 continue;
             best = &s_amb_ped[s_amb_nped_ghost++];
