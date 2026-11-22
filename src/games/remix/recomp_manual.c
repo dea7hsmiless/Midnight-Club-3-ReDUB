@@ -3011,6 +3011,52 @@ void sub_0018C5A0(void)
     sub_0018C5A0_gen();
 }
 
+/* ── Free Roam: the networking screen's first item ──
+ *
+ * sub_00180160 is the callback behind "Xbox Live". On a console that is a live
+ * service; here it is a dead end - pressing it opens "New Account", observed on
+ * screen. Free Roam therefore cannot be reached through the item as shipped.
+ *
+ * In a session this makes that item mean Free Roam instead, by doing exactly
+ * what Arcade's own item does (sub_0018C530_gen): [0x50F14C] = 0, copy the
+ * picked car into the settings, then Go(0x19), the Arcade setup screen. The
+ * cruise that loads from there is the one free roam expects, and the menu
+ * walker already knows that screen.
+ *
+ * Reusing Arcade's sequence rather than synthesising a cruise setup is the
+ * whole point: every one of those calls is the game's own, so nothing about
+ * the setup has to be reproduced by hand.
+ *
+ * Outside a session this is the untouched callback. */
+extern void sub_0013AB20(void);
+extern void sub_0013A590(void);
+extern void sub_00154B30(void);
+extern void sub_00180160_gen(void);
+extern void sub_0018C530_gen(void);
+void sub_00180160(void)
+{
+    extern int online_session_wanted(void);
+    extern void online_enter(const char *why);
+    if (!online_session_wanted()) {
+        sub_00180160_gen();
+        return;
+    }
+    online_enter("networking screen, Free Roam");
+    MEM32(0x0050F14Cu) = 0;
+    sub_0013AB20();
+    sub_0013A590();
+    {
+        uint32_t r[8] = { g_eax, g_ecx, g_edx, g_ebx, g_esp, g_ebp, g_esi, g_edi };
+        g_ecx = MEM32(0x0050F148u);
+        g_esp -= 4; MEM32(g_esp) = 0x19u;        /* the Arcade setup screen */
+        g_esp -= 4; MEM32(g_esp) = 0;            /* return address */
+        sub_00154B30();
+        g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3];
+        g_esp = r[4]; g_ebp = r[5]; g_esi = r[6]; g_edi = r[7];
+    }
+    fprintf(stderr, "[ONLINE] Free Roam: networking item -> Arcade's setup screen (0x19)"
+            " inside the session\n");
+}
 /* ── "Online" first in the main menu ──
  *
  * Networking is the main menu's fourth item, so a player has to press Down
