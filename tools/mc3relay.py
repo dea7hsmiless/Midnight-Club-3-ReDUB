@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import socket
 import struct
 import sys
@@ -78,25 +77,6 @@ T_PONG = 7
 T_BYE = 8
 
 
-def key_hash(text: str) -> int:
-    """The low 32 bits of FNV-1a, as rc_key_hash() in roam_core.h computes it.
-
-    Access control, not encryption: a short key can be brute-forced from a
-    captured hash. It keeps strangers who know the address out of a room.
-
-    An empty key is 0 -- "no key" -- matching the C side. Without that guard the
-    empty string hashes to the FNV basis (0x811c9dc5), which is a *key* the
-    relay would then demand, so an open relay and a client with no key would
-    disagree. tools/test_room_key.py checks this case.
-    """
-    if not text:
-        return 0
-    h = 0x811C9DC5
-    for b in text.encode("utf-8"):
-        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
-    return h
-
-
 class Member:
     __slots__ = ("id", "addr", "room", "name", "last_seen", "rx", "tx")
 
@@ -117,13 +97,11 @@ class Member:
 
 
 class Relay:
-    def __init__(self, verbose: bool = False, key: str = "") -> None:
+    def __init__(self, verbose: bool = False) -> None:
         self.verbose = verbose
-        self.key = key_hash(key) if key else 0
         self.members: dict[int, Member] = {}
         self.relayed = 0
         self.dropped = 0
-        self.refused_key = 0
         self.refused_full = 0
         self.refused_flood = 0
         self._flood: dict[tuple, list] = {}     # source -> [window_start, count]
@@ -193,22 +171,16 @@ class Relay:
                 self.dropped += 1
                 return []
             (_core_ver, _platform, _status, _port, _cfg_rev, room, name,
-             _links, key) = hello
-
-            # The room key, when this relay has one. A client that does not send
-            # one is an older build: refused too, because an open door defeats
-            # the point of having a key.
-            if self.key and key != self.key:
-                self.refused_key += 1
-                if known is not None:
-                    self.members.pop(sender, None)
-                self.log(f"refused  {name or '?'} {sender:08x}: wrong room key")
-                return []
+             _links) = hello
 
             if known is None:
                 if self.room_full(room, sender):
                     self.refused_full += 1
-                    self.log(f"refused  {name or '?'} {sender:08x}: room {room} is full")
+                    # Heard by whoever runs the server, not only under --verbose:
+                    # a refusal nobody can see is indistinguishable from a server
+                    # that is down, and that costs an evening to diagnose.
+                    self.say(f"refused  {name or '?'} {sender:08x} {addr[0]}:{addr[1]}"
+                             f": room {room} is full ({MAX_MEMBERS_PER_ROOM} here)")
                     return []
                 m = Member(sender, addr, room, name)
                 self.members[sender] = m
@@ -289,22 +261,14 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--bind", default="0.0.0.0", help="address to listen on")
     ap.add_argument("--port", type=int, default=47210, help="UDP port (the roam port)")
     ap.add_argument("--verbose", action="store_true", help="log every relayed datagram")
-    ap.add_argument("--key", default=os.environ.get("MC3_RELAY_KEY", ""),
-                    help="room key every client must send (or MC3_RELAY_KEY); "
-                         "empty: an open relay, for testing only")
     args = ap.parse_args(argv)
 
-    relay = Relay(args.verbose, args.key)
-    if relay.key:
-        relay.say("room key required: clients need the same MC3_ROAM_KEY")
-    else:
-        relay.say("NO ROOM KEY: anyone who knows this address and a room number can join.")
-        relay.say("set --key (or MC3_RELAY_KEY) before sharing the address")
+    relay = Relay(args.verbose)
     try:
         asyncio.run(serve(relay, args.bind, args.port))
     except KeyboardInterrupt:
         relay.say(f"stopped: {relay.relayed} datagrams relayed, {relay.dropped} dropped, "
-                  f"{relay.refused_key} wrong key, {relay.refused_full} full, "
+                  f"{relay.refused_full} refused (room full), "
                   f"{relay.refused_flood} over rate, "
                   f"{len(relay.members)} player(s) still listed")
     return 0

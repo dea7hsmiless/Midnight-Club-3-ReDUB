@@ -118,30 +118,13 @@ void     rc_name_clean(char *dst, const char *src, uint32_t srclen);
 void rc_state_put(rc_w *w, const rc_state *s, int ext);
 int  rc_state_get(rc_r *r, rc_state *s, int ext);
 
-/* A room key, as the wire carries it: the low 32 bits of FNV-1a over the key
- * text. Not a secret in transit (a key can be brute-forced from a captured
- * hash if it is short and weak), so it is access control, not encryption:
- * it keeps strangers who know the address out of a room, and that is all it
- * claims. Compare with the relay's own hash; see tools/mc3relay.py. */
-static inline uint32_t rc_key_hash(const char *text)
-{
-    uint32_t h = 0x811C9DC5u;
-    if (!text || !*text) return 0;          /* empty means "no key", not the FNV basis */
-    for (; *text; text++){ h ^= (uint8_t)*text; h *= 0x01000193u; }
-    return h;
-}
-
 typedef struct { uint8_t ver, type; uint16_t len; uint32_t sender; uint16_t seq, flags; } rc_hdr;
 typedef struct {
     rc_hdr h;
     union {
         struct { uint16_t core_ver; uint8_t platform, status; uint16_t listen_port, cfg_rev;
                  uint32_t room; char name[RC_NAME_MAX + 1]; uint8_t n_seen; uint32_t seen[RC_MAX_PEERS];
-                 uint8_t links;
-                 /* A room key, hashed, after the links. Optional and last: a
-                  * peer that does not send it is simply not checked, so an old
-                  * build still joins an open relay. See rc_key_hash(). */
-                 uint32_t key; int has_key; } hello;
+                 uint8_t links; } hello;
         struct { uint8_t n; struct { uint32_t ip; uint16_t port; uint32_t id; } e[RC_LIST_MAX]; } peers;
         struct { uint8_t status, epoch; uint16_t cfg_rev; uint8_t n, clock; rc_state s[RC_SNAP_STATES]; } snap;
         struct { uint16_t cfg_rev; uint8_t frag, nfrag; uint16_t total, dlen; const uint8_t *data; } cfg;
@@ -228,10 +211,6 @@ typedef struct {
      * one endpoint. */
     int      relay;
     uint32_t relay_ip;  uint16_t relay_port;
-    /* A room key carried in HELLO (hashed), so a relay can keep strangers out
-     * of a room without any new message. 0: none, and the relay must be open
-     * for us to be let in. */
-    uint32_t key;
 } rc_config;
 
 enum { RC_PS_FREE = 0, RC_PS_CANDIDATE = 1, RC_PS_HEARD = 2, RC_PS_EST = 3 };

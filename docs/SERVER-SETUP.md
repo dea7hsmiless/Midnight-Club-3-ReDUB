@@ -39,19 +39,19 @@ player needs a port forward or a public address — only the server does.
 
 ```sh
 cd source
-MC3_RELAY_KEY='your-key-here' python3 tools/mc3relay.py --port 47210
+python3 tools/mc3relay.py --port 47210
 ```
 
 **Windows:**
 
 ```bat
 cd source
-set MC3_RELAY_KEY=your-key-here
 python tools\mc3relay.py --port 47210
 ```
 
-Leave out the key only while testing alone — without it the room is open to anyone who
-knows the address and a room number.
+No key: a room is its number, and the relay passes whoever asks for it. A key of your own
+is available with `--key` if you ever want one, but it is not required and not part of a
+normal setup.
 
 You should see:
 
@@ -84,12 +84,9 @@ MC3_ROAM_HUB_IP=<the server's public address or host name>
 MC3_ROAM_HUB_PORT=47210
 MC3_ROAM_RELAY=1
 MC3_ROAM_ROOM=1
-MC3_ROAM_KEY=<the room key you set on the server>
 MC3_ROAM_NAME=<the player's name>
 ```
 
-- `MC3_ROAM_KEY` must match the server's `--key` exactly. It is sent hashed, so a wrong key
-  is refused rather than joining the room; without it, a keyed server refuses the player.
 - `MC3_ROAM_ROOM` must be **the same number on both clients**. Different numbers are
   different rooms and never see each other.
 - The room number is a **group**: the game also tags its room with the city it loads, and the
