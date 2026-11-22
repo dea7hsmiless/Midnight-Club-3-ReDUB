@@ -53,11 +53,11 @@ that contains one.
 ### Known issues
 
 - **Start-up time is intermittent on the machine used for testing.** Runs reached the title
-  in 11.4-11.6 s, while a few sat on a frozen frame for minutes and did not reproduce
-  reliably. Two different intermittent freezes were seen: one in the GPU command stream
-  (fixed above) and one while the intro movies play, which is **not** fixed. If you get one,
-  `work-remix/logs/latest.log` will tell them apart, and `MC3_SKIP_MOVIES=hard` avoids the
-  movie one.
+  in 11.4-11.6 s, while a few sat on a frozen frame for minutes. Two different freezes were
+  found: two in the GPU command walker (both fixed above) and one while Bink sets up a
+  movie, which is **not** fixed and is not avoided by skipping the movies. If you get one,
+  `work-remix/logs/latest.log` tells them apart: the walker ones log `[PB] decode abort` or
+  `[PB] bad target`.
 - The **0.2.4a report of "does not get past the first race" did not reproduce** here: a
   career race was completed at 60 FPS, past RESULTS and back into the cruise. If you can
   reproduce it, please say which platform and package you used and attach
