@@ -1,5 +1,75 @@
 # Release notes
 
+## v0.2.5 - 2026-11-21
+
+### Free roam (experimental, off by default)
+
+`MC3_ROAM=1` starts the free-roam transport: traffic, pedestrians and other players'
+cars are shared between copies of the game on the same network. Nothing changes for anyone
+who does not set it.
+
+- **Two players work.** Two copies, both started through Online, in the same city, each
+  with the other's car built and simulated (the game's own `drawn` and `phys` flags), and a
+  map blip for the other player. Observed on both sides: `1 peers, 1 cars`.
+- **Names are exchanged**, so the player list and the car records use the player's name
+  (`MC3_ROAM_NAME`), not a placeholder.
+- **Traffic sync.** The owner streams the ambient cars it can see and the other copy builds
+  them as cars you can see. Measured: 22-24 messages/second, 110-120 entities, 0 bad
+  datagrams.
+- **Pedestrians sync between adjacent players only.** Walkers within about 15 m of a
+  streamed pedestrian adopt its pose (measured: 8.0 m and 14.2 m adopt, 45-71 m do not).
+  Beyond that distance each player sees their own city, deliberately.
+- **No server is needed.** Copies find each other by broadcast on the local network. A
+  small hub (`tools/mc3hub.py`, Python standard library only) is included for players who
+  want a roster across subnets; it is optional.
+
+**Not solid:** you drive through another player's car. There are no collisions.
+
+### Online session (experimental, off by default)
+
+`MC3_ONLINE_SESSION=1` turns the main menu's Networking item into an online session:
+
+- **Online moves to the first slot** of the main menu while it is enabled;
+- the garage holds **2,000,000** so cars and parts can be bought and tuned;
+- every car, part, rim, paint and performance level is unlocked;
+- **nothing is written to the memory card** while the session runs: the career's money,
+  garage and unlock flags are saved on entry and restored when you pick Career, Arcade or
+  Tokyo.
+
+**Free Roam works from that item.** Main menu -> Online -> Networking -> the Arcade setup
+screens -> a free-roam cruise, with traffic, pedestrians and the HUD. The networking screen
+does not ship a working Free Roam entry (its first item is "Xbox Live", which opens
+"New Account" on a build with no Live service), so that item runs Arcade's own cruise path
+instead. Nothing about the cruise setup is rebuilt by hand.
+
+### Stability and diagnostics
+
+- **Log growth fixed.** A single short cruise used to write **322 MB / 5.0 million lines**
+  because a diagnostic trace was armed by a runtime default. The same scene is now 0.5 MB,
+  and the trace needs `RECOMP_NV2A_TRACE`.
+- **Boot stages carry their timing.** The autostart log prints seconds next to each stage
+  (`[AUTOSTART] 11.4s title`), so start-up problems can be measured instead of guessed.
+
+### Known issues
+
+- **Remote cars are not solid** (see above).
+- **Pedestrian sync is limited to about 15 m.**
+- **Name tags over another player's car** were not observed on screen during testing (the
+  peer was behind the camera). Untested rather than known-broken.
+- **Start-up time was intermittent** on the test machine: three runs with free roam on
+  reached the title in 11.4-11.6 s, while two earlier runs sat on a black window for
+  minutes and did not reproduce. If you see it, the log now stamps every stage.
+- The **0.2.4a report of "does not get past the first race" did not reproduce** here: a
+  career race was completed at 60 FPS, past RESULTS and back into the cruise. If you can
+  reproduce it, please say which platform and package you used and attach
+  `work-remix/logs/latest.log`.
+
+### Packaging
+
+0.2.4a's Windows zip shipped a real player settings file, so a fresh extract inherited the
+machine's own settings. This build ships no settings file at all: the game creates one from
+the example on first run, and the release check refuses a package that contains one.
+
 ## v0.2.4 - 2026-11-18
 
 ### Frame rate

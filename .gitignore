@@ -27,6 +27,11 @@
 # Toolkit pipeline outputs, written inside the vendored tree.
 /xboxrecomp/tools/*/output/
 
+# Release artifacts: the zips and tarballs tools/release-check.sh inspects.
+# Built locally, published from GitHub Releases, never committed (81 MB of
+# packaged build tree is not a source file).
+/release/
+
 # Host clutter.
 .DS_Store
 __pycache__/
