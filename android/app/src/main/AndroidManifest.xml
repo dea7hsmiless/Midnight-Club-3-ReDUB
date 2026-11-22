@@ -9,6 +9,16 @@
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- The free-roam transport opens a UDP socket (net/roam/roam_plat.c).
+         Without INTERNET the platform refuses socket() outright, so free roam
+         "did not start" on Android while working everywhere else. This is the
+         permission every networked app must have; it grants nothing the
+         transport does not already use. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Broadcast discovery on a LAN: joining a Wi-Fi network is not enough for
+         Android to deliver broadcast/multicast datagrams to an app, and the
+         lock the framework wants (WifiManager.MulticastLock) needs this. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- a disc outside the app's folder (android_host.c); asked for only then -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
