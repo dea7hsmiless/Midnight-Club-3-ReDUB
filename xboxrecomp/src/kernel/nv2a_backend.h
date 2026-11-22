@@ -223,4 +223,23 @@ int nv2a_backend_decode_texture(const Nv2aTexture *tex, uint32_t *argb_out);
  * the semaphore context DMA object through RAMIN. */
 void nv2a_pb_set_semaphore_target(uint32_t guest_va);
 
+/* The highest release the executor has written. The fence-wait recovery in
+ * recomp_manual.c compares the guest's polling value against this to decide
+ * whether the GPU really ran past a fence or the stream was lost. */
+uint32_t nv2a_pb_last_fence_release(void);
+
+/* The pushbuffer walk lost the command stream and skipped the rest of the
+ * batch (see nv2a_pb_scan.c: a run of zero words, or a word budget).
+ *
+ * Any fence release that was in the discarded remainder is now never coming.
+ * XDK D3D waits on that value with no timeout, so the guest thread would
+ * wait for ever -- observed as a permanent freeze in the cruise
+ * ("[WATCHDOG] hang: no frame presented for 12s", stuck in
+ * bridge_KeWaitForSingleObject under sub_004165A0), with the executor
+ * reporting "fence event still pending ... lastRelease=<the previous
+ * frame>". This publishes the discarded watermark so the wait can end: the
+ * frame is lost, the process is not. Returns nonzero if a value was
+ * published. */
+int nv2a_pb_release_lost_fence(uint32_t watermark);
+
 #endif /* NV2A_BACKEND_H */

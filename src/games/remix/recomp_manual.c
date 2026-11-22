@@ -154,6 +154,31 @@ extern void recomp_set_spin_hook(void (*fn)(void));
 typedef int (*PortWaitRecheck)(uint32_t);
 extern PortWaitRecheck xbox_kernel_wait_recheck_set(PortWaitRecheck fn);
 extern uint32_t nv2a_pb_last_fence_release(void);
+extern uint32_t nv2a_pb_desync_count(void);
+
+/* Publish the fence target when the release that would have reached it was
+ * discarded with the rest of a lost batch. Same CAS discipline as the other
+ * fence paths: only ever move the value forward, and only from the value
+ * that was actually observed. */
+static uint32_t fence_cas(uint32_t va, uint32_t expect, uint32_t want);
+static void fence_release_lost(uint32_t target)
+{
+    uint32_t gpu;
+    if (!s_fence_sem_va)
+        return;
+    gpu = __atomic_load_n((uint32_t *)((uintptr_t)s_fence_sem_va + g_xbox_mem_offset),
+                          __ATOMIC_SEQ_CST);
+    if ((int32_t)(target - gpu) <= 0)
+        return;                                /* already there or past it */
+    fence_cas(s_fence_sem_va, gpu, target);
+}
+
+extern uint32_t nv2a_pb_desync_count(void);
+/* Set when a fence wait should give up because the stream was lost under it.
+ * The wait began before a desync and is short of its target: the executor
+ * discarded the batch that carried the release, so no timeout will ever
+ * arrive. Releasing to the target is the only way out, and it costs one
+ * frame's rendering rather than the session. */
 static int fence_event_recheck(uint32_t object)
 {
     uint32_t device=MEM32(0x422D78u);
@@ -162,9 +187,24 @@ static int fence_event_recheck(uint32_t object)
     if((int32_t)(gpu-t_fence_target)<0){
         static RECOMP_TLS uint32_t watched;
         static RECOMP_TLS uint64_t began,last;
+        static RECOMP_TLS uint32_t desync_at_start;
         struct timespec ts;clock_gettime(CLOCK_MONOTONIC,&ts);
         uint64_t now=(uint64_t)ts.tv_sec*1000u+ts.tv_nsec/1000000u;
-        if(watched!=t_fence_target){watched=t_fence_target;began=last=now;}
+        if(watched!=t_fence_target){watched=t_fence_target;began=last=now;
+            desync_at_start=nv2a_pb_desync_count();}
+        /* The pushbuffer walk lost the command stream since this wait began.
+         * The release it needs was in the part that was discarded, so the
+         * value being polled here will never change. Publish the target so
+         * the guest thread can run: this is a lost frame, not a lost game. */
+        if(nv2a_pb_desync_count()!=desync_at_start){
+            static int logged;
+            if(logged++<8)
+                fprintf(stderr,"[D3D] fence wait ended after the pushbuffer lost the stream: "
+                        "GPU=%08X target=%08X (released; the frame's remaining commands were lost)\n",
+                        gpu,t_fence_target);
+            fence_release_lost(t_fence_target);
+            return 1;
+        }
         if(now-began>=1000&&now-last>=2000){last=now;fprintf(stderr,"[D3D] fence event still pending: GPU=%08X target=%08X PUT=%08X GET=%08X lastRelease=%08X\n",gpu,t_fence_target,MEM32(0xFD800040u),MEM32(0xFD800044u),nv2a_pb_last_fence_release());}
         return 0;
     }

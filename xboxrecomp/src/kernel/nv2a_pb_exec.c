@@ -437,8 +437,44 @@ static float reg_f(uint32_t method) { float f; memcpy(&f, &s_reg[method / 4], 4)
 static uint32_t s_sem_va;
 static uint32_t s_sem_last_release;
 uint32_t nv2a_pb_last_fence_release(void) { return __atomic_load_n(&s_sem_last_release,__ATOMIC_ACQUIRE); }
+
+/* Bumped every time the walk loses the command stream. A fence wait that
+ * began before a desync and is still short of its target is waiting on a
+ * release the executor has just thrown away; it must not wait for ever. */
+static uint32_t s_desync_count;
+uint32_t nv2a_pb_desync_count(void) { return __atomic_load_n(&s_desync_count,__ATOMIC_ACQUIRE); }
+void nv2a_pb_note_desync(void) { __atomic_add_fetch(&s_desync_count,1,__ATOMIC_ACQ_REL); }
+
 static uint32_t s_vtx_epoch;            /* Nv2aRawBatch.vtx_epoch */
 void nv2a_pb_set_semaphore_target(uint32_t guest_va) { s_sem_va = guest_va; }
+
+/* nv2a_pb_scan.c lost the command stream and discarded the rest of the
+ * batch. Any semaphore release in that remainder will never execute, and
+ * XDK D3D waits on it with no timeout -- a permanent hang, not a dropped
+ * frame. Publish the watermark the walk had reached instead. See the
+ * declaration in nv2a_backend.h for the failure this was taken from. */
+int nv2a_pb_release_lost_fence(uint32_t watermark)
+{
+    static unsigned n;
+    uint32_t have;
+    uint8_t *mem;
+
+    if (!s_sem_va || !watermark)
+        return 0;
+    mem = (uint8_t *)xbox_GetMemoryOffset();
+    have = *(volatile uint32_t *)(mem + s_sem_va);
+    /* Never move the guest's progress backwards: a release already
+     * published is further on than anything we are guessing at. */
+    if ((int32_t)(watermark - have) <= 0)
+        return 0;
+    *(volatile uint32_t *)(mem + s_sem_va) = watermark;
+    __atomic_store_n(&s_sem_last_release, watermark, __ATOMIC_RELEASE);
+    if (n++ < 8)
+        fprintf(stderr, "  [PB] desync: fence released to %08X (was %08X) so the "
+                        "wait ends; this frame's remaining commands are lost\n",
+                watermark, have);
+    return 1;
+}
 
 /* Slot + 1 of each method in s_unhandled: this runs millions of times a
  * second, so no search. The report sorts s_unhandled and rebuilds it. */

@@ -25,6 +25,7 @@
 #include <stddef.h>   /* ptrdiff_t */
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 extern ptrdiff_t xbox_GetMemoryOffset(void);
 
@@ -43,6 +44,10 @@ static uint32_t s_tot_words, s_tot_unknown, s_tot_jumps, s_tot_segments;
  * the executor writes to guest memory. */
 extern void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param);
 extern void nv2a_pb_exec_report(void);
+/* Declared in nv2a_backend.h; repeated here so this file stays standalone
+ * for the survey-only build. */
+int nv2a_pb_release_lost_fence(uint32_t watermark);
+void nv2a_pb_note_desync(void);
 static int s_exec_enabled = -1;
 
 /* Slot + 1 of each (subchannel, method) in s_seen. note() runs for every
@@ -170,6 +175,24 @@ void nv2a_pb_scan_report(void)
  * nothing), GET snaps to PUT rather than wandering through guest RAM. */
 #define PB_PHYS_MASK 0x0FFFFFFCu
 #define PB_RAM_BYTES (64u * 1024u * 1024u)   /* XBOX_CONTIG_SIZE */
+/* How far one walk may go before it is declared lost.
+ *
+ * This was cut to 0x40000 (262 K words) on the theory that a long walk means
+ * a desync. Measured, that was wrong and cost a freeze: healthy walks reach
+ * the cap with zero_run=0, one of them covering only 772 bytes of ring while
+ * following jumps through the rest -- normal behaviour, not a desync. Cutting
+ * it turned those into aborts, the aborts discarded real commands, and the
+ * fence wait behind them hung.
+ *
+ * So it stays large. A desync does not need it anyway: the zero-run test
+ * below catches a real one in 256 words. This budget is only the backstop
+ * for a walk that is lost but never sees zeros. */
+#define PB_WORDS_MAX 0x400000u               /* 4.2 M words, 16 MB */
+/* Consecutive zero words that mean the walk is reading non-command data.
+ * A zero dword decodes as "one method, zero parameters": legal, but a real
+ * stream never issues hundreds of them in a row. This is the actual tell
+ * for the abort above -- it fires long before the word budget does. */
+#define PB_ZERO_RUN_MAX 256u
 
 /* A jump or call outside RAM means the walk is reading data as commands. */
 /* The last command headers decoded, so a desync can be traced back to the
@@ -229,7 +252,7 @@ uint32_t nv2a_pb_scan(uint32_t put_phys)
 {
     const uint8_t *mem = (const uint8_t *)xbox_GetMemoryOffset();
     uint32_t put = put_phys & PB_PHYS_MASK;
-    uint32_t words = 0, jumps = 0, unknown = 0;
+    uint32_t words = 0, jumps = 0, unknown = 0, zero_run = 0;
 
     if (s_exec_enabled < 0)
         s_exec_enabled = getenv("RECOMP_PB_EXEC") != NULL;
@@ -268,10 +291,49 @@ uint32_t nv2a_pb_scan(uint32_t put_phys)
         s_hist[s_hist_n % PB_HIST].w = w;
         s_hist_n++;
 
-        if (++words > 0x400000u || unknown > 64) {
+        /* A run of zero words is the desync signal that actually fires
+         * first. Zero decodes as a zero-count method header, so it counts
+         * as known and leaves `unknown` at 0 for ever -- which is why the
+         * budget below was the only thing that ever caught it, 16 MB too
+         * late. A real stream issues commands continuously. */
+        zero_run = w ? 0 : zero_run + 1;
+
+        /* Test hook: prove the desync recovery without waiting for an
+         * intermittent freeze. RECOMP_PB_DESYNC_AT_SEC=<n> forces one abort
+         * n seconds after the first walk, so it lands in gameplay rather
+         * than during boot (a walk-count trigger fires thousands of times
+         * before the front end, and one that early destroys the boot
+         * sequence). The fence path should then release and the game carry
+         * on with one frame lost. */
+        {
+            static int armed = -1;
+            static long secs;
+            static struct timespec t0;
+            static int done;
+            if (armed < 0) {
+                const char *e = getenv("RECOMP_PB_DESYNC_AT_SEC");
+                secs = e && *e ? atol(e) : -1;
+                armed = secs > 0;
+                if (armed)
+                    clock_gettime(CLOCK_MONOTONIC, &t0);
+            }
+            if (armed && !done) {
+                struct timespec tn;
+                clock_gettime(CLOCK_MONOTONIC, &tn);
+                if (tn.tv_sec - t0.tv_sec >= secs) {
+                    done = 1;
+                    fprintf(stderr, "  [PB] forcing a desync now "
+                                    "(RECOMP_PB_DESYNC_AT_SEC=%ld) to test the recovery, "
+                                    "PUT=%08X\n", secs, put);
+                    zero_run = PB_ZERO_RUN_MAX + 1;
+                }
+            }
+        }
+
+        if (++words > PB_WORDS_MAX || unknown > 64 || zero_run > PB_ZERO_RUN_MAX) {
             /* A silently discarded stream looks like an idle GPU with a
              * pending fence. Preserve the point and recent control flow. */
-            fprintf(stderr,"  [PB] decode abort: GET=%08X PUT=%08X word=%08X words=%u unknown=%u\n",at,put,w,words,unknown);
+            fprintf(stderr,"  [PB] decode abort: GET=%08X PUT=%08X word=%08X words=%u unknown=%u zero_run=%u\n",at,put,w,words,unknown,zero_run);
             for(unsigned k=0;k<PB_HIST&&k<s_hist_n;k++){
                 unsigned i=(s_hist_n-1-k)%PB_HIST;
                 fprintf(stderr,"  [PB] abort header %08X at %08X\n",s_hist[i].w,s_hist[i].at);
@@ -280,9 +342,22 @@ uint32_t nv2a_pb_scan(uint32_t put_phys)
                 unsigned i=(s_flow_n-1-k)%PB_HIST;
                 fprintf(stderr,"  [PB] abort flow %08X at %08X -> %08X\n",s_flow[i].w,s_flow[i].at,s_flow[i].to);
             }
-            /* Yield at the actual unexecuted header. Never report PUT as
-             * consumed after a bounded pass: the producer could reuse data
-             * whose fence and drawing methods have not executed. */
+            /* Resynchronise, as the header above says and as a bad jump
+             * already does (pb_bad_target): the walk has lost the command
+             * boundaries and is reading parameter data as headers. Leaving
+             * s_get at the desync point was a permanent hang -- every later
+             * call saw the same GET, walked the same zeros until the word
+             * budget ran out, aborted again, and executed nothing in
+             * between. The fence the frame was waiting on was among the
+             * commands skipped, so the guest thread waited on it for ever.
+             *
+             * Snapping to PUT discards the rest of this batch, which is the
+             * same trade a bad jump makes: the frame is lost, the stream is
+             * not. PUT is the producer's position and is always a boundary
+             * the producer will continue from. */
+            pb_flow(at, 0xFFFFFFFFu, put);
+            nv2a_pb_note_desync();
+            s_get = put;
             break;
         }
         s_get = (s_get + 4) & PB_PHYS_MASK;
