@@ -882,7 +882,7 @@ static void amb_tx_collect(void)
     for (i = 0; i < s_amb_ncreature && s_amb_ntx < AMB_TX_MAX; i++) {
         uint32_t c = s_amb_creature[i];
         if (!amb_creature_active(c))
-            continue;
+            continue;                       /* frozen or not placed */
         if (!online_ram_n(c, AMB_CREATURE_POS + 12u))
             continue;
         s_amb_tx[s_amb_ntx].id = (uint16_t)(c >> 4);
@@ -994,7 +994,12 @@ static void amb_rx_drain(void)
 
 /* Milestone 4/5's takeover, defined below (used by amb_net_frame). */
 static void amb_ghost_apply(void);
-static int  amb_owner_elect(void);static void amb_ghost_takeover(void);
+static int  amb_owner_elect(void);
+static void amb_ped_ghost_apply(void);
+/* pedestrian ghost state (defined with amb_ped_ghost_apply, logged earlier) */
+static uint32_t s_amb_ped_adopted;
+static int  s_amb_pedghost_on = -1;
+static void amb_ghost_takeover(void);
 static void amb_ghost_check(void);
 static void amb_model_walk(uint32_t o);
 static void dri_ambient_draw(void);
@@ -1175,6 +1180,10 @@ static void amb_net_log(void)
             fprintf(stderr, "[AMBIENT] suppress: %u of %u local car(s) parked out of sight\n",
                     (unsigned)s_amb_ghost_parked, (unsigned)s_amb_ghost_live);
     }
+    if (s_amb_pedghost_on == 1)
+        fprintf(stderr, "[AMBIENT] ped ghost: %u adopted of %u streamed, %d local walker(s)%s\n",
+                (unsigned)s_amb_ped_adopted, (unsigned)s_amb_rx_n, s_amb_ncreature,
+                s_amb_creature_scanned ? "" : " (census not run)");
     s_amb_tx_msgs = s_amb_rx_msgs = s_amb_rx_ents = s_amb_rx_bad = 0;
     s_amb_tx_peers = 0;
 }
@@ -1501,7 +1510,15 @@ static void dri_ambient_draw(void)
     }
     if (!on || amb_level() <= 0)
         return;
+    {   /* prove the draw hook's own state once, so a silent ped path cannot hide */
+        static int said;
+        if (!said++) {
+            fprintf(stderr, "[AMBIENT] draw hook: ghoston %d, level %d, rx %d, creatures scanned %d\n",
+                    on, amb_level(), s_amb_rx_n, s_amb_creature_scanned);
+        }
+    }
     amb_rx_interp_all(delay_ms);
+    amb_ped_ghost_apply();
     {
         /* Report the smoothing honestly: how many entities were actually
          * bracketed (a 100 ms delay needs samples older than 100 ms, so a
@@ -1617,6 +1634,172 @@ static int amb_owner_elect(void)
         }
     }
     return s_amb_owner;
+}
+
+/* ── Pedestrian ghosts ───────────────────────────────────────
+ *
+ * A streamed pedestrian is identified by a pointer-derived handle, which means
+ * nothing on another machine, so a client cannot look one up by id. What it can
+ * do is adopt its own walkers by proximity: nearest local creature to the
+ * streamed position takes the pose and is frozen.
+ *
+ * The catch, found the hard way: parking a walker 30 km away puts it outside
+ * the match radius, so it can never be adopted again. So this keeps a small
+ * pool of walkers *at* their last known place and only parks the ones that
+ * stay unmatched - which means matching has to run on positions we remember,
+ * not on where the objects currently are.
+ *
+ * Freezing uses the game's own switch: sub_00223ED0 tests bit 0x20 of +0x134
+ * and returns before it touches +0xF4. So a frozen creature keeps the pose we
+ * write and stops walking.
+ *
+ * MC3_ROAM_AMBIENT_PEDGHOST=1 turns it on.
+ */
+#define AMB_PED_FROZEN 0x20u
+#define AMB_PED_ADOPT_MAX 32
+#define AMB_PED_MATCH_MAX 15.0f     /* metres: how far a local walker may be */
+
+typedef struct {
+    uint32_t creature;
+    float    home[3];    /* where it stood when we took it, for re-matching */
+    float    p[3];       /* the pose we last wrote */
+    int      live;
+} amb_ped_ghost;
+
+static amb_ped_ghost s_amb_ped[AMB_PED_ADOPT_MAX];
+static int s_amb_nped_ghost;
+
+static void amb_ped_ghost_apply(void)
+{
+    int i, k, adopted = 0;
+    uint8_t claimed[AMB_CREATURE_MAX];
+
+    if (s_amb_pedghost_on < 0) {
+        const char *e = getenv("MC3_ROAM_AMBIENT_PEDGHOST");
+        s_amb_pedghost_on = e && e[0] == '1';
+    }
+    /* The creature pointer list is what this needs, not the ped-type dump
+     * (which is level 2 only), so poll it directly. */
+    if (s_amb_pedghost_on && !s_amb_creature_scanned)
+        amb_creature_scan();
+    if (!s_amb_pedghost_on || !s_amb_creature_scanned || amb_owner_elect()) {
+        static int said;
+        if (s_amb_pedghost_on && !said++) {
+            fprintf(stderr, "[AMBIENT] ped ghost: not applying (scanned %d, owner %d)\n",
+                    s_amb_creature_scanned, amb_owner_elect());
+        }
+        return;
+    }
+    if (!s_amb_rx_n) {
+        static int said;
+        if (s_amb_pedghost_on && !said++)
+            fprintf(stderr, "[AMBIENT] ped ghost: waiting for streamed entities (census %d)\n",
+                    s_amb_ncreature);
+        return;
+    }
+    memset(claimed, 0, sizeof claimed);
+
+    /* Remember where each adopted walker stands, so it can be matched again
+     * even after we have moved it to the streamed position. */
+    for (i = 0; i < s_amb_nped_ghost; i++) {
+        amb_ped_ghost *g = &s_amb_ped[i];
+        if (!online_ram_n(g->creature, 0x138u)) {
+            g->live = 0;
+            continue;
+        }
+        g->live = 1;
+    }
+    for (i = 0; i < s_amb_nped_ghost; i++)
+        if (s_amb_ped[i].live)
+            claimed[0] = claimed[0];        /* (indices below are creature slots) */
+
+    /* Match each streamed pedestrian to the nearest walker we know of: an
+     * adopted one at its remembered home, or an unadopted one where it stands. */
+    for (i = 0; i < s_amb_rx_n; i++) {
+        amb_rx_ent *e = &s_amb_rx[i];
+        amb_ped_ghost *best = NULL;
+        uint32_t best_c = 0;
+        double bd = (double)AMB_PED_MATCH_MAX * AMB_PED_MATCH_MAX;
+        if (!e->used || e->kind != AMB_KIND_PED)
+            continue;
+        for (k = 0; k < s_amb_nped_ghost; k++) {
+            amb_ped_ghost *g = &s_amb_ped[k];
+            double dx, dy, dz, d;
+            if (!g->live)
+                continue;
+            dx = g->home[0] - e->p[0];
+            dy = g->home[1] - e->p[1];
+            dz = g->home[2] - e->p[2];
+            d = dx * dx + dy * dy + dz * dz;
+            if (d < bd) {
+                bd = d;
+                best = g;
+                best_c = g->creature;
+            }
+        }
+        for (k = 0; k < s_amb_ncreature; k++) {
+            uint32_t c = s_amb_creature[k];
+            double dx, dy, dz, d;
+            if (claimed[k & 63u] || !online_ram_n(c, AMB_CREATURE_POS + 12u))
+                continue;
+            if (!amb_creature_active(c))
+                continue;                   /* frozen already: not a candidate */
+            dx = MEMF(c + AMB_CREATURE_POS) - e->p[0];
+            dy = MEMF(c + AMB_CREATURE_POS + 4u) - e->p[1];
+            dz = MEMF(c + AMB_CREATURE_POS + 8u) - e->p[2];
+            d = dx * dx + dy * dy + dz * dz;
+            if (d < bd) {
+                bd = d;
+                best = NULL;
+                best_c = c;
+            }
+        }
+        if (!best && !best_c)
+            continue;                       /* nothing near enough yet */
+        if (!best) {
+            if (s_amb_nped_ghost >= AMB_PED_ADOPT_MAX)
+                continue;
+            best = &s_amb_ped[s_amb_nped_ghost++];
+            best->creature = best_c;
+            memcpy(best->home, e->p, sizeof best->home);
+            best->live = 1;
+        }
+        for (k = 0; k < s_amb_ncreature; k++)
+            if (s_amb_creature[k] == best->creature)
+                claimed[k & 63u] = 1;
+        /* freeze first, so nothing overwrites the pose after us */
+        if (!(MEM8(best->creature + 0x134u) & AMB_PED_FROZEN))
+            MEM8(best->creature + 0x134u) = (uint8_t)(MEM8(best->creature + 0x134u) | AMB_PED_FROZEN);
+        MEMF(best->creature + AMB_CREATURE_POS) = e->p[0];
+        MEMF(best->creature + AMB_CREATURE_POS + 4u) = e->p[1];
+        MEMF(best->creature + AMB_CREATURE_POS + 8u) = e->p[2];
+        memcpy(best->p, e->p, sizeof best->p);
+        adopted++;
+    }
+
+    /* Walkers the owner never sent: freeze and put them away. Only ones we
+     * have never adopted, since an adopted one is ours to hold. */
+    for (k = 0; k < s_amb_ncreature; k++) {
+        uint32_t c = s_amb_creature[k];
+        int ours = 0, g;
+        if (claimed[k & 63u])
+            continue;
+        for (g = 0; g < s_amb_nped_ghost; g++)
+            if (s_amb_ped[g].creature == c && s_amb_ped[g].live)
+                ours = 1;
+        if (ours)
+            continue;
+        if (!online_ram_n(c, AMB_CREATURE_POS + 12u))
+            continue;
+        if (MEMF(c + AMB_CREATURE_POS) > 20000.0f || MEMF(c + AMB_CREATURE_POS) < -20000.0f)
+            continue;                       /* already parked */
+        if (!(MEM8(c + 0x134u) & AMB_PED_FROZEN))
+            MEM8(c + 0x134u) = (uint8_t)(MEM8(c + 0x134u) | AMB_PED_FROZEN);
+        MEMF(c + AMB_CREATURE_POS) = 30000.0f + 20.0f * (float)k;
+        MEMF(c + AMB_CREATURE_POS + 4u) = -500.0f;
+        MEMF(c + AMB_CREATURE_POS + 8u) = 0.0f;
+    }
+    s_amb_ped_adopted = (uint32_t)adopted;
 }
 
 /* One ambient owner: its slot list and the live cars in it. */
