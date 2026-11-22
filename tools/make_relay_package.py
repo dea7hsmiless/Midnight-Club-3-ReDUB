@@ -56,8 +56,12 @@ No dependencies. No install. Python 3.8 or newer (standard library only).
 **Linux / macOS**
 
 ```sh
-./start.sh
+bash start.sh
 ```
+
+Use `bash start.sh`, not `./start.sh`: a zip carries no Unix permission bits, so the script
+arrives without the executable flag and `./start.sh` fails with "Permission denied". If you
+prefer the shorter form, run `chmod +x start.sh` once.
 
 **Windows**
 
@@ -73,7 +77,7 @@ You should see:
 [relay] listening on 0.0.0.0:47210 (UDP), relaying by room
 ```
 
-Leave it running. `./start.sh 50000` uses another port.
+Leave it running. `bash start.sh 50000` uses another port.
 
 ## 2. Open the port
 
@@ -237,7 +241,16 @@ def build() -> Path:
         out.unlink()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(stage.iterdir()):
-            z.write(f, f"ReDUB-relay-server/{f.name}")
+            arc = f"ReDUB-relay-server/{f.name}"
+            # External attributes carry the Unix mode. A zip written by z.write()
+            # stores 0, so the archive arrives with every file mode 0644: start.sh
+            # then fails with "Permission denied" and the README's own command
+            # does not work. 0755 for the scripts, 0644 for everything else.
+            mode = 0o755 if f.name in ("start.sh", "mc3relay.py", "mc3hub.py") else 0o644
+            info = zipfile.ZipInfo.from_file(f, arc)
+            info.external_attr = (0o100000 | mode) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, f.read_bytes())
     return out
 
 
@@ -250,7 +263,7 @@ def main() -> int:
     for n in names:
         print(f"  {n}")
     print()
-    print("upload the zip, extract it, run ./start.sh (or start.bat), open UDP 47210")
+    print("upload the zip, extract it, run 'bash start.sh' (or start.bat), open UDP 47210")
     return 0
 
 
