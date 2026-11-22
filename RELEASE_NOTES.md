@@ -2,45 +2,32 @@
 
 ## v0.2.5 - 2026-11-21
 
-### Free roam (experimental, off by default)
+### Split-screen, verified
 
-`MC3_ROAM=1` starts the free-roam transport: traffic, pedestrians and other players'
-cars are shared between copies of the game on the same network. Nothing changes for anyone
-who does not set it.
+The game's own 2-player mode now has a recorded result rather than a claim: with a second
+pad connected, Arcade offers `PLAYERS: 2`, both start prompts appear, and the race draws two
+live viewports with their own cameras and HUDs.
 
-- **Two players work.** Two copies, both started through Online, in the same city, each
-  with the other's car built and simulated (the game's own `drawn` and `phys` flags), and a
-  map blip for the other player. Observed on both sides: `1 peers, 1 cars`.
-- **Names are exchanged**, so the player list and the car records use the player's name
-  (`MC3_ROAM_NAME`), not a placeholder.
-- **Traffic sync.** The owner streams the ambient cars it can see and the other copy builds
-  them as cars you can see. Measured: 22-24 messages/second, 110-120 entities, 0 bad
-  datagrams.
-- **Pedestrians sync between adjacent players only.** Walkers within about 15 m of a
-  streamed pedestrian adopt its pose (measured: 8.0 m and 14.2 m adopt, 45-71 m do not).
-  Beyond that distance each player sees their own city, deliberately.
-- **No server is needed.** Copies find each other by broadcast on the local network. A
-  small hub (`tools/mc3hub.py`, Python standard library only) is included for players who
-  want a roster across subnets; it is optional.
+### A freeze that needed a kill is fixed
 
-**Not solid:** you drive through another player's car. There are no collisions.
+Some sessions froze on a single frame and had to be killed. Found and fixed: the GPU
+command stream could desynchronise, the port discarded the rest of that frame, and then
+waited for ever on a fence the discarded commands were supposed to raise. It now resyncs and
+drops one frame instead of the session.
 
-### Online session (experimental, off by default)
+### Mods: unlock everything
 
-`MC3_ONLINE_SESSION=1` turns the main menu's Networking item into an online session:
+A Mods menu with an "unlock everything" toggle, plus the home for future mods.
 
-- **Online moves to the first slot** of the main menu while it is enabled;
-- the garage holds **2,000,000** so cars and parts can be bought and tuned;
-- every car, part, rim, paint and performance level is unlocked;
-- **nothing is written to the memory card** while the session runs: the career's money,
-  garage and unlock flags are saved on entry and restored when you pick Career, Arcade or
-  Tokyo.
+### Aspect ratio
 
-**Free Roam works from that item.** Main menu -> Online -> Networking -> the Arcade setup
-screens -> a free-roam cruise, with traffic, pedestrians and the HUD. The networking screen
-does not ship a working Free Roam entry (its first item is "Xbox Live", which opens
-"New Account" on a build with no Live service), so that item runs Arcade's own cruise path
-instead. Nothing about the cruise setup is rebuilt by hand.
+Aspect ratio (Auto 16:9 / 4:3 / Stretch) is available in the launcher's Display page and in
+the in-game Port Options as Display shape. It applies on the next start.
+
+Auto shows a widescreen game at 16:9; 4:3 keeps the original shape with bars at the sides;
+Stretch fills the window. This also fixes a long-standing framing error where the picture was
+shown at 1.6:1 with unused columns on the right (Midnight Club 3 draws 720 of a 768-pixel
+pitch).
 
 ### Stability and diagnostics
 
@@ -49,26 +36,35 @@ instead. Nothing about the cruise setup is rebuilt by hand.
   and the trace needs `RECOMP_NV2A_TRACE`.
 - **Boot stages carry their timing.** The autostart log prints seconds next to each stage
   (`[AUTOSTART] 11.4s title`), so start-up problems can be measured instead of guessed.
+- **A run log on Windows.** `work-remix/logs/latest.log` holds the last run, with the previous
+  one kept as `.previous`, so a report has something to attach.
+
+### No settings file in the package
+
+0.2.4a's Windows zip shipped a real player settings file, so a fresh extract inherited the
+machine's own settings (including a forced 60 FPS). This build ships no settings file at all:
+the game creates one from the example on first run, and the release check refuses a package
+that contains one.
 
 ### Known issues
 
-- **Remote cars are not solid** (see above).
-- **Pedestrian sync is limited to about 15 m.**
-- **Name tags over another player's car** were not observed on screen during testing (the
-  peer was behind the camera). Untested rather than known-broken.
-- **Start-up time was intermittent** on the test machine: three runs with free roam on
-  reached the title in 11.4-11.6 s, while two earlier runs sat on a black window for
-  minutes and did not reproduce. If you see it, the log now stamps every stage.
+- **Start-up time is intermittent on the machine used for testing.** Runs reached the title
+  in 11.4-11.6 s, while a few sat on a frozen frame for minutes and did not reproduce
+  reliably. Two different intermittent freezes were seen: one in the GPU command stream
+  (fixed above) and one while the intro movies play, which is **not** fixed. If you get one,
+  `work-remix/logs/latest.log` will tell them apart, and `MC3_SKIP_MOVIES=hard` avoids the
+  movie one.
 - The **0.2.4a report of "does not get past the first race" did not reproduce** here: a
   career race was completed at 60 FPS, past RESULTS and back into the cruise. If you can
   reproduce it, please say which platform and package you used and attach
   `work-remix/logs/latest.log`.
 
-### Packaging
+### Not in this release
 
-0.2.4a's Windows zip shipped a real player settings file, so a fresh extract inherited the
-machine's own settings. This build ships no settings file at all: the game creates one from
-the example on first run, and the release check refuses a package that contains one.
+Multiplayer over a network. The engine work for it is in the tree and off by default, but it
+is not finished and is not described here: LAN System Link and online free roam both need a
+second machine, and online needs a server. Split-screen is the multiplayer mode in this
+release.
 
 ## v0.2.4 - 2026-11-18
 
