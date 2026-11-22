@@ -23,13 +23,22 @@ static void roam_net_boot(void)
     e = getenv("MC3_ROAM");
     if (!e || e[0] != '1')
         return;
-    /* No hub: broadcast discovery, up to 8 players, which is a LAN mesh and
-     * exactly the nearest-K the design wants at that size. */
+    /* No hub by default: broadcast discovery, up to 8 players, which is a LAN
+     * mesh and exactly the nearest-K the design wants at that size.
+     *
+     * Only when the player has not said otherwise. This used to set
+     * MC3_ROAM_HUB=0 unconditionally, which silently overrode both
+     * MC3_ROAM_HUB=1 and the hub address, so a configured hub could never be
+     * used -- the client only ever reached one by falling back to broadcast
+     * discovery. A default is a default; it must not outrank a setting. */
+    e = getenv("MC3_ROAM_HUB");
+    if (!e || !*e) {
 #ifdef _WIN32
-    _putenv_s("MC3_ROAM_HUB", "0");
+        _putenv_s("MC3_ROAM_HUB", "0");
 #else
-    setenv("MC3_ROAM_HUB", "0", 0);
+        setenv("MC3_ROAM_HUB", "0", 0);
 #endif
+    }
     if (roam_start("MC3", 0) != 0) {
         fprintf(stderr, "[ROAM] transport did not start (port %u busy, or no network)\n",
                 (unsigned)ROAM_PORT);

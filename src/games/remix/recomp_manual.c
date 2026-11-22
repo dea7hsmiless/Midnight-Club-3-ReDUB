@@ -3017,20 +3017,21 @@ void sub_0018C5A0(void)
  * service; here it is a dead end - pressing it opens "New Account", observed on
  * screen. Free Roam therefore cannot be reached through the item as shipped.
  *
- * In a session this makes that item mean Free Roam instead, by doing exactly
- * what Arcade's own item does (sub_0018C530_gen): [0x50F14C] = 0, copy the
- * picked car into the settings, then Go(0x19), the Arcade setup screen. The
- * cruise that loads from there is the one free roam expects, and the menu
- * walker already knows that screen.
+ * In a session this makes that item mean Free Roam instead, by delegating to
+ * Arcade's own menu callback (sub_0018C530_gen). That function already does the
+ * whole sequence correctly - [0x50F14C] = 0, copy the picked car, sub_0013A590,
+ * Go(0x19), the Arcade setup screen - so nothing here is rebuilt by hand.
  *
- * Reusing Arcade's sequence rather than synthesising a cruise setup is the
- * whole point: every one of those calls is the game's own, so nothing about
- * the setup has to be reproduced by hand.
+ * The earlier attempt hand-rolled that sequence with its own stack pushes and
+ * killed the game: "[PB] NOP(...) trap still pending after 2 s", i.e. the
+ * pushbuffer executor stalled, because calling a lifted function with a hand
+ * built frame is not the same as RECOMP_ABI_CALL doing it. Calling the lifted
+ * callback instead is both shorter and correct.
+ *
+ * Note it calls the _gen: sub_0018C530 (ours) ends the session, which is right
+ * when the player picks Arcade from the menu but wrong here.
  *
  * Outside a session this is the untouched callback. */
-extern void sub_0013AB20(void);
-extern void sub_0013A590(void);
-extern void sub_00154B30(void);
 extern void sub_00180160_gen(void);
 extern void sub_0018C530_gen(void);
 void sub_00180160(void)
@@ -3042,20 +3043,9 @@ void sub_00180160(void)
         return;
     }
     online_enter("networking screen, Free Roam");
-    MEM32(0x0050F14Cu) = 0;
-    sub_0013AB20();
-    sub_0013A590();
-    {
-        uint32_t r[8] = { g_eax, g_ecx, g_edx, g_ebx, g_esp, g_ebp, g_esi, g_edi };
-        g_ecx = MEM32(0x0050F148u);
-        g_esp -= 4; MEM32(g_esp) = 0x19u;        /* the Arcade setup screen */
-        g_esp -= 4; MEM32(g_esp) = 0;            /* return address */
-        sub_00154B30();
-        g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3];
-        g_esp = r[4]; g_ebp = r[5]; g_esi = r[6]; g_edi = r[7];
-    }
-    fprintf(stderr, "[ONLINE] Free Roam: networking item -> Arcade's setup screen (0x19)"
-            " inside the session\n");
+    sub_0018C530_gen();
+    fprintf(stderr, "[ONLINE] Free Roam: networking item -> Arcade's own cruise path"
+            " (sub_0018C530) inside the session\n");
 }
 /* ── "Online" first in the main menu ──
  *
