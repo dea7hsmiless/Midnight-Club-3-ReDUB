@@ -29,9 +29,12 @@ Aspect ratio (Auto 16:9 / 4:3 / Stretch) is available in the launcher's Display 
 the in-game Port Options as Display shape. It applies on the next start.
 
 Auto shows a widescreen game at 16:9; 4:3 keeps the original shape with bars at the sides;
-Stretch fills the window. This also fixes a long-standing framing error where the picture was
-shown at 1.6:1 with unused columns on the right (Midnight Club 3 draws 720 of a 768-pixel
-pitch).
+Stretch fills the window. The value is also accepted as `stretch` in the settings file, and an
+unknown value now says so in the log instead of silently showing 16:9.
+
+This also fixes a long-standing framing error where the picture was shown at 1.6:1 with unused
+columns on the right (Midnight Club 3 draws 720 of a 768-pixel pitch). All three modes were
+checked on screen.
 
 ### Stability and diagnostics
 
