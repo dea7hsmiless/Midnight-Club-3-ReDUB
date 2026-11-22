@@ -101,6 +101,10 @@ static int os_ram(uint32_t va)
            (va >= 0x80000000u && va < 0x84000000u);
 }
 
+/* The same test for callers that run before roam_compat.h is included (the
+ * main-menu reorder, whose override sits earlier in recomp_manual.c). */
+int online_session_ram(uint32_t va) { return os_ram(va); }
+
 /* The money slot, or 0 while the career manager is not up yet. */
 static uint32_t os_money_va(void)
 {
@@ -155,9 +159,11 @@ void online_enter(const char *why)
     for (i = 0; i < 4; i++)
         MEM8(s_os_flag[i]) = 1;
 
-    fprintf(stderr, "[ONLINE] enter (%s): money %u -> %u, all cars and parts unlocked;"
-            " the career's money, garage and unlock flags are kept aside\n",
-            why ? why : "?", (unsigned)s_sess.money, (unsigned)OS_MONEY);
+    fprintf(stderr, "[ONLINE] enter (%s): money %u -> %u, unlock flags %u/%u/%u/%u saved,"
+            " all cars and parts unlocked\n",
+            why ? why : "?", (unsigned)s_sess.money, (unsigned)OS_MONEY,
+            (unsigned)s_sess.unlock[0], (unsigned)s_sess.unlock[1],
+            (unsigned)s_sess.unlock[2], (unsigned)s_sess.unlock[3]);
 }
 
 /* Leave: put back every field we saved, whether or not it looks changed. */
@@ -176,9 +182,11 @@ void online_leave(const char *why)
     for (i = 0; i < 4; i++)
         MEM8(s_os_flag[i]) = s_sess.unlock[i];
 
-    fprintf(stderr, "[ONLINE] leave (%s): money %u restored, the garage and the unlock flags"
-            " are the career's again\n",
-            why ? why : "?", (unsigned)s_sess.money);
+    fprintf(stderr, "[ONLINE] leave (%s): money %u restored, unlock flags %u/%u/%u/%u restored,"
+            " the garage is the career's again\n",
+            why ? why : "?", (unsigned)s_sess.money,
+            (unsigned)s_sess.unlock[0], (unsigned)s_sess.unlock[1],
+            (unsigned)s_sess.unlock[2], (unsigned)s_sess.unlock[3]);
 
     memset(&s_sess, 0, sizeof s_sess);
     s_sess.leaves = 1;          /* count kept across sessions is not needed */

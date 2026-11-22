@@ -3011,6 +3011,102 @@ void sub_0018C5A0(void)
     sub_0018C5A0_gen();
 }
 
+/* ── "Online" first in the main menu ──
+ *
+ * Networking is the main menu's fourth item, so a player has to press Down
+ * three times to find it and nothing tells them it is there. While a session
+ * is wanted, move it to slot 0 so it reads as the first choice, the way an
+ * online mode should.
+ *
+ * The list is the front end's shared one: [0x50F148] -> +0xC = fe, fe+0xFC =
+ * list. Per slot it holds a 4-dword functor at list+0xEC+16*slot (the callback
+ * is at +4), a 16-byte record at [list+0x248]+16*(rows*col+slot), and a label
+ * block of [list+0x234] {text, flag} pairs that record+8 points to.
+ *
+ * The guard is the important part: if the functor at slot 3 is not
+ * sub_0018C5A0, this is not the menu we think it is, and we touch nothing.
+ * Moving the wrong entry would rewire the front end.
+ *
+ * Runs after the builder (sub_0018C770_gen) has filled the list, and only once
+ * per build. */
+extern void sub_0018C770_gen(void);
+extern void sub_00348AF0(void);          /* SetSelection(slot, col), ret 8 */
+void sub_0018C770(void)
+{
+    extern int online_session_wanted(void);
+    extern int online_session_ram(uint32_t va);
+    static int once;
+    uint32_t r[8];
+    uint32_t fe, lst, col, base, nl, i, k, w;
+    uint32_t fn[4], rec[3], lab[2 * 8];
+
+    sub_0018C770_gen();
+    if (once || !online_session_wanted())
+        return;
+    once = 1;
+
+    if (!online_session_ram(MEM32(0x0050F148u)))
+        return;
+    fe = MEM32(0x0050F148u);
+    if (!online_session_ram(fe = MEM32(fe + 0xCu)) ||
+        !online_session_ram(lst = MEM32(fe + 0xFCu)))
+        return;
+    col = MEM32(lst + 0x258u);
+    nl = MEM32(lst + 0x234u);
+    if (col > 7u || nl > 8u || (int32_t)MEM32(lst + 0x238u + 4u * col) < 4)
+        return;
+    /* The guard: slot 3's callback must be the Networking item. */
+    if (MEM32(lst + 0xECu + 3u * 16u + 4u) != 0x0018C5A0u) {
+        fprintf(stderr, "[ONLINE] main menu: slot 3 is not Networking (%08X), left alone\n",
+                (unsigned)MEM32(lst + 0xECu + 3u * 16u + 4u));
+        return;
+    }
+
+    r[0] = g_eax; r[1] = g_ecx; r[2] = g_edx; r[3] = g_ebx;
+    r[4] = g_esp; r[5] = g_ebp; r[6] = g_esi; r[7] = g_edi;
+
+    base = MEM32(lst + 0x230u) * col;
+#define MM_REC(s) (MEM32(lst + 0x248u) + 16u * (base + (s)))
+    /* Take slot 3 out */
+    for (w = 0; w < 4; w++) fn[w] = MEM32(lst + 0xECu + 3u * 16u + 4u * w);
+    rec[0] = MEM32(MM_REC(3));
+    rec[1] = MEM32(MM_REC(3) + 4u);
+    rec[2] = MEM32(MM_REC(3) + 0xCu);
+    for (k = 0; k < 2 * nl; k++)
+        lab[k] = MEM32(MEM32(MM_REC(3) + 8u) + 4u * k);
+    /* Slots 0-2 one down */
+    for (i = 3; i > 0; i--) {
+        for (w = 0; w < 4; w++)
+            MEM32(lst + 0xECu + i * 16u + 4u * w) = MEM32(lst + 0xECu + (i - 1u) * 16u + 4u * w);
+        MEM32(MM_REC(i)) = MEM32(MM_REC(i - 1u));
+        MEM32(MM_REC(i) + 4u) = MEM32(MM_REC(i - 1u) + 4u);
+        MEM32(MM_REC(i) + 0xCu) = MEM32(MM_REC(i - 1u) + 0xCu);
+        for (k = 0; k < 2 * nl; k++)
+            MEM32(MEM32(MM_REC(i) + 8u) + 4u * k) = MEM32(MEM32(MM_REC(i - 1u) + 8u) + 4u * k);
+    }
+    /* Networking into slot 0 */
+    for (w = 0; w < 4; w++) MEM32(lst + 0xECu + 4u * w) = fn[w];
+    MEM32(MM_REC(0)) = rec[0];
+    MEM32(MM_REC(0) + 4u) = rec[1];
+    MEM32(MM_REC(0) + 0xCu) = rec[2];
+    for (k = 0; k < 2 * nl; k++)
+        MEM32(MEM32(MM_REC(0) + 8u) + 4u * k) = lab[k];
+#undef MM_REC
+
+    /* Put the cursor on slot 0 so the selected id is Online's, as the builder
+     * ended by selecting its own slot 0. */
+    g_esp -= 4; MEM32(g_esp) = 0;            /* return address */
+    g_esp -= 4; MEM32(g_esp) = 0xFFFFFFFFu;  /* col: -1 */
+    g_esp -= 4; MEM32(g_esp) = 0;            /* slot 0 */
+    g_ecx = lst;
+    sub_00348AF0();
+    g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3];
+    g_esp = r[4]; g_ebp = r[5]; g_esi = r[6]; g_edi = r[7];
+
+    fprintf(stderr, "[ONLINE] main menu: Online moved to the first slot (was 3 of %u)\n",
+            (unsigned)MEM32(lst + 0x238u + 4u * col));
+}
+
 static void roam_net_boot(void);        /* roam_net.c, included at the end */
 static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
 void sub_0020B6F0(void)
@@ -3067,16 +3163,14 @@ void sub_0020B6F0(void)
     if (s_state_obj) {      /* states 2 and 3: a race or cruise (sub_0001EDB0) */
         extern void mc3_autostart_frame(int in_game, int downs_to_arcade);
         extern int online_session_wanted(void);
-        /* MC3_ONLINE_SESSION: the main menu's fourth item is Networking (after
-         * Career, Tokyo Challenge, Arcade), so a session needs Down x3 instead
-         * of Arcade's Down x2. That is the whole reason this is a parameter.
-         *
-         * This must ask whether a session is WANTED, not whether one is on:
-         * the session only turns on when A is pressed on Networking, which is
-         * the press this count is steering towards. Asking online_session_on()
-         * here would always read 0 and send the player to Arcade instead. */
+        /* MC3_ONLINE_SESSION: with the menu reorder active, Networking is slot
+         * 0, so the autostart must not press Down at all. Without the reorder
+         * it is the fourth item and needs three. Asking for the wrong count is
+         * silent - the cursor lands on a different item and the press opens
+         * that instead - so the two must agree, and they do because both read
+         * online_session_wanted(). */
         mc3_autostart_frame(MEM32(s_state_obj + 4) == 2 || MEM32(s_state_obj + 4) == 3,
-                            online_session_wanted() ? 3 : 2);
+                            online_session_wanted() ? 0 : 2);
     }
     {
         static int time_trace = -1;

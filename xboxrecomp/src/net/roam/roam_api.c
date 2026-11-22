@@ -44,7 +44,30 @@ int roam_start(const char *name, uint32_t vip){
     c.max_players = 8;               /* without a hub; the hub's lists lift it */
     c.rate_hz = 20;
     c.snap_states = 1;               /* the WebSocket loses nothing (nfsu2-web: one state per SNAP) */
-    if (env_int("MC3_ROAM_HUB", 1, 0, 1)){ c.hub_ip = ROAM_HUB_VIP; c.hub_port = ROAM_PORT; }
+    if (env_int("MC3_ROAM_HUB", 1, 0, 1)) {
+        /* The hub's address, overridable so one can be run anywhere: without
+         * this the only hub is the compile-time ROAM_HUB_VIP (10.77.0.253),
+         * which means nobody can test a hub without assigning that address to
+         * an interface. MC3_ROAM_HUB_IP takes a dotted quad, and
+         * MC3_ROAM_HUB_PORT a port. */
+        const char *hip = getenv("MC3_ROAM_HUB_IP");
+        c.hub_ip = ROAM_HUB_VIP;
+        c.hub_port = ROAM_PORT;
+        if (hip && *hip) {
+            unsigned a, b, cc, d;
+            if (sscanf(hip, "%u.%u.%u.%u", &a, &b, &cc, &d) == 4 &&
+                a < 256u && b < 256u && cc < 256u && d < 256u)
+                c.hub_ip = (a << 24) | (b << 16) | (cc << 8) | d;
+            else
+                fprintf(stderr, "[roam] MC3_ROAM_HUB_IP=%s is not a dotted quad, "
+                        "using the built-in hub\n", hip);
+        }
+        c.hub_port = (uint16_t)env_int("MC3_ROAM_HUB_PORT", c.hub_port, 1, 65535);
+        fprintf(stderr, "[roam] hub %u.%u.%u.%u:%u\n",
+                (unsigned)(c.hub_ip >> 24) & 0xFFu, (unsigned)(c.hub_ip >> 16) & 0xFFu,
+                (unsigned)(c.hub_ip >> 8) & 0xFFu, (unsigned)c.hub_ip & 0xFFu,
+                (unsigned)c.hub_port);
+    }
     g_k = env_int("MC3_ROAM_K", g_k, 1, ROAM_K_MAX);
     c.links = g_k;
     c.room = g_room;
