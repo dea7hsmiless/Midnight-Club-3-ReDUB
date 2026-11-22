@@ -19,6 +19,7 @@
 #undef far
 #endif
 #include "roam_plat.h"
+#include "roam_addr.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,12 +60,32 @@ static int env_int(const char *k, int def, int lo, int hi){
  * not resolve. Resolved once, at start: a relay's address is not expected to
  * move mid-session, and a failed lookup then falls back to the caller's
  * default instead of silently pointing at nothing. */
+/* 1 once an address has arrived encoded: it is then kept out of the log too.
+ * An address hidden in the file and printed in plain text two lines later has
+ * not been hidden from anyone who reads the log (see roam_addr.h). */
+static int g_addr_private;
+
 static uint32_t resolve_host(const char *host, const char *what)
 {
     unsigned a, b, cc, d;
     struct hostent *he;
+    char plain[ROAM_ADDR_MAX + 1];
+    int dec;
     if (!host || !*host)
         return 0;
+    /* An rd1: value, for a player who would rather their settings file did not
+     * name the server in plain sight. Malformed must be reported, not treated
+     * as a host name: that would fail as "does not resolve". */
+    dec = roam_addr_decode(host, plain, sizeof plain);
+    if (dec < 0) {
+        fprintf(stderr, "[roam] %s is not a valid encoded address (a mistyped "
+                        "character?); run tools/redub_addr.py to make one\n", what);
+        return 0;
+    }
+    if (dec > 0) {
+        host = plain;
+        g_addr_private = 1;
+    }
     if (sscanf(host, "%u.%u.%u.%u", &a, &b, &cc, &d) == 4 &&
         a < 256u && b < 256u && cc < 256u && d < 256u)
         return (a << 24) | (b << 16) | (cc << 8) | d;
@@ -77,6 +98,21 @@ static uint32_t resolve_host(const char *host, const char *what)
     fprintf(stderr, "[roam] %s=%s does not resolve: using the built-in address\n", what, host);
     return 0;
 }
+/* The dotted quad for a log line, or a mask when the address arrived encoded.
+ * MC3_ROAM_SHOW_ADDR=1 prints it anyway, because a wrong address has to be
+ * seeable to be found -- the mask is the default, not a rule. */
+static const char *addr_text(uint32_t ip, char *buf, size_t cap)
+{
+    const char *show = getenv("MC3_ROAM_SHOW_ADDR");
+    if (g_addr_private && !(show && show[0] == '1'))
+        snprintf(buf, cap, "**.**.**.**");
+    else
+        snprintf(buf, cap, "%u.%u.%u.%u",
+                 (unsigned)(ip >> 24) & 0xFFu, (unsigned)(ip >> 16) & 0xFFu,
+                 (unsigned)(ip >> 8) & 0xFFu, (unsigned)ip & 0xFFu);
+    return buf;
+}
+
 /* A server address implies wanting the server.
  *
  * roam_net.c defaults MC3_ROAM_HUB to 0 when it is unset (a LAN mesh needs no
@@ -138,10 +174,11 @@ int roam_start(const char *name, uint32_t vip){
                 c.hub_ip = ip;
         }
         c.hub_port = (uint16_t)env_int("MC3_ROAM_HUB_PORT", c.hub_port, 1, 65535);
-        fprintf(stderr, "[roam] hub %u.%u.%u.%u:%u\n",
-                (unsigned)(c.hub_ip >> 24) & 0xFFu, (unsigned)(c.hub_ip >> 16) & 0xFFu,
-                (unsigned)(c.hub_ip >> 8) & 0xFFu, (unsigned)c.hub_ip & 0xFFu,
-                (unsigned)c.hub_port);
+        {
+            char ab[32];
+            fprintf(stderr, "[roam] hub %s:%u\n",
+                    addr_text(c.hub_ip, ab, sizeof ab), (unsigned)c.hub_port);
+        }
     }
     g_k = env_int("MC3_ROAM_K", g_k, 1, ROAM_K_MAX);
     c.links = g_k;
@@ -174,10 +211,10 @@ int roam_start(const char *name, uint32_t vip){
                             "MC3_ROAM_RELAY_PORT (or the hub's)\n");
             c.relay = 0;
         } else {
-            fprintf(stderr, "[roam] relay %u.%u.%u.%u:%u (group %u): datagrams go through it\n",
-                    (unsigned)(c.relay_ip >> 24) & 0xFFu, (unsigned)(c.relay_ip >> 16) & 0xFFu,
-                    (unsigned)(c.relay_ip >> 8) & 0xFFu, (unsigned)c.relay_ip & 0xFFu,
-                    (unsigned)c.relay_port, (unsigned)(g_room_base >> 16));
+            char ab[32];
+            fprintf(stderr, "[roam] relay %s:%u (group %u): datagrams go through it\n",
+                    addr_text(c.relay_ip, ab, sizeof ab), (unsigned)c.relay_port,
+                    (unsigned)(g_room_base >> 16));
         }
     }
     rc_io io = { 0, 0, 0, on_event };

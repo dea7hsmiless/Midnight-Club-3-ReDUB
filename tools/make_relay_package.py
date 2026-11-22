@@ -129,6 +129,26 @@ and this server logs:
 If you see `joined` on the server but no car in game, the two clients are in different
 rooms, or one is missing `MC3_ROAM_RELAY=1`.
 
+### If you would rather the file did not name your server
+
+`MC3_ROAM_HUB_IP` also takes an `rd1:` value: the same address encoded, so that a player's
+settings file does not read as an address at all:
+
+```sh
+python3 redub_addr.py encode 203.0.113.10
+MC3_ROAM_HUB_IP=rd1:...
+```
+
+`redub_addr.py decode` reverses it, and refuses a value with a mistyped character instead of
+decoding nonsense. The log masks the address as well unless the player sets
+`MC3_ROAM_SHOW_ADDR=1`.
+
+Be honest with yourself about this one: it is obfuscation, not encryption. The game has to
+decode the address with no secret, so the same file can be decoded by anyone who looks, and
+the traffic is plain UDP regardless. What it prevents is the address being read over a
+shoulder, in a screenshot, or in a config pasted into a chat. If it must not be known, it
+must not be on their machine.
+
 ## 4. Keep it running
 
 **systemd (Linux):**
@@ -234,7 +254,7 @@ def build() -> Path:
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
 
-    for name in ("mc3relay.py", "mc3hub.py"):
+    for name in ("mc3relay.py", "mc3hub.py", "redub_addr.py"):
         shutil.copy2(TOOLS / name, stage / name)
     (stage / "README.md").write_text(README, encoding="utf-8", newline="\n")
     (stage / "start.sh").write_text(START_SH, encoding="utf-8", newline="\n")
@@ -257,7 +277,8 @@ def build() -> Path:
             # stores 0, so the archive arrives with every file mode 0644: start.sh
             # then fails with "Permission denied" and the README's own command
             # does not work. 0755 for the scripts, 0644 for everything else.
-            mode = 0o755 if f.name in ("start.sh", "mc3relay.py", "mc3hub.py") else 0o644
+            mode = (0o755 if f.name in ("start.sh", "mc3relay.py", "mc3hub.py",
+                                        "redub_addr.py") else 0o644)
             info = zipfile.ZipInfo.from_file(f, arc)
             info.external_attr = (0o100000 | mode) << 16
             info.compress_type = zipfile.ZIP_DEFLATED

@@ -95,6 +95,19 @@ MC3_ROAM_NAME=<the player's name>
 - `MC3_ROAM_NAME` is what the other player sees in the player list and over the car.
 - `MC3_ROAM_RELAY=1` is what turns on relay behaviour. Without it the client expects to reach
   each peer directly, which only works on a LAN.
+- `MC3_ROAM_HUB_IP` takes a dotted quad, a host name, or an `rd1:` value — the same address
+  encoded, so the settings file does not name the server in plain sight:
+
+  ```
+  python tools/redub_addr.py encode 203.0.113.10
+  rd1:...
+  ```
+
+  This is obfuscation, not encryption. The client must decode it without a secret, so the file
+  holds everything needed to reverse it, and the traffic is still plain UDP. It hides the
+  address from a glance at the folder, a screenshot, or a shared config — not from anyone who
+  reads it on purpose. The log masks the address too; `MC3_ROAM_SHOW_ADDR=1` prints it when you
+  are trying to find a wrong one.
 
 Then both players enter free roam the same way (Online → Free Roam). Each should log:
 
