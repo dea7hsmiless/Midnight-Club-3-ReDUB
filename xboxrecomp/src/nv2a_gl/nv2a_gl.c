@@ -2672,10 +2672,22 @@ static GLuint feedback_tex(GlSurf *s)
         tex_bind_forget();
         s->fb_valid = 0;
     }
-    if (s->fb_valid && s->fb_gen == s->gseq)
+    if (s->fb_valid && s->fb_gen == s_frame)
         return s->fb_tex;
     /* The target is bound; copy its texels into a texture that is not an
-     * attachment (legal on iOS, unlike a same-framebuffer blit). */
+     * attachment (legal on iOS, unlike a same-framebuffer blit).
+     *
+     * Once per frame, not once per draw. Keying this on the surface's gseq (as
+     * the 0.2.4 iOS tree did) would copy on every draw, because gseq is stamped
+     * on each surface bind: unbounded work in the middle of a draw batch, and
+     * every copy calls state_dirty(), which throws the merged-draw batching
+     * away. Sampling what the target held at the start of the frame is what a
+     * self-sampling draw needs anyway.
+     *
+     * That is a robustness choice, not a measured speed-up: a boot A/B with the
+     * snapshot off and on measured no difference at boot (119.8 s and 123.1 s,
+     * both under load -- the earlier idle baseline was 63 s, which says the
+     * machine, not this code, explains those numbers). */
     glBindFramebuffer(GL_READ_FRAMEBUFFER, s->fbo);
     active_unit(0);
     glBindTexture(GL_TEXTURE_2D, s->fb_tex);
@@ -2685,7 +2697,7 @@ static GLuint feedback_tex(GlSurf *s)
     glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
     tex_bind_forget();
     state_dirty();
-    s->fb_gen = s->gseq;
+    s->fb_gen = s_frame;
     s->fb_valid = 1;
     if (reported++ < 4)
         fprintf(stderr, "  [GL] feedback snapshot: %08X %ux%u\n", s->va, s->pw, s->ph);
@@ -2780,10 +2792,11 @@ static void bind_stage(const uint32_t *regs, int i, float scale[2])
         }
         {
             /* Sample a copy, not the attachment being written (undefined on
-             * GL, and Apple's GL-on-Metal may hand back a stale image). */
-            GLuint snap = feedback_tex(s_fb_target);
-            if (snap) {
-                tex = snap;
+             * GL, and Apple's GL-on-Metal may hand back a stale image). The
+             * copy was taken before this draw's state setup: touching GL state
+             * here wedged the renderer, so this only substitutes the texture. */
+            if (s_fb_target->fb_tex) {
+                tex = s_fb_target->fb_tex;
                 mipped = 0;
             }
         }
@@ -5426,6 +5439,20 @@ static void gl_draw_raw(const Nv2aRawBatch *b)
     {
         uint32_t texs = s_hz_texs;
         uint64_t t0 = hz_now();
+        /* A stage that samples the surface this draw renders into: take the
+         * copy now, before any of this draw's state is set up. Doing it inside
+         * bind_stage (where the sampled texture is first known) ran in the
+         * middle of the draw and wedged the renderer -- frame 321, one draw a
+         * frame, watchdog, while the same build with the snapshot off reached
+         * frame 2434 with 687 draws a frame. */
+        if (s_fb_target && s_fb_target->tex) {
+            int k;
+            for (k = 0; k < 4; k++)
+                if (b->tex_va[k] && b->tex_va[k] == s_fb_target->va) {
+                    feedback_tex(s_fb_target);
+                    break;
+                }
+        }
         for (i = 0; i < 4; i++)
             bind_stage(r, (int)i, tscale[i]);
         if (s_hz_texs != texs)
