@@ -23,4 +23,16 @@ void     roam_plat_unlock(void);
 int64_t  roam_plat_now_us(void);   /* monotonic */
 uint32_t roam_plat_random(void);   /* nonzero */
 
+/* Room census, for matchmaking. The relay answers a bare "MC3Q" datagram with
+ * "MC3ROOMS 1 <n> <room>:<players> ..." on the same socket; that reply is kept
+ * here instead of being fed to the core (it is not a roam datagram).
+ *
+ * request: ask the relay at ip:port (host order), returns 0 when sent;
+ * best:    the fullest room with a free slot (8 players), or -1 if none;
+ * rooms/is_room: read what the last answer said. */
+int  roam_plat_census_request(uint32_t relay_ip, uint16_t relay_port);
+int  roam_plat_census_best(int *players_out);
+int  roam_plat_census_players(int room);
+int  roam_plat_census_age_ms(void);        /* since the last answer, -1 none */
+
 #endif

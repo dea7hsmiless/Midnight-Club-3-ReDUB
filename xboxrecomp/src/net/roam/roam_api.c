@@ -44,6 +44,10 @@ static uint32_t   g_room;
  * picked room 1 were put into different rooms the moment one of them reached
  * the cruise ("Big left: other room"). */
 static uint32_t   g_room_base;
+/* Where the room census is asked (the relay, or the named server when there is
+ * no relay), kept from roam_start for roam_census_request. */
+static uint32_t   g_census_ip;
+static uint16_t   g_census_port;
 
 /* ── tunnelling another protocol (System Link) through the relay ─────────────
  * The handler and its user are declared here because roam_start registers them
@@ -153,8 +157,14 @@ static const char *join_addr(void)
     return (j && *j) ? j : NULL;
 }
 
-static void on_event(void *user, int ev, int peer, const char *text){
-    (void)user; (void)ev; (void)peer;
+/* The same address as a number, for the census when there is no relay. */
+static uint32_t join_ip(void)
+{
+    const char *j = join_addr();
+    return j ? resolve_host(j, "MC3_ROAM_JOIN") : 0;
+}
+
+static void on_event(void *user, int ev, int peer, const char *text){    (void)user; (void)ev; (void)peer;
     fprintf(stderr, "[roam] %s\n", text);
 }
 
@@ -240,9 +250,18 @@ int roam_start(const char *name, uint32_t vip){
             c.relay = 0;
         } else {
             char ab[32];
+            g_census_ip = c.relay_ip;
+            g_census_port = c.relay_port;
             fprintf(stderr, "[roam] relay %s:%u (group %u): datagrams go through it\n",
                     addr_text(c.relay_ip, ab, sizeof ab), (unsigned)c.relay_port,
                     (unsigned)(g_room_base >> 16));
+        }
+    } else {
+        /* No relay: the named server is the address to ask for a census. */
+        uint32_t ip = join_ip();
+        if (ip) {
+            g_census_ip = ip;
+            g_census_port = (uint16_t)env_int("MC3_ROAM_HUB_PORT", ROAM_PORT, 1, 65535);
         }
     }
     rc_io io = { 0, 0, 0, on_event };
@@ -272,6 +291,53 @@ void roam_set_room(uint32_t room){
     g_room = room;
     if (!g_on) return;
     roam_plat_lock(); rc_set_room(&g_s, room); roam_plat_unlock();
+}
+/* The room number the player chose (MC3_ROAM_ROOM), changed while the game is
+ * running: players of the old room dropped, the new one joined at the next
+ * HELLO, exactly as if the game had been restarted with the new value.
+ *
+ * The number is the high half of the room key and the city the low half, so a
+ * group keeps its members together through any city change. Returns the room
+ * actually in force afterwards (the value is clamped to 0..65535). */
+int roam_set_group(unsigned group){
+    uint32_t base;
+
+    if (group > 0xFFFFu)
+        group = 0xFFFFu;
+    base = (uint32_t)group << 16;
+    if (base == g_room_base)
+        return (int)group;
+    g_room_base = base;
+    /* Apply now: rc_set_room drops every peer of the old room and makes the
+     * hub hear the new one at its next tick. Persisting the value is the
+     * caller's business (the settings layer owns the env file). */
+    g_room = base | (g_room & 0xFFFFu);
+    if (g_on) {
+        roam_plat_lock(); rc_set_room(&g_s, g_room); roam_plat_unlock();
+    }
+    fprintf(stderr, "[roam] room %u\n", (unsigned)group);
+    return (int)group;
+}
+/* The room number in force (the high half of the key). */
+int roam_group(void){
+    return (int)(g_room >> 16);
+}
+/* Matchmaking: ask the relay (the address the session already uses) which
+ * rooms have players, and pick one. The answer arrives on the roam socket on
+ * its own thread, so these never block. */
+int roam_census_request(void){
+    if (!g_census_ip || !g_census_port)
+        return -1;
+    return roam_plat_census_request(g_census_ip, g_census_port);
+}
+int roam_census_best(int *players){
+    return roam_plat_census_best(players);
+}
+int roam_census_players(int room){
+    return roam_plat_census_players(room);
+}
+int roam_census_age_ms(void){
+    return roam_plat_census_age_ms();
 }
 void roam_set_k(int k){
     g_k = k < 1 ? 1 : k > ROAM_K_MAX ? ROAM_K_MAX : k;

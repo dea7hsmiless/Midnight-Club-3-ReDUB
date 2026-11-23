@@ -3167,12 +3167,21 @@ static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
 /* The front end draws each label up to the length it shipped with -- "Xbox
  * Live" is nine units, "Xbox System Link" sixteen -- so the names below are
  * chosen to fit those lengths exactly rather than being clipped. */
-static const char *const online_label_from[3] = { "Networking",  "Xbox Live", "Xbox System Link" };
-static const char *const online_label_to[3]   = { "Online",      "Free Roam", "Online Race" };
-static const char *const online_label_short[3] = { "Online",     "Free Roam", "Races" };
-static struct { uint32_t va; } online_label[3][8];
-static int online_label_n[3];
+/* An empty name blanks a label: the writer fills the original length with
+ * spaces, so the Xbox Live sign-in status under the main menu disappears
+ * without the layout noticing. */
+static const char *const online_label_from[4] = { "Networking",  "Xbox Live", "Xbox System Link", "Not Signed In" };
+static const char *const online_label_to[4]   = { "Online",      "Free Roam", "Online Race", "" };
+static const char *const online_label_short[4] = { "Online",     "Free Roam", "Online Race", "" };
+static struct { uint32_t va; } online_label[4][8];
+static int online_label_n[4];
 static int online_labels_ready;            /* the main menu's label was renamed */
+
+static void online_ready_note(int k)
+{
+    if (k == 0)
+        online_labels_ready = 1;
+}
 
 static int online_guest_ok(uint32_t va, uint32_t n)
 {
@@ -3208,7 +3217,7 @@ static void online_labels_discover(void)
 {
     const uint32_t hi = 0x84000000u;
     unsigned k, n;
-    for (k = 0; k < 3; k++) {
+    for (k = 0; k < 4; k++) {
         const char *s = online_label_from[k];
         uint32_t len = (uint32_t)strlen(s), va = 0x80000000u;
         online_label_n[k] = 0;
@@ -3264,7 +3273,7 @@ static void online_labels_discover(void)
 static void online_labels_apply(void)
 {
     unsigned k, n;
-    for (k = 0; k < 3; k++) {
+    for (k = 0; k < 4; k++) {
         uint32_t len = (uint32_t)strlen(online_label_from[k]);
         for (n = 0; n < (unsigned)online_label_n[k]; n++) {
             uint32_t va = online_label[k][n].va, i, slack = 0, to_len;
@@ -3302,8 +3311,7 @@ static void online_labels_apply(void)
                 continue;
             for (i = 0; i < len; i++)
                 MEM16(va + 2u * i) = (uint16_t)(uint8_t)(i < to_len ? to[i] : ' ');
-            if (k == 0)
-                online_labels_ready = 1;   /* the main menu is built */
+            online_ready_note(k);
             fprintf(stderr, "[ONLINE] label %08X \"%s\" -> \"%s\"\n",
                     va, online_label_from[k], to);
         }
@@ -3982,9 +3990,132 @@ static void port_text(uint32_t row,const char *text)
     for(size_t i=0;i<n;i++)MEM16(dst+i*2)=(unsigned char)text[i];
     MEM16(dst+n*2)=0;
 }
+/* ── the two online rows, shared by every platform ────────────────────────
+ *
+ * 24: ROOM, cycled with A. 25: FIND A ROOM, which asks the relay which rooms
+ * have players and moves to the fullest one with a free slot.
+ *
+ * The room applies immediately: roam_set_group drops the old room's peers and
+ * joins the new one at the next HELLO, so two players who choose the same
+ * number meet without either of them restarting. The number is saved too, so a
+ * relaunch lands in it.
+ */
+extern int roam_set_group(unsigned group);
+extern int roam_group(void);
+extern int roam_census_request(void);
+extern int roam_census_best(int *players_out);
+extern int roam_census_players(int room);
+extern int roam_census_age_ms(void);
+
+/* The room number is persisted by the platform, in the same settings file as
+ * everything else (windows_settings.c, ios_host.c, android_host.c and
+ * linux_settings.c each provide this one function). */
+extern int windows_port_save_room(int room);
+
+#define PORT_ROW_ROOM 24
+#define PORT_ROW_FIND 25
+/* 0..255: the wire carries 16 bits; this is the range a D-pad cycle reaches
+ * in a reasonable time, and it is far more than one relay's city needs. */
+#define PORT_ROOMS    256
+
+static int port_room = -1;
+
+static int port_room_get(void)
+{
+    if (port_room < 0) {
+        const char *e = getenv("MC3_ROAM_ROOM");
+        port_room = (e && *e) ? atoi(e) : 0;
+        if (port_room < 0 || port_room >= PORT_ROOMS)
+            port_room = 0;
+    }
+    return port_room;
+}
+
+static void port_room_apply(int room)
+{
+    char v[16];
+    if (room < 0) room += PORT_ROOMS;
+    if (room >= PORT_ROOMS) room -= PORT_ROOMS;
+    port_room = room;
+    roam_set_group((unsigned)room);
+    (void)v;
+    windows_port_save_room(room);
+    fprintf(stderr, "[PORT] room %d (applied now)\n", room);
+}
+
+/* FIND A ROOM: ask, then move to the answer once it arrives (checked on every
+ * label refresh, which runs while the list is on screen). */
+static int port_find_pending;
+
+static void port_find_start(void)
+{
+    if (roam_census_request() != 0) {
+        fprintf(stderr, "[PORT] find a room needs online play (no server)\n");
+        return;
+    }
+    port_find_pending = 1;
+    fprintf(stderr, "[PORT] find a room: asking the server\n");
+}
+
+static void port_find_poll(void)
+{
+    int players = 0, best, age;
+    if (!port_find_pending)
+        return;
+    age = roam_census_age_ms();
+    if (age < 0 || age > 3000)
+        return;                       /* no answer yet */
+    port_find_pending = 0;
+    best = roam_census_best(&players);
+    if (best < 0) {
+        fprintf(stderr, "[PORT] find a room: nothing free, staying in %d\n",
+                port_room_get());
+        return;
+    }
+    fprintf(stderr, "[PORT] find a room: joining room %d (%d/8)\n", best, players);
+    port_room_apply(best);
+}
+
+/* Labels for these two rows, asked by every platform's label function. */
+int port_online_label(int id, char *out, size_t size)
+{
+    if (id == PORT_ROW_ROOM) {
+        snprintf(out, size, "ROOM: %d", port_room_get());
+        return 1;
+    }
+    if (id == PORT_ROW_FIND) {
+        int age = roam_census_age_ms();
+        int here = roam_census_players(port_room_get());
+        if (port_find_pending)
+            snprintf(out, size, "FIND A ROOM: SEARCHING...");
+        else if (age >= 0 && age < 30000 && here > 0)
+            snprintf(out, size, "FIND A ROOM (%d/8 HERE)", here);
+        else
+            snprintf(out, size, "FIND A ROOM");
+        return 1;
+    }
+    return 0;
+}
+
+/* Row presses for these two rows; step is 0 for a plain press. */
+int port_online_change(int id, int step)
+{
+    (void)step;
+    if (id == PORT_ROW_ROOM) {
+        port_room_apply(port_room_get() + 1);
+        return 1;
+    }
+    if (id == PORT_ROW_FIND) {
+        port_find_start();
+        return 1;
+    }
+    return 0;
+}
+
 static void port_labels(void)
 {
     if(!port_context_valid())return;
+    port_find_poll();
     for(int k=0;k<port_row_n;k++){
         int i=port_row_id[k];char text[96];text[0]=0;
         windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);
@@ -4026,25 +4157,26 @@ static void port_build(void)
      * 15 settings + BACK at capacity 16. PHONE MUSIC (id 9) and SONG DISPLAY
      * (id 11) are the media rows. Per-app volume does not exist on Android,
      * so id 10 (PC MUSIC VOLUME) is not offered here. */
+    /* Two slots of every platform's list are kept for the online rows below
+     * (ROOM and FIND A ROOM), so each order here is two shorter than the page
+     * has room for: 16 slots, less BACK, less those two. */
 #if defined(__ANDROID__)
-    /* 16-slot page: 15 rows + BACK. The always-fullscreen status and the
-     * graphics preset (both also in the Android launcher) give up their slots
-     * to phone music and controller vibration; both of those were previously
-     * labels with no handler. */
-    const int order[]={1,2,3,4,6,7,8,9,10,11,12,13,14,15,16};
-    int settings=15;
+    /* 16-slot page: 13 rows + the two online rows + BACK. The always-fullscreen
+     * status and the graphics preset (both also in the Android launcher) give
+     * up their slots to phone music and controller vibration. */
+    const int order[]={1,2,3,4,6,7,8,9,10,11,12,13,14};
+    int settings=13;
 #elif defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
     /* iOS: the launcher's touch controls on the main page, the fine-tuning on
-     * an Advanced page. Ids 0..16 fit; 15 opens Advanced, and ids 17..21 get
-     * their own event range below. Desktop keeps its own order. */
-    const int main_order[]={0,1,8,9,10,11,2,12,3,13,14,16,15};
+     * an Advanced page. 15 opens Advanced, and ids 17..21 get their own event
+     * range below. */
+    const int main_order[]={0,1,8,9,10,11,2,12,3,13};
     const int adv_order[]={5,7,4,6,19,20,21,17,18,22,23};
     const int *order=port_page?adv_order:main_order;
-    int settings=port_page?11:13;
+    int settings=port_page?11:10;
 #else
-    const int order[]={0,5,2,12,3,4,6,13,14,1,16,7,9,11,15,8,10};
-    int capacity=MEM32(port_list+0x230);
-    int settings=capacity>=18?17:capacity>=17?16:15;
+    const int order[]={0,5,2,12,3,4,6,13,14,1,16,7,9,11,15};
+    int settings=15;
 #endif
     port_row_n=0;
     for(int k=0;k<settings;k++){
@@ -4056,6 +4188,15 @@ static void port_build(void)
                     : 0x7F00u+(uint32_t)i;
         port_rows[i]=port_add(ev,NULL);
         port_row_id[port_row_n++]=i;
+    }
+    /* ONLINE rows, on the main page only, paid for by the two settings each
+     * order above leaves out. They stay inside the 16-slot capacity. */
+    if (!port_page) {
+        static const int online[2] = { 24, 25 };
+        for (int k = 0; k < 2; k++) {
+            port_rows[online[k]] = port_add(0x7F18u + (uint32_t)k, NULL);
+            port_row_id[port_row_n++] = online[k];
+        }
     }
     port_add(0x7F11u,port_page?"BACK TO OPTIONS":"BACK");port_labels();
     port_building=0;
@@ -4150,6 +4291,11 @@ void sub_00163830(void)
         port_accept_down=1;
         windows_port_setting_change(17+(int)(event-0x7F20));
         port_labels();g_eax=0;g_esp+=8;return;
+    }
+    if(port_open && event>=0x7F18 && event<0x7F1A) {
+        if(port_accept_down){g_eax=0;g_esp+=8;return;}
+        port_accept_down=1;
+        windows_port_setting_change((int)(event-0x7F00));port_labels();g_eax=0;g_esp+=8;return;
     }
     if(port_open && event>=0x7F00 && event<0x7F10) {
         if(port_accept_down){g_eax=0;g_esp+=8;return;}

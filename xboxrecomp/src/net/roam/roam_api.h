@@ -28,6 +28,10 @@ extern "C" {
 #endif
 
 #define ROAM_PORT        47210      /* UDP port of the roam endpoint (and of the hub) */
+/* Players in one room: the title asks for seven links, so eight including us.
+ * The relay refuses a ninth HELLO for that room, and the census counts against
+ * the same number. */
+#define ROAM_ROOM_PLAYERS 8
 #define ROAM_HUB_VIP     0x0A4D00FDu /* 10.77.0.253: the server's free-roam hub */
 #define ROAM_K_DEFAULT   7          /* players linked by the hub (the nearest K) */
 #define ROAM_K_MAX       64
@@ -103,6 +107,19 @@ void roam_set_k(int k);
  * are in): the hub links, and peers accept, players of the same room only.
  * Kept across roam_stop/roam_start; a change drops every peer of the old room. */
 void roam_set_room(uint32_t room);
+/* The room number the player picks (MC3_ROAM_ROOM), 0..65535, applied while the
+ * game runs: the old room's peers are dropped and the new room joined at the
+ * next HELLO, the same as restarting with that value. Keeps MC3_ROAM_ROOM in
+ * step so a relaunch lands in the same room. Returns the number now in force. */
+int  roam_set_group(unsigned group);
+int  roam_group(void);                      /* the room number in force */
+/* Matchmaking (the relay's census): ask which rooms have players, then pick the
+ * fullest one with a free slot. The answer arrives on the roam socket, so
+ * these never block; check roam_census_age_ms to know it came back. */
+int  roam_census_request(void);             /* 0 sent, -1 no relay/address */
+int  roam_census_best(int *players_out);    /* room number, or -1 for none */
+int  roam_census_players(int room);         /* players in that room, -1 unknown */
+int  roam_census_age_ms(void);              /* since the last answer, -1 none */
 void roam_set_status(uint8_t status);       /* RC_ST_* */
 /* our car's state, every frame (a SNAP goes out at 20 Hz when due) */
 void roam_set_local(const rc_state *s);

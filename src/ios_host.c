@@ -214,9 +214,24 @@ static void apply_online_default(void)
 
 /* The title calls this with the row id (event-0x7F00) from its own UI
  * thread; there is no window to bounce through, so commit directly. */
+/* The room and Find a Room rows are shared code (src/games/remix/recomp_manual.c),
+ * so every platform gets the same behaviour: a live room change, and a query
+ * to the relay for the fullest room with a free slot. */
+extern int port_online_label(int id, char *out, size_t size);
+extern int port_online_change(int id, int step);
+
+/* The shared online rows save the room number through the same env file. */
+int windows_port_save_room(int room)
+{
+    char v[16];
+    snprintf(v, sizeof v, "%d", room);
+    return save_env_pair("MC3_ROAM_ROOM", v);
+}
+
 void windows_port_setting_change(int id)
 {
     char v[16], vbuf[16];
+    if (port_online_change(id, 0)) return;
     switch (id) {
     case 0: {  /* on-screen controls: auto -> always -> off -> auto */
         int m = env_int("RECOMP_TOUCH_PAD", -1);
@@ -342,6 +357,7 @@ void windows_port_setting_change(int id)
 
 void windows_port_setting_label(int id, char *out, size_t size)
 {
+    if (port_online_label(id, out, size)) return;
     if (id == 0) {
         const char *names[] = {"AUTO", "ALWAYS", "OFF"};
         int m = env_int("RECOMP_TOUCH_PAD", -1);

@@ -456,8 +456,23 @@ int windows_port_vsync_get(void)
     return s_vsync;
 }
 
+/* The room and Find a Room rows are shared code (src/games/remix/recomp_manual.c),
+ * so every platform gets the same behaviour: a live room change, and a query
+ * to the relay for the fullest room with a free slot. */
+extern int port_online_label(int id, char *out, size_t size);
+extern int port_online_change(int id, int step);
+
+/* The shared online rows save the room number through the same settings
+ * storage every other Android setting uses. */
+int windows_port_save_room(int room)
+{
+    android_save_int("MC3_ROAM_ROOM", room);
+    return 1;
+}
+
 void windows_port_setting_change(int id)
 {
+    if (port_online_change(id, 0)) return;
     switch (id) {
     case 1:
         s_vsync = s_vsync == 0 ? 1 : s_vsync == 1 ? -1 : 0;
@@ -629,6 +644,7 @@ void windows_port_setting_change(int id)
 
 void windows_port_setting_label(int id, char *out, size_t size)
 {
+    if (port_online_label(id, out, size)) return;
     static const char *aa_names[] = { "OFF", "FXAA", "FXAA LOW", "FXAA HIGH" };
     if (id == 1)
         snprintf(out, size, "VSYNC: %s", s_vsync < 0 ? "ADAPTIVE" : s_vsync ? "ON" : "OFF");

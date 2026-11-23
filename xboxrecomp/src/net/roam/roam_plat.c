@@ -20,6 +20,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The room census (matchmaking) is parsed before the core sees a datagram. */
+static int census_take(const uint8_t *buf, int n);
+
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -132,13 +135,16 @@ static void plat_broadcast(void *user, uint16_t port, const uint8_t *buf, int le
 static void plat_receive_all(void)
 {
     uint8_t buf[ROAM_DGRAM_MAX];
-    for (;;) {
-        struct sockaddr_in from;
+    for (;;) {        struct sockaddr_in from;
         int n;
         socklen_t fl = (socklen_t)sizeof from;
         n = (int)recvfrom(g_sock, (char *)buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
         if (n <= 0)
             return;
+        /* A room census answer is text, not a roam datagram: the core would
+         * drop it as RC_E_MAGIC, so take it here. */
+        if (census_take(buf, n))
+            continue;
         roam_plat_lock();
         if (g_run && g_s)
             rc_receive(g_s, ntohl(from.sin_addr.s_addr), ntohs(from.sin_port), buf, n, plat_now_us());
@@ -307,4 +313,108 @@ void roam_plat_stop(void)
 #endif
     g_sock = RSOCK_BAD;
     g_s = NULL;
+}
+
+/* ── room census (matchmaking) ────────────────────────────────────────────
+ *
+ * The relay answers a bare "MC3Q" with one line of text on the same socket:
+ *
+ *     MC3ROOMS 1 <n> <room>:<players> ...
+ *
+ * That is not a roam datagram, so the receive path must not hand it to the
+ * core; the parser below runs first and swallows it. The answer is kept as a
+ * small table; the game reads it to offer "Find a room".
+ */
+#define CENSUS_ROOMS 32
+static struct { int room, players; } s_census[CENSUS_ROOMS];
+static int      s_census_n = -1;         /* -1: no answer yet */
+static int64_t  s_census_at;
+
+static int census_take(const uint8_t *buf, int n)
+{
+    /* "MC3ROOMS 1 2 3:4 7:1" -- only the shape matters, so a hand-typed
+     * answer works too. */
+    char text[512];
+    char *p;
+    int count, i, room, players;
+
+    if (n <= 0 || n >= (int)sizeof text)
+        return 0;
+    if (n < 8 || memcmp(buf, "MC3ROOMS", 8) != 0)
+        return 0;
+    memcpy(text, buf, (size_t)n);
+    text[n] = 0;
+    p = text + 8;
+    if (*p == ' ') p++;
+    if (*p < '0' || *p > '9')
+        return 0;                          /* version, ignored */
+    while (*p && *p != ' ') p++;
+    while (*p == ' ') p++;
+    count = (int)strtol(p, &p, 10);
+    if (count < 0 || count > CENSUS_ROOMS)
+        count = CENSUS_ROOMS;
+    for (i = 0; i < count; i++) {
+        while (*p == ' ') p++;
+        room = (int)strtol(p, &p, 10);
+        if (*p != ':')
+            break;
+        players = (int)strtol(p + 1, &p, 10);
+        s_census[i].room = room;
+        s_census[i].players = players;
+    }
+    s_census_n = i;
+    s_census_at = plat_now_us();
+    fprintf(stderr, "[roam] rooms: %d with players\n", s_census_n);
+    for (i = 0; i < s_census_n; i++)
+        fprintf(stderr, "[roam]   room %d: %d/8\n",
+                s_census[i].room, s_census[i].players);
+    return 1;
+}
+
+int roam_plat_census_request(uint32_t relay_ip, uint16_t relay_port)
+{
+    static const char q[] = "MC3Q";
+    struct sockaddr_in a;
+    if (g_sock == RSOCK_BAD || !relay_ip || !relay_port)
+        return -1;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_port = htons(relay_port);
+    a.sin_addr.s_addr = htonl(relay_ip);
+    sendto(g_sock, q, (int)strlen(q), 0, (struct sockaddr *)&a, sizeof a);
+    return 0;
+}
+
+/* The fullest room that still has a slot (the title's own 8-player limit),
+ * preferring the room we are already in when it is empty. */
+int roam_plat_census_best(int *players_out)
+{
+    int i, best = -1, best_n = 0;
+    for (i = 0; i < s_census_n; i++) {
+        if (s_census[i].players >= ROAM_ROOM_PLAYERS)
+            continue;
+        if (s_census[i].players > best_n) {
+            best = s_census[i].room;
+            best_n = s_census[i].players;
+        }
+    }
+    if (players_out)
+        *players_out = best_n;
+    return best;
+}
+
+int roam_plat_census_players(int room)
+{
+    int i;
+    for (i = 0; i < s_census_n; i++)
+        if (s_census[i].room == room)
+            return s_census[i].players;
+    return -1;
+}
+
+int roam_plat_census_age_ms(void)
+{
+    if (s_census_n < 0)
+        return -1;
+    return (int)((plat_now_us() - s_census_at) / 1000);
 }

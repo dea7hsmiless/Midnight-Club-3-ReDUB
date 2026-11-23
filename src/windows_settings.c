@@ -132,8 +132,27 @@ static void change_on_main(void *p)
     if(id>=1&&id<=6){preset=0;save_setting("MC3_GRAPHICS_PRESET","0");}
 }
 
+/* The room and Find a Room rows are shared code (src/games/remix/recomp_manual.c),
+ * so every platform gets the same behaviour: a live room change, and a query
+ * to the relay for the fullest room with a free slot. */
+extern int port_online_label(int id, char *out, size_t size);
+extern int port_online_change(int id, int step);
+
+/* The shared online rows save the room number; Windows keeps its settings in
+ * one env file, written by save_settings. */
+int windows_port_save_room(int room)
+{
+    char v[16];
+    snprintf(v, sizeof v, "%d", room);
+    return save_setting("MC3_ROAM_ROOM", v);
+}
+
 void windows_port_setting_change(int id)
 {
+    /* The room and Find a Room rows are not window state, so they run on the
+     * calling (guest) thread: a live room change drops peers, and the census
+     * reply is picked up on the network thread. */
+    if (port_online_change(id, 0)) return;
     /* Never wait for the window thread from a guest UI callback. The guest
      * may hold its execution lock while Windows/SDL waits for presentation. */
     if(!hwnd||!PostMessageA(hwnd,WM_APP+0x331,(WPARAM)id,0))
@@ -141,6 +160,7 @@ void windows_port_setting_change(int id)
 }
 void windows_port_setting_label(int id,char *out,size_t size)
 {
+    if (port_online_label(id, out, size)) return;
     int n=windows_port_vsync_get();
     if(id==0) snprintf(out,size,"FULLSCREEN: %s",fullscreen?"ON":"OFF");
     if(id==1) snprintf(out,size,"VSYNC: %s",n<0?"ADAPTIVE":n?"ON":"OFF");

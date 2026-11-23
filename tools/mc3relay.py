@@ -125,6 +125,32 @@ class Relay:
     def room_full(self, room: int, except_id: int) -> bool:
         return len(self.room_of(room, except_id)) >= MAX_MEMBERS_PER_ROOM
 
+    def census(self, addr) -> bytes:
+        """Reply to a client's MC3Q: the rooms that have players in them.
+
+        A client that wants to be matched sends MC3Q and picks a room from the
+        answer. Rooms are grouped by the high half of the room key (the number
+        players choose); the low half is the city and is deliberately not
+        shown, so two players who pick room 3 always count together whatever
+        city each is in.
+
+            MC3ROOMS 1 <groups> [<group>:<players> ...]
+
+        Players are counted per group, and stale members are dropped first so
+        an answer never advertises somebody who already left."""
+        self.reap()
+        counts: dict[int, int] = {}
+        for m in self.members.values():
+            group = m.room >> 16
+            counts[group] = counts.get(group, 0) + 1
+        groups = sorted(counts)
+        parts = [b"MC3ROOMS", b"1", str(len(groups)).encode()]
+        for g in groups:
+            parts.append(f"{g}:{counts[g]}".encode())
+        self.log(f"census to {addr[0]}:{addr[1]}: "
+                 + (", ".join(f"{g}={counts[g]}" for g in groups) or "no rooms"))
+        return b" ".join(parts)
+
     def flooding(self, addr) -> bool:
         """True when this source is over its datagram budget for the second."""
         now = time.monotonic()
@@ -140,6 +166,11 @@ class Relay:
         if self.flooding(addr):
             self.refused_flood += 1
             return []
+
+        # A client asking which rooms have players (the launcher's and the
+        # in-game Find a Room both send exactly "MC3Q").
+        if data == b"MC3Q":
+            return [(self.census(addr), addr)]
 
         got = parse(data)
         if got is None:

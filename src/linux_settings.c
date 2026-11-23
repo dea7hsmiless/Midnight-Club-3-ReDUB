@@ -117,9 +117,24 @@ static void apply_preset(int n,int defaults)
     set_vsync(n==3?1:0);
 }
 
+/* The room and Find a Room rows are shared code (src/games/remix/recomp_manual.c),
+ * so every platform gets the same behaviour: a live room change, and a query
+ * to the relay for the fullest room with a free slot. */
+extern int port_online_label(int id, char *out, size_t size);
+extern int port_online_change(int id, int step);
+
+/* The shared online rows save the room number into the same settings file. */
+int windows_port_save_room(int room)
+{
+    char v[16];
+    snprintf(v, sizeof v, "%d", room);
+    return save_setting("MC3_ROAM_ROOM", v);
+}
+
 void windows_port_setting_change(int id)
 {
     char value[32];
+    if (port_online_change(id, 0)) return;
     if(!s_window)return;
     switch(id){
     case 0:{int next=!(SDL_GetWindowFlags(s_window)&SDL_WINDOW_FULLSCREEN);SDL_ClearError();int rc=SDL_SetWindowFullscreen(s_window,next?SDL_WINDOW_FULLSCREEN_DESKTOP:0);if(rc==0){SDL_RaiseWindow(s_window);SDL_PumpEvents();int actual=!!(SDL_GetWindowFlags(s_window)&SDL_WINDOW_FULLSCREEN);if(save_setting("MC3_FULLSCREEN",actual?"1":"0"))s_fullscreen=actual;fprintf(stderr,"[PORT] Fullscreen %s (%s)\n",actual?"enabled":"disabled",SDL_GetError());}else fprintf(stderr,"[PORT] Fullscreen request failed: %s\n",SDL_GetError());break;}
@@ -151,6 +166,7 @@ void windows_port_setting_change(int id)
 
 void windows_port_setting_label(int id,char *out,size_t size)
 {
+    if (port_online_label(id, out, size)) return;
     int n=windows_port_vsync_get();
     if(id==0)snprintf(out,size,"FULLSCREEN: %s",s_fullscreen?"ON":"OFF");
     if(id==1)snprintf(out,size,"VSYNC: %s",n<0?"ADAPTIVE":n?"ON":"OFF");
