@@ -3858,8 +3858,16 @@ static int netplay_on(void)
     if (on < 0) {
         const char *e = getenv("MC3_NETPLAY");
         on = e && *e == '1';
-        if (on)
-            fprintf(stderr, "[NET] System Link HLE on (MC3_NETPLAY): XNet answered over host UDP\n");
+        if (on) {
+            fprintf(stderr, "[NET] System Link HLE on (MC3_NETPLAY): XNet answered by the runtime\n");
+            /* The guest's XNetStartup comes before the first frame that reaches
+             * roam_net_boot(), and xnet_startup() latches the medium's address
+             * once. The free-roam session (its id, and the relay) therefore has
+             * to exist here, or System Link would come up on host UDP and the
+             * relay could never carry a race. roam_net_boot is idempotent and
+             * does nothing unless a roam setup was asked for. */
+            roam_net_boot();
+        }
     }
     return on;
 }

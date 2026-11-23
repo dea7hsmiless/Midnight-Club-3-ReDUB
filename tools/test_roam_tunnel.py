@@ -28,6 +28,14 @@ HARNESS = r"""
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#ifdef _WIN32
+#include <winsock2.h>          /* before the roam headers: its `far` macro would */
+#else
+#include <arpa/inet.h>
+#endif
+#ifdef far
+#undef far                     /* rewrite rc_session's `far` field (roam_api.c) */
+#endif
 #include "net/roam/roam_core.h"
 #include "net/xnet_hle.h"
 
@@ -129,22 +137,22 @@ int main(void)
     /* ---- 2: the transport ---- */
     {
         const xnet_transport *T = &xnet_transport_relay;
-        uint32_t me = T->local_addr();
+        uint32_t me = T->local_addr();          /* network order, as the HLE keeps it */
         intptr_t h = T->open();
         char buf[64];
         uint32_t ip = 0;
         uint16_t port = 0;
-        printf("me %08x bind %d\n", me, T->bind(h, 2000));
+        printf("me %08x bind %d\n", (unsigned)ntohl(me), T->bind(h, 2000));
         printf("outsend %d\n", T->sendto(h, msg, 4, 0xFFFFFFFFu, 2001));
         printf("outframe %08x %08x %u %u\n", s_src, s_dst, s_sp, s_dp);
 
-        g_from(0, 0x0A4D0009u, me, 2001, 2000, "hi", 2);          /* for us */
+        g_from(0, 0x0A4D0009u, ntohl(me), 2001, 2000, "hi", 2);   /* for us */
         g_from(0, 0x0A4D0009u, 0x0A4D000Au, 2001, 2000, "no", 2); /* another player */
-        g_from(0, 0x0A4D0009u, me, 2001, 2002, "no", 2);          /* wrong port */
+        g_from(0, 0x0A4D0009u, ntohl(me), 2001, 2002, "no", 2);   /* wrong port */
         {
             int n1 = T->recvfrom(h, buf, sizeof buf, &ip, &port);
             int n2 = T->recvfrom(h, buf, sizeof buf, &ip, &port);
-            printf("recv %d %d %08x %u\n", n1, n2, ip, port);
+            printf("recv %d %d %08x %u\n", n1, n2, (unsigned)ntohl(ip), port);
         }
         /* a broadcast frame reaches our bound port too */
         g_from(0, 0x0A4D0009u, 0xFFFFFFFFu, 2001, 2000, "hey", 3);
@@ -178,7 +186,7 @@ def main() -> int:
                str(root / "xboxrecomp" / "src" / "net" / "xnet_relay.c"),
                "-I", str(root / "xboxrecomp" / "src"),
                "-I", str(root / "xboxrecomp" / "src" / "net" / "roam"),
-               "-o", str(exe)]
+               "-o", str(exe), "-lws2_32"]
         done = subprocess.run(cmd, capture_output=True, text=True)
         if done.returncode != 0:
             print("could not build the harness:\n" + (done.stderr or done.stdout)[-3000:])

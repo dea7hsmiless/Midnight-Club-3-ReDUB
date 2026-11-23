@@ -23,11 +23,21 @@
  * one at a time; inbound frames arrive on the roam session's receive thread.
  * Each socket's queue is therefore single-producer / single-consumer.
  */
+#ifdef _WIN32
+#include <winsock2.h>          /* before the roam headers: its `far` macro would */
+#endif
+#ifdef far
+#undef far                     /* rewrite rc_session's `far` field (roam_api.c) */
+#endif
 #include "xnet_hle.h"
 #include "roam/roam_api.h"
 
 #include <stdio.h>
 #include <string.h>
+
+#ifndef _WIN32
+#include <arpa/inet.h>
+#endif
 
 #define XR_SOCKS    8
 #define XR_QUEUE    64
@@ -53,7 +63,12 @@ static uint32_t xr_tx, xr_rx, xr_qfull, xr_notun;
 static int      xr_reported;
 
 /* 10.77.a.b, a in 0..127 and b even in 2..126: never the network or a broadcast
- * address, and stable for the life of the session (the id is). */
+ * address, and stable for the life of the session (the id is).
+ *
+ * Host order here; the boundary converts. The HLE keeps addresses in network
+ * order (the UDP transport passes inet_addr's value straight through), so a
+ * host-order value returned as-is is read as a different address: 10.77.42.14
+ * went out as 14.42.77.10 once, which is a real routable one. */
 static uint32_t xr_vaddr(uint32_t id)
 {
     uint32_t a = (id >> 8) & 0x7Fu;
@@ -113,7 +128,7 @@ static uint32_t xr_local_addr(void)
                 (unsigned)(xr_me >> 24) & 0xFFu, (unsigned)(xr_me >> 16) & 0xFFu,
                 (unsigned)(xr_me >> 8) & 0xFFu, (unsigned)xr_me & 0xFFu);
     }
-    return xr_me;
+    return htonl(xr_me);                   /* the HLE works in network order */
 }
 
 static intptr_t xr_open(void)
@@ -146,7 +161,7 @@ static int xr_sendto(intptr_t h, const void *p, int n, uint32_t ip, uint16_t por
     if (n <= 0 || n > XR_DGRAM)
         return -XNET_WSAEMSGSIZE;
     s = &xr_s[h];
-    if (roam_tunnel_send(xr_me, ip, s->port, port, p, n) != 0) {
+    if (roam_tunnel_send(xr_me, ntohl(ip), s->port, port, p, n) != 0) {
         xr_notun++;
         return -XNET_WSAENETDOWN;
     }
@@ -165,7 +180,7 @@ static int xr_recvfrom(intptr_t h, void *p, int n, uint32_t *ip, uint16_t *port)
         return -XNET_WSAEWOULDBLOCK;
     r = s->q[s->head].len < n ? s->q[s->head].len : n;
     memcpy(p, s->q[s->head].d, (size_t)r);
-    *ip = s->q[s->head].src;
+    *ip = htonl(s->q[s->head].src);
     *port = s->q[s->head].sport;
     s->head = (s->head + 1) % XR_QUEUE;
     xr_rx++;
