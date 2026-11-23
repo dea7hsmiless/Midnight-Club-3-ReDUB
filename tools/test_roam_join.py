@@ -89,7 +89,12 @@ def run(exe: Path, env_extra: dict) -> str:
 
 def main() -> int:
     root = Path(__file__).resolve().parent.parent
-    cc = os.environ.get("CC") or shutil.which("clang") or shutil.which("cc")
+    # Prefer the MSYS2 toolchain: a clang that cannot link -lpthread (the
+    # Swift toolchain on PATH, for one) fails this harness at the link step.
+    msys = "C:/msys64/clang64/bin/clang.exe"
+    cc = (os.environ.get("CC")
+          or (msys if os.path.exists(msys) else None)
+          or shutil.which("clang") or shutil.which("cc"))
     if not cc:
         print("no C compiler on PATH (set CC, or run in an MSYS2 CLANG64 shell)")
         return 2

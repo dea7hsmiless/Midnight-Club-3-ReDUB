@@ -3355,13 +3355,19 @@ void online_menu_patch(void)
         if (sig != last) {
             last = sig;
             online_labels_discover();
-        } else if (online_label_n[0] == 0 && (sig & 0xFFu) == 0) {
-            /* Discovery can run before the screen has interned its strings
-             * and find nothing; without a retry the rename is lost for the
-             * rest of the session. Cheap: only while nothing was found. */
-            static unsigned retry;
-            if ((++retry & 63u) == 0 && retry < 4096u)
-                online_labels_discover();
+        } else if (online_label_n[0] == 0) {
+            /* Discovery can run before the screen has interned its strings and
+             * find nothing, and returning to the same screen keeps the
+             * signature, so the rename used to be lost for the rest of the
+             * session. Retry a bounded number of times, about every two
+             * seconds: the scan walks the guest heap, so it must not become a
+             * per-frame cost. */
+            static unsigned wait, tries;
+            if (++wait >= 120) {
+                wait = 0;
+                if (++tries <= 8)
+                    online_labels_discover();
+            }
         }
         online_labels_apply();
     }
