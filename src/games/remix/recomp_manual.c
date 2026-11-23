@@ -3728,9 +3728,9 @@ static void port_build(void)
      * an Advanced page. Ids 0..16 fit; 15 opens Advanced, and ids 17..21 get
      * their own event range below. Desktop keeps its own order. */
     const int main_order[]={0,1,8,9,10,11,2,12,3,13,14,16,15};
-    const int adv_order[]={5,7,4,6,19,20,21,17,18,22};
+    const int adv_order[]={5,7,4,6,19,20,21,17,18,22,23};
     const int *order=port_page?adv_order:main_order;
-    int settings=port_page?10:13;
+    int settings=port_page?11:13;
 #else
     const int order[]={0,5,2,12,3,4,6,13,14,1,16,7,9,11,15,8,10};
     int capacity=MEM32(port_list+0x230);
