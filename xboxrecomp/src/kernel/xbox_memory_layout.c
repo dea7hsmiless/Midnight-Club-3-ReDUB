@@ -2330,7 +2330,7 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
         fprintf(stderr, "xbox_MemoryLayoutInit: mapped %zu KB at 0x%08X (original Xbox address)\n",
                 g_memory_size / 1024, XBOX_MAP_START);
     } else {
-        fprintf(stderr, "xbox_MemoryLayoutInit: mapped %zu KB at 0x%p (offset %+td from Xbox base)\n",
+        fprintf(stderr, "xbox_MemoryLayoutInit: mapped %zu KB at %p (offset %+td from Xbox base)\n",
                 g_memory_size / 1024, g_memory_base, g_memory_offset);
     }
 

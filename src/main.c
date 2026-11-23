@@ -928,8 +928,16 @@ int main(int argc, char **argv)
         extern void ios_boot(void);
         extern int ios_launcher_run(void);
         ios_boot();
-        if (!ios_launcher_run())
-            fprintf(stderr, "[IOS STARTUP] no window scene: starting the game anyway\n");
+        if (!ios_launcher_run()) {
+            /* No scene, so no window can ever be created; starting the guest
+             * would run the title behind nothing. The 0.2.4 build (the iOS
+             * reference tree) returns here too. */
+            fprintf(stderr, "[IOS STARTUP] no window scene: not starting the guest\n");
+            fflush(stderr);
+            return 0;
+        }
+        fprintf(stderr, "[IOS STARTUP] launcher finished; starting the guest\n");
+        fflush(stderr);
     }
 #endif
 #ifdef _WIN32

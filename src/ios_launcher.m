@@ -53,6 +53,7 @@ void ios_haptic_tick(int strong){
 @property(nonatomic,strong) NSString *activeGame;
 @property(nonatomic,strong) NSMutableDictionary *settings;
 @property(nonatomic,strong) NSMutableDictionary *valueButtons;
+@property(nonatomic,strong) NSMutableSet *expandedSettings;
 @property(nonatomic,strong) NSTimer *timer;
 @property(nonatomic) BOOL done,busy,verified;
 @property(nonatomic) UIBackgroundTaskIdentifier backgroundTask;
@@ -113,9 +114,29 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
 - (void)render {
  for(UIView *v in self.rail.subviews)[v removeFromSuperview];for(UIView *v in self.pane.subviews)[v removeFromSuperview];
  CGFloat rw=self.rail.bounds.size.width,w=self.pane.bounds.size.width,h=self.pane.bounds.size.height;if(w<1)return;
- [self label:@"ReDUB" size:26 bold:YES frame:CGRectMake(16,16,rw-20,42) parent:self.rail muted:NO];
+ /* The rail carries the game logo, not the word "ReDUB" in text: that is what
+  * the desktop launcher's rail shows (Launcher.cs BrandPanel rail picture,
+  * 188x84 at 16,24), and the iPad/iPhone rail has room for it now that the
+  * settings are collapsed sections. Aspect-fit, capped so the page buttons
+  * keep their positions. */
+ CGFloat navTop=74;
+ {
+  UIImage *mark=[UIImage imageWithContentsOfFile:[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Assets/logo.png"]];
+  if(mark&&mark.size.width>0){
+   CGFloat lw=rw-20,lh=lw*mark.size.height/mark.size.width;
+   if(lh>58)lh=58;
+   UIImageView *brand=[[UIImageView alloc]initWithImage:mark];
+   brand.frame=CGRectMake(10,14,lw,lh);
+   brand.contentMode=UIViewContentModeScaleAspectFit;
+   brand.accessibilityLabel=@"Midnight Club 3 ReDUB logo";
+   [self.rail addSubview:brand];
+   navTop=MAX(74.0,14+lh+12);
+  } else {
+   [self label:@"ReDUB" size:26 bold:YES frame:CGRectMake(16,16,rw-20,42) parent:self.rail muted:NO];
+  }
+ }
  NSArray *pages=@[@"Game",@"Install",@"Settings",@"Support",@"About"];
- for(NSUInteger i=0;i<pages.count;i++){CGFloat y=i<3?74+i*49:MAX(228,self.rail.bounds.size.height-100)+(i-3)*45;UIButton *b=[self button:pages[i] frame:CGRectMake(9,y,rw-18,41) parent:self.rail action:@selector(nav:) primary:[self.page isEqual:pages[i]]];b.enabled=!self.busy;}
+ for(NSUInteger i=0;i<pages.count;i++){CGFloat y=i<3?navTop+i*49:MAX(228,self.rail.bounds.size.height-100)+(i-3)*45;UIButton *b=[self button:pages[i] frame:CGRectMake(9,y,rw-18,41) parent:self.rail action:@selector(nav:) primary:[self.page isEqual:pages[i]]];b.enabled=!self.busy;}
  CGFloat x=22,cw=w-44;
  if([self.page isEqual:@"Game"]){
  CGFloat heroH=MAX(150,MIN(280,h-160));UIView *hero=[[UIView alloc]initWithFrame:CGRectMake(0,0,w,heroH)];hero.clipsToBounds=YES;[self.pane addSubview:hero];
@@ -149,9 +170,10 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
 - (NSArray*)rows {return @[
  @[@"Display",@"Gamma",@"MC3_GAMMA",@[@"0.8",@"0.9",@"1",@"1.1",@"1.2",@"1.3",@"1.4"],@"1",@[@"0.8",@"0.9",@"1.0 (Default)",@"1.1",@"1.2",@"1.3",@"1.4"]],
  @[@"Display",@"Brightness",@"MC3_BRIGHTNESS",@[@"0.8",@"0.9",@"1",@"1.1",@"1.2"],@"1",@[@"80%",@"90%",@"100% (Default)",@"110%",@"120%"]],
- @[@"Display",@"VSync",@"RECOMP_GL_VSYNC",@[@"0",@"1",@"-1"],@"1",@[@"Off",@"On",@"Adaptive"]],
+ @[@"Display",@"VSync",@"RECOMP_GL_VSYNC",@[@"0",@"1",@"-1"],@"1",@[@"Off",@"On",@"Adaptive"],@"Availability depends on the iOS graphics driver. Frame timing diagnostics report whether the request was accepted."],
+ @[@"Display",@"Frame rate",@"MC3_FRAME_RATE",@[@"30",@"60"],@"30",@[@"30 FPS (Default)",@"60 FPS (Restart)"]],
  @[@"Graphics",@"Preset",@"MC3_GRAPHICS_PRESET",@[@"default",@"performance",@"quality"],@"default",@[@"Default",@"Performance",@"Quality"],@"Applies a matching set of graphics values; the rows below update to match. Render scale, HUD and filtering apply on the next launch."],
- @[@"Graphics",@"Render scale",@"RECOMP_GL_SCALE",@[@"1",@"1.5",@"2",@"3",@"5"],@"2",@[@"1x",@"1.5x",@"2x",@"3x",@"5x"]],
+ @[@"Graphics",@"Render resolution",@"RECOMP_GL_SCALE",@[@"1",@"1.5",@"2",@"3",@"5"],@"2",@[@"1x",@"1.5x",@"2x",@"3x",@"5x"]],
  @[@"Graphics",@"HUD texture quality",@"RECOMP_GL_UI_SCALE",@[@"1",@"2",@"3",@"5"],@"3",@[@"1x",@"2x",@"3x (Default)",@"5x"]],
  @[@"Graphics",@"Anti-aliasing",@"RECOMP_GL_FXAA",@[@"0",@"1",@"2",@"3"],@"1",@[@"Off",@"FXAA",@"FXAA Low",@"FXAA High"]],
  @[@"Graphics",@"Texture filtering",@"RECOMP_GL_ANISO",@[@"1",@"4",@"16"],@"4",@[@"1x",@"4x (Default)",@"16x"]],
@@ -165,10 +187,18 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  @[@"Controls",@"Tap-to-latch gas",@"RECOMP_TOUCH_LATCH",@[@"0",@"1"],@"0",@[@"Off",@"On"]],
  @[@"Controls",@"Auto-accelerate",@"RECOMP_TOUCH_AUTO_GAS",@[@"0",@"1"],@"0",@[@"Off",@"On"]],
  @[@"Controls",@"Touch haptics",@"RECOMP_TOUCH_HAPTICS",@[@"1",@"0"],@"1",@[@"On",@"Off"],@"A light click when a pedal engages and a firmer one at full throttle, in every pedal layout."],
+ @[@"Controls",@"Stick haptics",@"RECOMP_TOUCH_STICK_HAPTICS",@[@"1",@"0"],@"1",@[@"On",@"Off"],@"Clicks when the analog stick leaves centre and reaches the outer ring, in every pedal mode. Touch haptics must also be on."],
  @[@"Controls",@"Controller vibration",@"MC3_RUMBLE_STRENGTH",@[@"0",@"50",@"75",@"100",@"125",@"150"],@"100",@[@"Off",@"50%",@"75%",@"100%",@"125%",@"150%"]],
+ @[@"Controls",@"Steering",@"RECOMP_TOUCH_STEER",@[@"stick",@"tilt",@"both"],@"stick",@[@"Stick",@"Tilt",@"Stick + tilt"],@"Tilt uses the phone's accelerometer. Hold the phone level when the race starts to set its centre."],
+ @[@"Controls",@"Steering response",@"RECOMP_TOUCH_STEER_SENS",@[@"1",@"1.35",@"1.7",@"2"],@"1",@[@"Normal",@"Quick",@"Sharp",@"Very sharp"],@"Boosts small steering inputs; full lock is unchanged."],
+ @[@"Controls",@"Tilt range",@"RECOMP_TOUCH_TILT_RANGE",@[@"0.35",@"0.45",@"0.55",@"0.70"],@"0.45",@[@"Short",@"Medium (Default)",@"Wide",@"Extra wide"],@"A wider range needs more phone tilt for full steering lock."],
+ @[@"Controls",@"Tilt dead zone",@"RECOMP_TOUCH_TILT_DEADZONE",@[@"0.02",@"0.06",@"0.10"],@"0.06",@[@"Small",@"Normal (Default)",@"Large"],@"Ignores small movements around the calibrated centre."],
+ @[@"Controls",@"Invert tilt",@"RECOMP_TOUCH_TILT_INVERT",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Turn on if tilting left steers right."],
  @[@"Advanced",@"Steering dead zone",@"RECOMP_TOUCH_DEADZONE",@[@"0",@"3",@"5",@"8",@"12"],@"5",@[@"Off",@"3%",@"5% (Default)",@"8%",@"12%"],@"How far the stick must move before it steers. Ignores tiny thumb movements around the centre; full lock is still reached at the ring's edge."],
  @[@"Advanced",@"Throttle ramp",@"RECOMP_TOUCH_RAMP",@[@"0",@"150",@"300"],@"0",@[@"Off",@"Fast (150 ms)",@"Smooth (300 ms)"],@"Eases the touch pedals from rest to full throttle or brake over 150 or 300 ms instead of an instant press. Gives smoother launches and less wheelspin; a real controller's triggers are not affected."],
  @[@"Diagnostics",@"FPS counter",@"MC3_FPS_OVERLAY",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Draws the frame rate at the top of the screen."],
+ @[@"Diagnostics",@"Frame timing log",@"MC3_TIME_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Logs game steps, gameplay transitions and presentation waits once per second. Enable before Play; share diagnostics after a race."],
+ @[@"Diagnostics",@"Performance report",@"MC3_PERF",@[@"0",@"3"],@"0",@[@"Off",@"Every 3 seconds"],@"Measures CPU waits, guest lock contention and renderer work. Enable for a short race, then share diagnostics. Restart after changing."],
  @[@"Diagnostics",@"GL error log",@"RECOMP_GL_ERRORS",@[@"0",@"1",@"2"],@"0",@[@"Off",@"Step",@"Call"],@"Step names the stage that raised a GL error; Call names the exact GL call and is slow, for chasing a driver problem."],
  @[@"Diagnostics",@"Renderer trace",@"RECOMP_GL_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Writes shader sources, surface and texture creation, and any texture mode the renderer does not implement (bump, dot, cube) to the launch log. Diagnostic only: it slows loading and makes a large log. Turn it off when done."],
  @[@"Diagnostics",@"Texgen trace",@"RECOMP_GL_TEXGEN_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Logs fixed-function texture-coordinate generation that the renderer cannot yet do. Use with Renderer trace when chasing graphics bugs in the garage or menus."],
@@ -177,38 +207,90 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  NSUInteger index=[row[3] indexOfObject:value];
  return index==NSNotFound?value:row[5][index];
 }
+- (NSString*)settingsGroup:(NSArray*)r {
+ NSString *k=r[2];
+ if([k isEqual:@"MC3_FPS_OVERLAY"])return @"Display";
+ if([r[0] isEqual:@"Diagnostics"])return @"Diagnostics";
+ if([r[0] isEqual:@"Advanced"]||[k isEqual:@"RECOMP_GL_VSYNC"]||[k isEqual:@"RECOMP_GL_QUEUE_FRAMES"])return @"Advanced";
+ if([k containsString:@"HAPTICS"]||[k isEqual:@"MC3_RUMBLE_STRENGTH"])return @"Feedback";
+ if([k containsString:@"TILT"]||[k isEqual:@"RECOMP_TOUCH_STEER_SENS"])return @"Tilt & steering";
+ if([r[0] isEqual:@"Controls"])return @"Touch controls";
+ if([r[0] isEqual:@"Display"]||[k isEqual:@"RECOMP_GL_ASPECT"])return @"Display";
+ return @"Graphics";
+}
+- (void)toggleSettingsSection:(UIButton*)b {
+
+ NSString *group=b.accessibilityIdentifier;
+ if([self.expandedSettings containsObject:group])[self.expandedSettings removeObject:group];
+ else [self.expandedSettings addObject:group];
+ [NSUserDefaults.standardUserDefaults setObject:self.expandedSettings.allObjects forKey:@"ReDUBExpandedSettingsV2"];
+ CGPoint offset=self.pane.contentOffset;[self render];
+ self.pane.contentOffset=CGPointMake(0,MIN(offset.y,MAX(0,self.pane.contentSize.height-self.pane.bounds.size.height)));
+}
 - (void)renderSettings:(CGFloat)cw {
- [self label:@"Settings" size:27 bold:YES frame:CGRectMake(22,16,cw,42) parent:self.pane muted:NO];[self label:@"Tap a value or an arrow to change it. Saved for the next launch." size:12 bold:NO frame:CGRectMake(22,61,cw,28) parent:self.pane muted:YES];
+ [self label:@"Settings" size:27 bold:YES frame:CGRectMake(22,16,cw-44,42) parent:self.pane muted:NO];
+ [self label:@"Saved automatically. Close and reopen the game to apply changes." size:12 bold:NO frame:CGRectMake(22,61,cw-44,36) parent:self.pane muted:YES];
  self.valueButtons=[NSMutableDictionary dictionary];
- CGFloat y=106;NSString *category=@"";NSUInteger i=0;
- for(NSArray *r in self.rows){
-  if(![category isEqual:r[0]]){
-   category=r[0];[self label:category size:18 bold:YES frame:CGRectMake(22,y,cw,28) parent:self.pane muted:NO];y+=36;
-   /* Say plainly that this section is optional tuning, not required setup. */
-   if([category isEqual:@"Advanced"]){[self label:@"Fine-tuning. The defaults are safe to keep; change these only if you want to." size:11 bold:NO frame:CGRectMake(30,y,cw-60,24) parent:self.pane muted:YES];y+=26;}
-  }
-  BOOL many=[r[3] count]>1;
-  /* Arrows on both sides of every multi-value setting; one value button on
-   * its own for a plain on/off would still work, but the arrows make the
-   * direction explicit and stop a stray tap from changing something. */
-  CGFloat labelW=cw-(many?238.0:162.0);if(labelW<110.0)labelW=110.0;
+ CGFloat y=112;
+ NSArray *rows=self.rows;
+ if(!self.expandedSettings){
+  NSArray *saved=[NSUserDefaults.standardUserDefaults arrayForKey:@"ReDUBExpandedSettingsV2"];
+  self.expandedSettings=[NSMutableSet setWithArray:saved?:@[@"Display",@"Graphics"]];
+ }
+ for(NSString *group in @[@"Display",@"Graphics",@"Touch controls",@"Tilt & steering",@"Feedback",@"Advanced",@"Diagnostics"]){
+  BOOL expanded=[self.expandedSettings containsObject:group];
+  UIButton *section=[self button:[NSString stringWithFormat:@"%@  %@",expanded?@"▼":@"▶",group] frame:CGRectMake(22,y,cw-44,44) parent:self.pane action:@selector(toggleSettingsSection:) primary:NO];
+  section.accessibilityIdentifier=group;section.accessibilityLabel=group;
+  section.accessibilityValue=expanded?@"Expanded":@"Collapsed";y+=54;
+  if(!expanded)continue;
+  for(NSUInteger i=0;i<rows.count;i++){
+   NSArray *r=rows[i];if(![[self settingsGroup:r] isEqual:group])continue;
+  BOOL stacked=cw<460;
+  CGFloat labelW=stacked?cw-60:cw-230;
   [self label:r[1] size:13 bold:NO frame:CGRectMake(30,y,labelW,42) parent:self.pane muted:NO];
+  if(stacked)y+=40;
   NSString *value=self.settings[r[2]]?:r[4];
-  CGFloat vx=cw+(many?-164.0:-126.0);
-  UIButton *vb=[self button:[self settingLabel:r value:value] frame:CGRectMake(vx,y,140,42) parent:self.pane action:@selector(nextSetting:) primary:NO];vb.tag=i;
-  vb.accessibilityLabel=[NSString stringWithFormat:@"%@, %@",r[1],[self settingLabel:r value:value]];
-  if(r.count>6&&[r[6] length])vb.accessibilityHint=r[6];
-  self.valueButtons[@(i)]=vb;
-  if(many){
-   UIButton *rt=[self button:@"▶" frame:CGRectMake(vx+144,y,34,42) parent:self.pane action:@selector(nextSetting:) primary:NO];rt.tag=i;
-   UIButton *lt=[self button:@"◀" frame:CGRectMake(vx-38,y,34,42) parent:self.pane action:@selector(prevSetting:) primary:NO];lt.tag=i;
-   rt.accessibilityLabel=[NSString stringWithFormat:@"Next %@",r[1]];
-   lt.accessibilityLabel=[NSString stringWithFormat:@"Previous %@",r[1]];
+  CGFloat vx=stacked?30:cw-204;
+  BOOL binary=[r[3] count]==2&&[r[3] containsObject:@"0"]&&[r[3] containsObject:@"1"];
+  if(binary){
+   UISwitch *toggle=[[UISwitch alloc]initWithFrame:CGRectMake(vx,y+5,51,31)];
+   toggle.on=[value isEqual:@"1"];toggle.tag=i;
+   toggle.accessibilityLabel=r[1];
+   [toggle addTarget:self action:@selector(switchSetting:) forControlEvents:UIControlEventValueChanged];
+   [self.pane addSubview:toggle];
+  }else{
+   UIButton *vb=[self button:[self settingLabel:r value:value] frame:CGRectMake(vx,y,180,42) parent:self.pane action:nil primary:NO];vb.tag=i;
+   NSMutableArray *actions=[NSMutableArray array];
+   for(NSUInteger choice=0;choice<[r[3] count];choice++){
+    NSString *selected=r[3][choice];
+    UIAction *action=[UIAction actionWithTitle:r[5][choice] image:nil identifier:nil handler:^(__kindof UIAction *action){
+     NSString *current=self.settings[r[2]]?:r[4];NSUInteger currentIndex=[r[3] indexOfObject:current];
+     if(currentIndex==NSNotFound)currentIndex=0;
+     [self shiftRow:i delta:(NSInteger)choice-(NSInteger)currentIndex];
+     CGPoint offset=self.pane.contentOffset;[self render];self.pane.contentOffset=offset;
+    }];
+    action.state=[selected isEqual:value]?UIMenuElementStateOn:UIMenuElementStateOff;
+    [actions addObject:action];
+   }
+   vb.menu=[UIMenu menuWithTitle:r[1] children:actions];vb.showsMenuAsPrimaryAction=YES;
+   vb.accessibilityLabel=[NSString stringWithFormat:@"%@, %@",r[1],[self settingLabel:r value:value]];
+   if(r.count>6)vb.accessibilityHint=r[6];self.valueButtons[@(i)]=vb;
   }
-  i++;y+=53;
+  y+=53;
   /* Optional seventh element: what the setting actually does. */
   if(r.count>6&&[r[6] length]){[self label:r[6] size:11 bold:NO frame:CGRectMake(30,y,MAX(160,cw-60),44) parent:self.pane muted:YES];y+=44;}
- }self.pane.contentSize=CGSizeMake(self.pane.bounds.size.width,y+20);
+
+  }
+  y+=12;
+ }
+ self.pane.contentSize=CGSizeMake(self.pane.bounds.size.width,y+20);
+}
+- (void)switchSetting:(UISwitch*)sender {
+ NSArray *r=self.rows[sender.tag];NSString *target=sender.on?@"1":@"0";
+ NSString *current=self.settings[r[2]]?:r[4];
+ NSInteger from=[r[3] indexOfObject:current];if(from==NSNotFound)from=0;
+ [self shiftRow:sender.tag delta:(NSInteger)[r[3] indexOfObject:target]-from];
+ sender.on=[(self.settings[r[2]]?:r[4]) isEqual:@"1"];
 }
 - (void)prevSetting:(UIButton*)b {[self shiftRow:b.tag delta:-1];}
 - (void)nextSetting:(UIButton*)b {[self shiftRow:b.tag delta:1];}
@@ -291,6 +373,7 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{char err[512];BOOL ok=ios_disc_verify(self.activeGame.fileSystemRepresentation,err,sizeof err);NSString *message=ok?@"Supported Xbox Remix executable verified. Game assets are checked when used by the runtime.":[NSString stringWithUTF8String:err];dispatch_async(dispatch_get_main_queue(),^{self.busy=NO;self.verified=ok;self.status=ok?@"Verification passed":@"Verification failed";[self render];[self alert:message];});});
 }
 - (void)play {
+ fprintf(stderr,"[IOS STARTUP] Play pressed: game=%s verified=%d\n",self.activeGame.fileSystemRepresentation,self.verified?1:0);fflush(stderr);
  if(self.busy)return;if(!self.verified){self.page=@"Install";[self render];return;}
  /* Override stale desktop paths from an imported settings file. Saves must be writable. */
  NSString *save=[Documents() stringByAppendingPathComponent:@"save"];[[NSFileManager defaultManager] createDirectoryAtPath:save withIntermediateDirectories:YES attributes:nil error:nil];setenv("MC3_GAME_DIR",self.activeGame.fileSystemRepresentation,1);setenv("MC3_SAVE_DIR",save.fileSystemRepresentation,1);

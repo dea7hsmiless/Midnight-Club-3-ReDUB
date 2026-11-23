@@ -19,6 +19,7 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <limits.h>          /* PATH_MAX, for the iOS mapping file */
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
@@ -2424,10 +2425,30 @@ BOOL UnmapViewOfFile(LPCVOID baseAddr)
 }
 #else
 /* An unnamed file descriptor that ftruncate and mmap both accept. Linux has
- * memfd_create for this; elsewhere an immediately-unlinked temp file does. */
+ * memfd_create for this; Apple gets an unlinked temp file on iOS and POSIX
+ * shm on the Mac. */
 static int anon_map_fd(const char *name)
 {
 #if defined(__APPLE__)
+#if TARGET_OS_IPHONE
+    /* shm_open() is not a reliable anonymous mapping primitive inside an
+     * iOS app sandbox (it fails with EPERM/ENOMEM on current devices). A
+     * file created in the app's temporary directory and unlinked at once
+     * has the same mmap aliasing semantics and remains private to the app.
+     *
+     * This is the 0.2.4 iOS behaviour, restored verbatim: dropping this
+     * branch made the title stop at xbox_MemoryLayoutInit with
+     * "CreateFileMapping failed (error 8)" as soon as Play was pressed. */
+    const char *tmp = getenv("TMPDIR");
+    char path[PATH_MAX];
+    if (!tmp || !tmp[0]) tmp = "/tmp";
+    snprintf(path, sizeof(path), "%s%sredub-map-XXXXXX", tmp,
+             tmp[strlen(tmp) - 1] == '/' ? "" : "/");
+    int fd = mkstemp(path);
+    if (fd >= 0) unlink(path);
+    else fprintf(stderr, "  [MEM] no mapping file at %s (errno %d)\n", path, errno);
+    return fd;
+#else
     static volatile LONG map_counter = 0;
     char shm_name[32];
     LONG seq = InterlockedIncrement(&map_counter);
@@ -2436,6 +2457,7 @@ static int anon_map_fd(const char *name)
     int fd = shm_open(shm_name, O_CREAT | O_RDWR | O_EXCL, 0600);
     if (fd >= 0) shm_unlink(shm_name);
     return fd;
+#endif
 #else
     return memfd_create(name ? name : "xbox_map", 0);
 #endif
@@ -2451,12 +2473,20 @@ HANDLE CreateFileMappingA(HANDLE file, LPSECURITY_ATTRIBUTES sa, DWORD protect,
     int fd = anon_map_fd(name);
     if (fd < 0) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return NULL; }
     if (ftruncate(fd, (off_t)size) != 0) {
+        int e = errno;
         close(fd);
+        fprintf(stderr, "  [MEM] a %zu KB mapping cannot be sized (errno %d)\n",
+                (size_t)(size / 1024), e);
         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
         return NULL;
     }
 
     w32_object *o = obj_alloc(K_FILEMAP);
+    if (!o) {
+        close(fd);
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return NULL;
+    }
     o->fd       = fd;
     o->map_size = size;
     return (HANDLE)o;

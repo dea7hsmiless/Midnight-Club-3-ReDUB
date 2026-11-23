@@ -72,6 +72,31 @@ def app_version() -> str:
     return "0.0.0"
 
 
+def payload_files(appdir: Path) -> None:
+    """The launcher's artwork and the HD logo pack.
+
+    The launcher reads Assets/hero.jpg and Assets/logo.png from the bundle, and
+    Play copies hd/textures into Documents/hd so the boot and menu screens show
+    the ReDUB logos instead of the originals. The 0.2.4 package shipped both;
+    without them the launcher's hero is blank and the in-game menus keep stock
+    art. Missing files are reported, not fatal: the app still runs.
+    """
+    assets = appdir / "Assets"
+    assets.mkdir()
+    for name, src in (("hero.jpg", ROOT / "launcher" / "art" / "hero.jpg"),
+                      ("logo.png", ROOT / "launcher" / "art" / "logo.png")):
+        if src.is_file():
+            shutil.copy2(src, assets / name)
+        else:
+            print(f"warning: no {src}: the launcher hero will be blank")
+
+    hd = ROOT / "hd"
+    if (hd / "textures").is_dir():
+        shutil.copytree(hd, appdir / "hd")
+    else:
+        print(f"warning: no {hd}: the menus will use the original logos")
+
+
 def icons_png(appdir: Path) -> list[str]:
     src = IOS / "assets" / "redub-ios-icon.png"
     try:
@@ -130,6 +155,7 @@ def main(argv: list[str]) -> int:
 
     shutil.copy2(binary, app / EXE_NAME)
     (app / "save").mkdir()
+    payload_files(app)
 
     if not args.no_disc:
         print(f"copying the disc ({disc}) ... this takes a few minutes")
