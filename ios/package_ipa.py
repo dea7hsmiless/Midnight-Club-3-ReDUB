@@ -111,7 +111,6 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--no-env", action="store_true", help="ship no settings file")
     ap.add_argument("--no-disc", action="store_true", help="omit the 4.4 GB disc (thin test package)")
     args = ap.parse_args(argv)
-
     binary = Path(args.binary)
     disc = Path(args.disc)
     if not binary.is_file():
@@ -173,6 +172,24 @@ def main(argv: list[str]) -> int:
             "UIInterfaceOrientationLandscapeRight",
         ],
         "UIRequiresFullScreen": True,
+        # The scene lifecycle. ios_scene.m's ReDUBSceneDelegate is the app's only
+        # scene: it shows the placeholder, then hands over to SDL via
+        # postFinishLaunch. Without this key UIKit creates no scene, SDL never
+        # starts, and the app looks like it does nothing at all.
+        "UIApplicationSceneManifest": {
+            "UIApplicationSupportsMultipleScenes": False,
+            "UISceneConfigurations": {
+                "UIWindowSceneSessionRoleApplication": [
+                    {
+                        "UISceneConfigurationName": "Default Configuration",
+                        "UISceneDelegateClassName": "ReDUBSceneDelegate",
+                    }
+                ]
+            },
+        },
+        # A launch screen. Without one iOS runs the app in a legacy letterboxed
+        # mode and warns at launch.
+        "UILaunchScreen": {},
         # The app's Documents folder in the Files app, so the settings file can
         # be edited without a Mac or a cable.
         "UIFileSharingEnabled": True,

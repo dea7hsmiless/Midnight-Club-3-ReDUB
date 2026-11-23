@@ -900,12 +900,15 @@ static int game_main_args(int argc, char **argv)
     return game_main();
 }
 
-#if defined(__ANDROID__)
-/* SDL starts the program as SDL_main on a thread of its own (SDL_main.h
- * renames main); the title then runs on xbox_host_main_run's 64 MB stack
- * while that thread serves SDL. The folder, log and settings first:
- * android_host.c. */
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+/* SDL starts the program as SDL_main: SDL_main.h renames main, and SDL's own
+ * main (libSDL2main) is the real entry -- it calls UIApplicationMain/Java
+ * bootstrap and only then this. Without the rename on iOS our main ran before
+ * any application, no scene existed, and the app never showed a window: the
+ * 0.2.4 iOS build asserted exactly this ("main.o exports SDL_main"). */
 #include <SDL_main.h>
+#endif
+#if defined(__ANDROID__)
 void android_boot(void);
 #endif
 

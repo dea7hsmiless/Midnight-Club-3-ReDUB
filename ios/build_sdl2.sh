@@ -29,15 +29,13 @@ SRC_W=$(win_path "$SRC")
 echo "SDL2 source: $SRC_W"
 echo "building in: $BUILD (iOS $DEPLOY, static)"
 
-# SDL's iOS scene support needs the patch the 0.2.4 build used (the launcher and
-# the game window must belong to the same UIScene). Applied if not already.
-if [ -f ios/sdl-scenes.patch ] && ! grep -q "redub-before-scenes" "$SRC/.redub-patched" 2>/dev/null; then
-    if (cd "$SRC" && git apply --check "$(pwd)/../../../../ios/sdl-scenes.patch" 2>/dev/null); then
-        echo "applying ios/sdl-scenes.patch"
-        (cd "$SRC" && git apply "$(pwd)/../../../../ios/sdl-scenes.patch") || true
-        : > "$SRC/.redub-patched"
-    fi
-fi
+# SDL's iOS scene support needs the patch the 0.2.4 build used: SDL must not start
+# SDL_main before a scene exists, and its window must belong to a scene. The
+# patch script edits the SDL source in place (keeping .redub-before-scenes
+# backups), so it is idempotent.
+echo "patching SDL for the scene lifecycle"
+IOS_SDL_SOURCE="$SRC_W" python3 ios/prepare_sdl_scenes.py 2>&1 | tail -3 || {
+    echo "prepare_sdl_scenes.py failed (already applied?): continuing"; }
 
 cmake -S "$SRC_W" -B "$BUILD" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$(win_path "$(pwd)/ios/ios.toolchain.cmake")" \
@@ -54,6 +52,9 @@ cmake -S "$SRC_W" -B "$BUILD" -G Ninja \
     -DSDL_THREADS=ON \
     2>&1 | tail -15
 
-cmake --build "$BUILD" --target SDL2-static 2>&1 | tail -20
+cmake --build "$BUILD" --target SDL2-static 2>&1 | tail -8
+# SDL2main is the real entry point: it calls UIApplicationMain and then SDL_main
+# (our main.c, renamed by SDL_main.h). Pure static library, no extra sources.
+cmake --build "$BUILD" --target SDL2main 2>&1 | tail -4
 
 ls -la "$BUILD"/libSDL2*.a 2>/dev/null || { echo "no libSDL2.a produced"; exit 1; }
