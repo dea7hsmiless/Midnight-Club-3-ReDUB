@@ -3147,8 +3147,16 @@ void sub_00180160(void)
      * torn down, so it keeps drawing over Arcade and the cruise loading screen.
      * online_cruise_pass() makes the move at the top of the next game frame
      * instead, where Go(screen) is called the way the game calls it. */
-    online_cruise_pending = 1;
+    /* The front end's menu activation waits for its item's action to change the
+     * screen. Returning without one leaves it spinning for ever in a UI list
+     * walk with the guest lock held: the GPU trap is then never taken and the
+     * game freezes. Measured on iPhone and PC: "cruise: requested" with no
+     * "Arcade opened", then "[PB] NOP ... trap still pending" for ever. The
+     * game's own items make the same Go() from this callback, so make it here
+     * too, and accept the backdrop glitch until it can be fixed properly. */
     fprintf(stderr, "[ONLINE] cruise: requested\n");
+    sub_0018C530_gen();
+    fprintf(stderr, "[ONLINE] cruise: Arcade opened synchronously\n");
     g_esp += 4;  /* guest RET: this callback has no stack arguments */
 }
 /** "Online" keeps the Networking item's place
