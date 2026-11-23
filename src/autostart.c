@@ -40,6 +40,7 @@
 extern void (*xbox_path_hook)(const char *xbox_path);
 extern int mc3_menu_item_count(void);      /* recomp_manual.c */
 extern int mc3_port_options_open(void);    /* recomp_manual.c */
+extern void mc3_menu_debug_dump(const char *tag);
 
 /* MC3_AUTOSTART_PORT: the target index is the menu's own last item, not a
  * count of Downs. Options is the last item on the main menu, and the main
@@ -483,6 +484,11 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
     case ST_OPTIONS:                /* Down to Port Options (the last item), A */
         if (s_downs < 7) {
             if (ready(now, 1500, 450)) {
+                if (port_wanted()) {
+                    char tag[32];
+                    snprintf(tag, sizeof tag, "options down %d", s_downs);
+                    mc3_menu_debug_dump(tag);
+                }
                 press(PAD_DOWN, 0, now);
                 s_downs++;
             }

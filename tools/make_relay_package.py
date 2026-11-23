@@ -248,7 +248,10 @@ WantedBy=multi-user.target
 
 def build() -> Path:
     ver = app_version()
-    ver_short = ".".join(ver.split(".")[:2]) if "." in ver else ver
+    # The full version, so the file matches the release it belongs to
+    # (ReDUB-relay-server-0.2.5.zip beside the 0.2.5 packages); the package's
+    # own VERSION file names the release anyway.
+    ver_short = ver
     stage = ROOT / "work-remix" / "relay-package"
     if stage.exists():
         shutil.rmtree(stage)

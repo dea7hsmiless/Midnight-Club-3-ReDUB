@@ -3805,6 +3805,19 @@ static int port_find_pending;            /* FIND A ROOM waiting for an answer */
 /* Read by the autostart walker (src/autostart.c) so a test can wait for the
  * Port Options page instead of guessing that its press opened it. */
 int mc3_port_options_open(void) { return port_open; }
+
+/* The front-end list's own words, for the test walker: page, capacity,
+ * columns, the per-page counts and the selection index (whichever of these
+ * fields it turns out to be -- printing the range settles it). */
+void mc3_menu_debug_dump(const char *tag)
+{
+    uint32_t lst = online_fe_list();
+    if (!lst) { fprintf(stderr, "[MENU] %s: no list\n", tag ? tag : "?"); return; }
+    fprintf(stderr, "[MENU] %s:", tag ? tag : "?");
+    for (uint32_t off = 0x22Cu; off <= 0x26Cu; off += 4u)
+        fprintf(stderr, " %03X=%u", (unsigned)off, (unsigned)MEM32(lst + off));
+    fprintf(stderr, "\n");
+}
 static time_t port_find_t0;
 static int port_page;                   /* Port Options page: 0 main, 1 advanced (iOS) */
 static int port_row_id[32];             /* id behind each row of the current page */

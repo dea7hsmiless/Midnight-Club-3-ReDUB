@@ -93,6 +93,19 @@ def main() -> int:
           relay.members[0x700000FF].room != key(6, 1),
           f"room {relay.members[0x700000FF].room >> 16}")
 
+    # --- a member whose session stalled past EXPIRE_S re-HELLOs ----------
+    # Seen in the field: the game stops sending while a cruise loads, the relay
+    # expires the member, and the next HELLO arrived with the member already
+    # fetched -- `self.members[sender]` then raised KeyError on the receive
+    # path and that player's traffic was lost (or the process died).
+    relay = r.Relay(verbose=False)
+    relay.handle(hello(0x71000001, "staller", key(11, 1)), ("10.4.0.1", 44001))
+    m = relay.members[0x71000001]
+    m.last_seen -= r.EXPIRE_S + 5          # pretend the session went quiet
+    out = relay.handle(hello(0x71000001, "staller", key(11, 1)), ("10.4.0.1", 44001))
+    check("a member that expired and re-HELLOs is re-admitted, without an exception",
+          0x71000001 in relay.members, f"{len(out)} out")
+
     # --- the census is a datagram, even with many rooms -------------------
     relay = r.Relay(verbose=False)
     for g in range(256):

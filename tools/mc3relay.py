@@ -221,6 +221,10 @@ class Relay:
             return []
 
         now = time.monotonic()
+        # Before the lookup, so the member used below is always the one in the
+        # table: reaping after the lookup let a stale Member be healed and then
+        # `self.members[sender]` raised KeyError on the receive path.
+        self.reap()
         known = self.members.get(sender)
 
         if mtype == T_BYE:
@@ -252,7 +256,6 @@ class Relay:
             (_core_ver, _platform, _status, _port, _cfg_rev, room, name,
              _links) = hello
 
-            self.reap()                 # expired members must not hold slots
             if known is None:
                 if len(self.members) >= MAX_MEMBERS:
                     self.say(f"refused  {name or '?'} {sender:08x} {addr[0]}:{addr[1]}"
@@ -285,7 +288,9 @@ class Relay:
                 known.addr = addr          # follow a NAT re-binding
                 known.room = room
                 known.name = name
-            known = self.members[sender]
+            known = self.members.get(sender)
+            if known is None:           # reaped between the two lines
+                return []
         else:
             if known is None:
                 # Not a player we know: never relay a stranger onwards.
