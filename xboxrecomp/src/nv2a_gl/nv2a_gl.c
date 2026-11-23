@@ -36,6 +36,9 @@
 #include "nv2a_gl.h"
 #include <ctype.h>
 #include <sys/stat.h>
+#if defined(__APPLE__)
+#include <TargetConditionals.h>      /* TARGET_OS_IPHONE: iOS is GLES-only */
+#endif
 #ifdef _WIN32
 #include <direct.h>
 #define mkdir(p, mode) _mkdir(p)          /* Windows: no mode argument */
@@ -159,6 +162,9 @@ static inline void es_read_pixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum
 #include "../kernel/nv2a_backend.h"
 
 #include <SDL.h>
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#include <SDL_syswm.h>               /* the UIKit screen framebuffer */
+#endif
 
 #if (!defined(_WIN32) || defined(XBOXRECOMP_SDL_HOST)) && !defined(__SWITCH__)
 void xbox_sdl_keyboard_handle(const SDL_Event *e);   /* input/sdl_keyboard.c */
@@ -178,6 +184,55 @@ int nv2a_gl_adopt_window(void **win, void **ctx);
 int nv2a_gl_draw_placeholder(void);
 int nv2a_gl_screen_size(int *w, int *h);
 static SDL_Window   *s_win;
+/* UIKit owns a nonzero screen FBO; desktop GL uses framebuffer zero. Without
+ * this, iOS renders every frame into framebuffer 0 -- which is not the
+ * CAEAGLLayer -- so the title runs (audio, guest frames) with a black screen.
+ * This is the 0.2.4 iOS behaviour, taken from the reference tree. */
+static GLuint s_screen_fbo, s_screen_colorbuffer;
+static int refresh_screen_target(void)
+{
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    SDL_SysWMinfo info;
+    memset(&info, 0, sizeof info);
+    SDL_VERSION(&info.version);
+    if (!s_win || !SDL_GetWindowWMInfo(s_win, &info)
+        || info.subsystem != SDL_SYSWM_UIKIT
+        || !info.info.uikit.framebuffer || !info.info.uikit.colorbuffer) {
+        static int warned;
+        if (!warned++)
+            fprintf(stderr, "[IOS VIDEO] Cannot obtain UIKit screen framebuffer: %s\n",
+                    SDL_GetError());
+        return 0;
+    }
+    if (s_screen_fbo != info.info.uikit.framebuffer) {
+        fprintf(stderr, "[IOS VIDEO] screen framebuffer=%u colorbuffer=%u\n",
+                info.info.uikit.framebuffer, info.info.uikit.colorbuffer);
+    }
+    s_screen_fbo = info.info.uikit.framebuffer;
+    s_screen_colorbuffer = info.info.uikit.colorbuffer;
+#endif
+    return 1;
+}
+/* The window's target: the UIKit framebuffer on iOS, zero elsewhere. */
+static void bind_screen(GLenum target)
+{
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    (void)target;
+    refresh_screen_target();
+    glBindFramebuffer(GL_FRAMEBUFFER, s_screen_fbo);
+#else
+    glBindFramebuffer(target, 0);
+#endif
+}
+/* SDL_GL_SwapWindow presents whatever renderbuffer is current on iOS, so the
+ * colourbuffer has to be bound immediately before the swap. */
+static void screen_present_begin(void)
+{
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    refresh_screen_target();
+    glBindRenderbuffer(GL_RENDERBUFFER, s_screen_colorbuffer);
+#endif
+}
 static SDL_GLContext s_ctx;
 static int           s_resume_pending;   /* foreground: re-assert GL at the next flip */
 /* Called from the iOS scene delegate when the app becomes active. Plain atomic
@@ -3907,6 +3962,13 @@ static void gl_make_window(void *unused)
         const char *e = getenv("RECOMP_GL_GLES");
 #if defined(__ANDROID__)
         nv2a_gl_es = !(e && e[0] == '0');
+#elif defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        /* iOS has no desktop GL at all: GLES or nothing (RECOMP_GL_GLES=0
+         * forces the 3.0-only path for testing; default is on). Without this
+         * branch iOS asked for a 3.3 core context, got "OpenGL ES 3.3 context
+         * could not be created", and the title ran with audio and no picture.
+         * This is the 0.2.4 iOS behaviour, taken from the reference tree. */
+        nv2a_gl_es = !(e && e[0] == '0');
 #else
         nv2a_gl_es = e && e[0] == '1';
 #endif
@@ -3946,6 +4008,17 @@ static void gl_make_window(void *unused)
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
         s_es_minor = 1;
         s_ctx = SDL_GL_CreateContext(s_win);
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        /* iOS tops out at ES 3.0 (GLES beyond it is deprecated), so the
+         * 3.2 and 3.1 requests above both fail and the ES header falls
+         * back to a 3.00 source. Try it here rather than give up. */
+        if (!s_ctx) {
+            fprintf(stderr, "  [GL] no OpenGL ES 3.1 context (%s); trying 3.0\n", SDL_GetError());
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+            s_es_minor = 0;
+            s_ctx = SDL_GL_CreateContext(s_win);
+        }
+#endif
     }
     if (!s_ctx) {
         fprintf(stderr, "  [GL] context: %s\n", SDL_GetError());
@@ -6724,7 +6797,7 @@ static void touchpad_draw(void)
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, iw, ih, GL_RGBA, GL_UNSIGNED_BYTE, img);
         }
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    bind_screen(GL_FRAMEBUFFER);
     glViewport(0, 0, ww, wh);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
@@ -7011,7 +7084,7 @@ static void fg_size(int w, int h)
             fprintf(stderr, "  [GL] frame generation: flow target incomplete, crossfade instead\n");
             s_fg_on = 1;
         }
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        bind_screen(GL_FRAMEBUFFER);
     }
     s_fg_w = w;
     s_fg_h = h;
@@ -7029,7 +7102,7 @@ static void fg_capture(void)
     if (w <= 0 || h <= 0)
         return;
     fg_size(w, h);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    bind_screen(GL_READ_FRAMEBUFFER);
     glBindTexture(GL_TEXTURE_2D, s_fg_tex[s_fg_index]);
     tex_param_forget(s_fg_tex[s_fg_index]);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
@@ -7080,7 +7153,7 @@ static int fg_second(void)
         fg_draw(0);
 
         /* 2: composite to the window */
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        bind_screen(GL_FRAMEBUFFER);
         glViewport(0, 0, s_fg_w, s_fg_h);
         glUseProgram(s_fg_prog);
         s_cur_prog = s_fg_prog;
@@ -7097,7 +7170,7 @@ static int fg_second(void)
         glActiveTexture(GL_TEXTURE0);
         fg_draw(0);
     } else {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        bind_screen(GL_FRAMEBUFFER);
         glViewport(0, 0, s_fg_w, s_fg_h);
         glDisable(GL_SCISSOR_TEST);
         glDisable(GL_DEPTH_TEST);
@@ -7145,7 +7218,7 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
         }
         held43 = 1;
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    bind_screen(GL_FRAMEBUFFER);
     glViewport(dx, dy, dw, dh);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_STENCIL_TEST);
@@ -7217,7 +7290,7 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
         int steady = fill && fill_steady_init();
         if (steady) {
             fill_steady_pass(s->tex, full, band, 2.0f * band[0]);   /* band[0]: half a band */
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            bind_screen(GL_FRAMEBUFFER);
             glViewport(dx, dy, dw, dh);
             glUseProgram(s_fx_prog);
             s_cur_prog = s_fx_prog;
@@ -7297,17 +7370,34 @@ static void gl_flip(void)
 {
     state_dirty();
 #if defined(__APPLE__)
-    /* Back from the lock screen or another app. The EAGL drawable may have moved
-     * and the render thread's context needs re-asserting before the next
-     * submission, or the game comes back to a frozen picture. (The 0.2.4 iOS
-     * tree also rebuilt an explicit renderbuffer chain here; this renderer
-     * presents through SDL like the Android build does, so re-asserting the
-     * context and marking the state dirty is what applies.) */
+    /* Back from the lock screen or another app. The EAGL drawable may have
+     * moved, so the render thread's context needs re-asserting and the screen
+     * target re-read before the next submission, or the game comes back to a
+     * frozen or black picture. */
     if (__atomic_exchange_n(&s_resume_pending, 0, __ATOMIC_SEQ_CST)) {
         if (s_win && s_ctx)
             SDL_GL_MakeCurrent(s_win, s_ctx);
-        state_dirty();
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        {
+            GLenum st;
+            refresh_screen_target();
+            glBindFramebuffer(GL_FRAMEBUFFER, s_screen_fbo);
+            glBindRenderbuffer(GL_RENDERBUFFER, s_screen_colorbuffer);
+            st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+            /* The suspended drawable returns with stale contents; wipe it so
+             * the first frame cannot show what was there before the switch. */
+            glDisable(GL_SCISSOR_TEST);
+            glColorMask(1, 1, 1, 1);
+            glClearColor(0, 0, 0, 1);
+            glClear(GL_COLOR_BUFFER_BIT);
+            fprintf(stderr, "[IOS LIFECYCLE] GL resumed: framebuffer=%u colorbuffer=%u status=0x%X frame=%u\n",
+                    s_screen_fbo, s_screen_colorbuffer, st, s_frame);
+            fflush(stderr);
+        }
+#else
         fprintf(stderr, "[IOS LIFECYCLE] GL resumed: context re-asserted, state dirty\n");
+#endif
+        state_dirty();
     }
 #endif
     static int dump_every = -1;
@@ -7320,6 +7410,13 @@ static void gl_flip(void)
 
     if (!ready())
         return;
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    /* The UIKit screen target must be readable before anything is drawn: the
+     * reference tree returns here rather than render into a framebuffer UIKit
+     * will not present. */
+    if (!refresh_screen_target())
+        return;
+#endif
     s_frame++;
     {
         /* A frame over 50 ms (a hitch): say what it did -- compiling programs
@@ -7432,7 +7529,7 @@ static void gl_flip(void)
          * placeholder (a loading screen), or
          * at least a clear -- a buffer never drawn to reaches the screen as
          * whatever the driver left in it. */
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        bind_screen(GL_DRAW_FRAMEBUFFER);
         glDisable(GL_SCISSOR_TEST);
         glColorMask(1, 1, 1, 1);
         if (!nv2a_gl_draw_placeholder()) {
@@ -7510,7 +7607,7 @@ static void gl_flip(void)
     if (!nv2a_gl_screen_size(&ww, &wh) || ww <= 0 || wh <= 0)
         SDL_GL_GetDrawableSize(s_win, &ww, &wh);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, s->fbo);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    bind_screen(GL_DRAW_FRAMEBUFFER);
     glDisable(GL_SCISSOR_TEST);
     glColorMask(1, 1, 1, 1);
     glClearColor(0, 0, 0, 1);
@@ -7543,7 +7640,7 @@ swap:
     if (gl_probe()) {
         /* A blue square straight into the window: does anything we draw
          * reach the screen? */
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        bind_screen(GL_FRAMEBUFFER);
         glColorMask(1, 1, 1, 1);
         glEnable(GL_SCISSOR_TEST);
         glScissor(16, 16, 96, 96);
@@ -7653,9 +7750,12 @@ swap:
     }
 #endif
     fg_capture();                    /* the frame just drawn, overlays included */
+    screen_present_begin();
     SDL_GL_SwapWindow(s_win);
-    if (fg_second())                 /* RECOMP_FG: one generated frame */
+    if (fg_second()) {               /* RECOMP_FG: one generated frame */
+        screen_present_begin();
         SDL_GL_SwapWindow(s_win);
+    }
     gq_frame_end();
     s_mg_fb_draw = s_mg_fb_read = 0xFFFFFFFFu;   /* whatever the swap did */
     pf_mark(PF_SWAP);
