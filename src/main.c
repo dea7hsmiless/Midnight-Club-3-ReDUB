@@ -639,7 +639,10 @@ static void set_runtime_defaults(void)
     setenv("RECOMP_FLIP_VBLANK", "1", 0);      /* one flip per vblank, as on the
                                                 * console: unpaced, the menus
                                                 * presented at 100+ fps */
-#if !defined(__SWITCH__)
+    /* A game's audio should play with the Ring/Silent switch on; SDL reads its
+     * hint from the environment before the audio session is created. */
+    setenv("SDL_AUDIO_CATEGORY", "playback", 0);
+#if !defined(__SWITCH__) && !(defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     setenv("RECOMP_KEYBOARD", "1", 0);         /* keyboard as pad 1 (Enter = Start) */
 #endif
     /* DirectSound's DSP command word: registered at run time by each game's
@@ -703,6 +706,20 @@ static int game_main(void)
     game_dir = getenv("MC3_GAME_DIR");
     if (!game_dir || !game_dir[0]) {
         game_dir = MC3_DEFAULT_GAME_DIR;
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        /* The disc lives in the app's Documents folder. SDL does not chdir to
+         * the bundle, so a relative default would resolve against "/" on the
+         * device; resolve it through HOME instead. ios_boot()/the launcher set
+         * MC3_GAME_DIR in practice, so this only catches a bare start. */
+        {
+            static char game_path[2048];
+            const char *home = getenv("HOME");
+            if (home && !strchr(game_dir, '/')) {
+                snprintf(game_path, sizeof game_path, "%s/Documents/%s", home, game_dir);
+                game_dir = game_path;
+            }
+        }
+#endif
 #ifdef __SWITCH__
         /* Several editions on one card, as on a computer: this NRO's
          * game-<edition>/ if it holds a disc, else game/. */
@@ -937,6 +954,10 @@ int main(int argc, char **argv)
             return 0;
         }
         fprintf(stderr, "[IOS STARTUP] launcher finished; starting the guest\n");
+        /* The launcher has just saved the player's settings to the env file;
+         * re-read them so this run uses what was chosen, not what was there
+         * when ios_boot() ran. */
+        { extern void ios_settings_refresh(void); ios_settings_refresh(); }
         fflush(stderr);
     }
 #endif

@@ -1845,6 +1845,9 @@ static int ui_eligible(const GlTex *t)
     if (s_ui_scale < 0) {
         const char *e = getenv("RECOMP_GL_UI_SCALE");
         s_ui_scale = e ? atoi(e) : 2;
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        if (!e) s_ui_scale = 3;     /* the launcher's default on iOS */
+#endif
         if (s_ui_scale < 1) s_ui_scale = 1;
         if (s_ui_scale > 5) s_ui_scale = 5;
         fprintf(stderr, "  [GL] UI art upscaled %dx (RECOMP_GL_UI_SCALE)\n", s_ui_scale);
@@ -2570,6 +2573,65 @@ static void rt_edge_fill(GlSurf *rt, uint32_t w, uint32_t h)
         return;
     glDisable(GL_SCISSOR_TEST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, rt->fbo);
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    /* iOS rejects glBlitFramebuffer within one framebuffer (the trace named
+     * these very columns: INVALID_OPERATION 0x0502). Read the last column
+     * and row back and upload the replicated strips into the surface texture
+     * instead; this runs only when the sampled size changes. The readback is
+     * row-major, as glTexSubImage2D wants it: a column-major buffer here
+     * uploaded each texel's row across the strip and scrambled it. */
+    {
+        static int logged;
+        unsigned char *row = NULL, *src = NULL, *strip = NULL, *band = NULL;
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        if (!logged) {
+            logged = 1;
+            fprintf(stderr, "  [GL] edge fill by readback (iOS)\n");
+        }
+        if (sx < rt->pw && rt->tex) {
+            size_t cw = (size_t)(rt->pw - sx), y, x;
+            src = (unsigned char *)malloc((cw + 1) * (size_t)sy * 4u);
+            strip = (unsigned char *)malloc(cw * (size_t)sy * 4u);
+            if (src && strip) {
+                glReadPixels((GLint)sx - 1, 0, (GLsizei)(cw + 1), (GLsizei)sy,
+                             GL_RGBA, GL_UNSIGNED_BYTE, src);
+                for (y = 0; y < sy; y++)
+                    for (x = 0; x < cw; x++)
+                        memcpy(strip + (y * cw + x) * 4u,
+                               src + (y * (cw + 1)) * 4u, 4u);
+                active_unit(0);
+                bind_tex(rt->tex);
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, (GLint)sx, 0, (GLsizei)cw,
+                                (GLsizei)sy, GL_RGBA, GL_UNSIGNED_BYTE, strip);
+                tex_bind_forget();
+            }
+        }
+        if (sy < rt->ph && rt->tex) {
+            size_t rh = (size_t)(rt->ph - sy), y, x;
+            row = (unsigned char *)malloc((size_t)rt->pw * 4u);
+            band = (unsigned char *)malloc((size_t)rt->pw * rh * 4u);
+            if (row && band) {
+                glReadPixels(0, (GLint)sy - 1, (GLsizei)rt->pw, 1, GL_RGBA, GL_UNSIGNED_BYTE, row);
+                /* The corner: the row above still holds the surface's old
+                 * strip, so take the replicated column's last texel. */
+                for (x = sx; x < rt->pw; x++)
+                    memcpy(row + x * 4u, row + ((sx ? sx - 1 : 0) * 4u), 4u);
+                for (y = 0; y < rh; y++)
+                    memcpy(band + y * (size_t)rt->pw * 4u, row, (size_t)rt->pw * 4u);
+                active_unit(0);
+                bind_tex(rt->tex);
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+                glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (GLint)sy, (GLsizei)rt->pw,
+                                (GLsizei)rh, GL_RGBA, GL_UNSIGNED_BYTE, band);
+                tex_bind_forget();
+            }
+        }
+        free(src); free(strip); free(row); free(band);
+    }
+#else
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, rt->fbo);
     if (sx < rt->pw)                    /* the last column, across the strip */
         glBlitFramebuffer((GLint)sx - 1, 0, (GLint)sx, (GLint)sy, (GLint)sx, 0,
@@ -2577,6 +2639,7 @@ static void rt_edge_fill(GlSurf *rt, uint32_t w, uint32_t h)
     if (sy < rt->ph)                    /* the last row, below (the corner too) */
         glBlitFramebuffer(0, (GLint)sy - 1, (GLint)rt->pw, (GLint)sy, 0, (GLint)sy,
                           (GLint)rt->pw, (GLint)rt->ph, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+#endif
     glBindFramebuffer(GL_FRAMEBUFFER, rt->fbo);
     state_dirty();
 }
@@ -2648,6 +2711,10 @@ static float tex_aniso(void)
         const char *e = getenv("RECOMP_GL_ANISO");
         GLfloat mx = 0.0f;
 #if defined(__SWITCH__)
+        a = e ? (float)atof(e) : 4.0f;
+#elif defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        /* A phone's GPU and battery would rather spend the bandwidth
+         * elsewhere; 4x still cleans up the road at grazing angles. */
         a = e ? (float)atof(e) : 4.0f;
 #else
         a = e ? (float)atof(e) : 16.0f;
@@ -2996,8 +3063,17 @@ uint32_t nv2a_gl_program_count(void) { return s_prog_live; }
                        "precision highp sampler2D;\n"
 static const char *es_header(void)
 {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    /* iOS caps its (deprecated) GLES at 3.0; the renderer's GLSL is
+     * 3.30-core syntax, which an ES 3.00 compiler takes (nothing beyond it is
+     * used). 3.1/3.2 stay for a future driver. */
+    if (s_es_minor >= 2) return "#version 320 es\n" ES_HEADER_REST;
+    if (s_es_minor == 1) return "#version 310 es\n" ES_HEADER_REST;
+    return "#version 300 es\n" ES_HEADER_REST;
+#else
     return s_es_minor >= 2 ? "#version 320 es\n" ES_HEADER_REST
                            : "#version 310 es\n" ES_HEADER_REST;
+#endif
 }
 
 static GLuint compile(GLenum type, const char *const *src, int n)
@@ -4070,6 +4146,11 @@ static int ready(void)
         const char *e = getenv("RECOMP_GL_SCALE");
         GLint mt = 0, mr = 0;
         double k = e ? strtod(e, NULL) : 1.0;
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        /* A phone's 480p-era picture has the headroom; the desktop default
+         * stays 1x. */
+        if (!e) k = 2.0;
+#endif
         if (!(k > 0.0)) k = 1.0;                    /* unset, 0 or garbage */
         s_scale = k < 0.5 ? 0.5 : k > 5.0 ? 5.0 : k;   /* 5: 3600x2400, a 4K screen */
         glGetIntegerv(0x0D33, &mt);                 /* GL_MAX_TEXTURE_SIZE */
@@ -7276,6 +7357,16 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
     {extern float windows_port_gamma_get(void),windows_port_brightness_get(void);gamma=windows_port_gamma_get();brightness=windows_port_brightness_get();}
     glUniform1f(s_fx_gamma,gamma);glUniform1f(s_fx_brightness,brightness);
     int aa_mode=s_fx_on;
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    {
+        /* iOS has no gameplay/media split to gate on; the setting applies
+         * live, so Port Options can turn it off without a restart. */
+        extern int windows_port_fxaa_get(void);
+        static int previous_mode=-1;
+        aa_mode=windows_port_fxaa_get()?1:0;
+        if(aa_mode!=previous_mode){fprintf(stderr,"  [GL] active presentation FXAA mode %d\n",aa_mode);previous_mode=aa_mode;}
+    }
+#else
     {
         extern int windows_port_fxaa_get(void),windows_media_gameplay_get(void);
         static int previous_mode=-1;
@@ -7284,6 +7375,7 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
         aa_mode=windows_media_gameplay_get()?windows_port_fxaa_get():0;
         if(aa_mode!=previous_mode){fprintf(stderr,"  [GL] active presentation FXAA mode %d\n",aa_mode);previous_mode=aa_mode;}
     }
+#endif
     glUniform1i(s_fx_aa,aa_mode);
     glUniform1f(s_fx_sharp, -s_fx_sharpness);   /* 1 / mix(8, 5, k); 0 = off */
     {
@@ -7369,6 +7461,39 @@ static void gl_blit(const Nv2aBlit *b)
 static void gl_flip(void)
 {
     state_dirty();
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    {
+        extern int ios_scene_is_active(void);
+        /* Backgrounded: stop at the next present instead of letting the guest
+         * keep issuing GL work. iOS rejects those submissions
+         * (Metal BackgroundExecutionNotPermitted) and may terminate the app.
+         * Blocking here pauses the game at a frame boundary; the main thread
+         * still runs life cycle and events. */
+        if (!ios_scene_is_active()) {
+            static int threaded = -1;
+            if (threaded < 0) {
+                const char *e = getenv("RECOMP_GL_THREAD");
+                threaded = e && e[0] == '1';
+            }
+            if (threaded) {
+                SDL_Delay(16);              /* queued executor: do not grow it */
+                return;
+            }
+            {
+                static int logged;
+                if (!logged) {
+                    logged = 1;
+                    fprintf(stderr, "[IOS LIFECYCLE] rendering paused (background)\n");
+                    fflush(stderr);
+                }
+                while (!ios_scene_is_active())
+                    SDL_Delay(50);
+                logged = 0;
+            }
+            SDL_Delay(50);                  /* let SDL's foreground hook finish */
+        }
+    }
+#endif
 #if defined(__APPLE__)
     /* Back from the lock screen or another app. The EAGL drawable may have
      * moved, so the render thread's context needs re-asserting and the screen
@@ -7608,6 +7733,11 @@ static void gl_flip(void)
         SDL_GL_GetDrawableSize(s_win, &ww, &wh);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, s->fbo);
     bind_screen(GL_DRAW_FRAMEBUFFER);
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    if (s_frame <= 3)
+        fprintf(stderr, "[IOS VIDEO] present framebuffer=%u status=0x%X\n",
+                s_screen_fbo, glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER));
+#endif
     glDisable(GL_SCISSOR_TEST);
     glColorMask(1, 1, 1, 1);
     glClearColor(0, 0, 0, 1);

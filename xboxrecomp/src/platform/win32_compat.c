@@ -1827,11 +1827,33 @@ static void *mach_map_fixed(void *address, size_t size, int prot)
 }
 #endif
 
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+/* iOS forbids mach_vm_map (its header is an #error) and has no
+ * MAP_FIXED_NOREPLACE. MAP_FIXED would displace live mappings silently, so a
+ * fixed address is honoured only inside a range the Xbox memory layout has
+ * reserved for this process and registered here: nothing else may live in that
+ * arena, which is what makes MAP_FIXED safe there. macOS keeps mach_vm_map. */
+#define IOS_NO_MACH_VM_MAP 1
+static uintptr_t s_ios_fixed_base;
+static SIZE_T s_ios_fixed_size;
+void w32_ios_set_fixed_arena(LPVOID base, SIZE_T size)
+{
+    s_ios_fixed_base = (uintptr_t)base;
+    s_ios_fixed_size = size;
+}
+static int ios_in_fixed_arena(LPCVOID address, SIZE_T size)
+{
+    uintptr_t a = (uintptr_t)address;
+    return address && s_ios_fixed_size && a >= s_ios_fixed_base
+        && size <= s_ios_fixed_size
+        && a - s_ios_fixed_base <= s_ios_fixed_size - size;
+}
+#endif
+
 LPVOID VirtualAlloc(LPVOID address, SIZE_T size, DWORD allocationType, DWORD protect)
 {
     int prot  = prot_from_page(protect);
     int flags = MAP_PRIVATE | MAP_ANONYMOUS;
-
     /* MEM_COMMIT on a region already reserved by a prior VirtualAlloc:
      * just adjust protection. */
     if ((allocationType & MEM_COMMIT) && !(allocationType & MEM_RESERVE) && address) {
@@ -1842,6 +1864,11 @@ LPVOID VirtualAlloc(LPVOID address, SIZE_T size, DWORD allocationType, DWORD pro
 
 #if defined(MAP_FIXED_NOREPLACE)
     if (address) flags |= MAP_FIXED_NOREPLACE;
+#elif defined(IOS_NO_MACH_VM_MAP)
+    /* Inside the arena the memory layout reserved for us, MAP_FIXED can only
+     * replace pages this process owns. Outside it the address stays a hint and
+     * the result is compared below. */
+    if (address && ios_in_fixed_arena(address, size)) flags |= MAP_FIXED;
 #endif
 
     void *p;
@@ -2519,6 +2546,14 @@ LPVOID MapViewOfFileEx(HANDLE mapping, DWORD access, DWORD offHigh, DWORD offLow
     if (baseAddr) {
 #if defined(MAP_FIXED_NOREPLACE)
         flags |= MAP_FIXED_NOREPLACE;
+#elif defined(IOS_NO_MACH_VM_MAP)
+        /* iOS: only inside the arena we reserved and registered can a fixed
+         * address be taken without displacing something live. */
+        if (!ios_in_fixed_arena(baseAddr, len)) {
+            SetLastError(ERROR_INVALID_ADDRESS);
+            return NULL;
+        }
+        flags |= MAP_FIXED;
 #elif defined(HAVE_MACH_VM)
         /* Darwin has no MAP_FIXED_NOREPLACE. Claim the range first with
          * mach_vm_map(VM_FLAGS_FIXED), which refuses rather than displaces;

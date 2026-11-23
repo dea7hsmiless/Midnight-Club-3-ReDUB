@@ -2189,8 +2189,18 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
          * them sit inside the 4 GB __PAGEZERO segment and none can. */
         /* Reserve base + mirrors as one range, and map the base at its head.
          * VirtualFree releases just the slice about to be used, so each view
-         * replaces our own reservation rather than racing for free space. */
+         * replaces our own reservation rather than racing for free space.
+         *
+         * iOS reserves the whole 4 GB guest space instead: nothing there can
+         * use MAP_FIXED outside a range this process owns (win32_compat.c:
+         * IOS_NO_MACH_VM_MAP), so the arena registered just below is what
+         * makes the apertures and mirror views mappable at their guest
+         * addresses. */
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        g_span_size = (size_t)0x100000000ULL;
+#else
         g_span_size = g_memory_size * (size_t)(1 + XBOX_NUM_MIRRORS);
+#endif
 
         /* Leave room for the whole 4 GB guest space above the base.
          *
@@ -2219,11 +2229,18 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
         if (!g_span_base && span_hint)
             g_span_base = VirtualAlloc(NULL, g_span_size, MEM_RESERVE, PAGE_NOACCESS);
         if (g_span_base) {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+            w32_ios_set_fixed_arena(g_span_base, g_span_size);
+#else
             VirtualFree(g_span_base, g_memory_size, MEM_RELEASE);
+#endif
             g_memory_base = MapViewOfFileEx(g_mapping_handle,
                                             FILE_MAP_ALL_ACCESS, 0, 0,
                                             g_memory_size, g_span_base);
             if (!g_memory_base) {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+                w32_ios_set_fixed_arena(NULL, 0);
+#endif
                 VirtualFree(g_span_base, g_span_size, MEM_RELEASE);
                 g_span_base = NULL;
                 g_span_size = 0;
@@ -3246,6 +3263,9 @@ void xbox_MemoryLayoutShutdown(void)
     /* Whatever is left of the base+mirrors reservation. The views carved out
      * of it are already unmapped above; this releases the range itself. */
     if (g_span_base) {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        w32_ios_set_fixed_arena(NULL, 0);
+#endif
         VirtualFree(g_span_base, g_span_size, MEM_RELEASE);
         g_span_base = NULL;
         g_span_size = 0;

@@ -498,6 +498,11 @@ LPVOID MapViewOfFile(HANDLE mapping, DWORD access,
 LPVOID MapViewOfFileEx(HANDLE mapping, DWORD access,
                        DWORD offHigh, DWORD offLow, SIZE_T count, LPVOID baseAddr);
 BOOL   UnmapViewOfFile(LPCVOID baseAddr);
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+/* The Xbox memory layout registers the arena it reserved, so fixed mappings
+ * can use MAP_FIXED safely inside it (see win32_compat.c). */
+void   w32_ios_set_fixed_arena(LPVOID base, SIZE_T size);
+#endif
 #define CreateFileMapping CreateFileMappingA
 
 /* ---- Aligned allocation ---------------------------------------------- */
