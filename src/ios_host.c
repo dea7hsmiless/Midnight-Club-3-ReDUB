@@ -187,6 +187,31 @@ static void settings_from_env(void)
 
 void ios_settings_refresh(void) { settings_from_env(); }
 
+/* Online is on unless the player switched it off.
+ *
+ * MC3_ONLINE=0 is that switch, written by the launcher row and by Port
+ * Options; it clears the address and the System Link transport whatever the
+ * file also says. With no MC3_ONLINE at all the default room is used, so a
+ * fresh install (and an existing one that never touched the switch) is
+ * online without anyone editing the settings file. */
+#ifndef MC3_ONLINE_SERVER
+#  define MC3_ONLINE_SERVER "162.35.56.66"
+#endif
+static void apply_online_default(void)
+{
+    const char *off = getenv("MC3_ONLINE");
+    if (off && off[0] == '0') {
+        unsetenv("MC3_ROAM_JOIN");
+        unsetenv("MC3_NETPLAY");
+        fprintf(stderr, "[IOS] online: off (MC3_ONLINE=0)\n");
+        return;
+    }
+    if (!getenv("MC3_ROAM_JOIN"))
+        setenv("MC3_ROAM_JOIN", MC3_ONLINE_SERVER, 1);
+    if (!getenv("MC3_NETPLAY"))
+        setenv("MC3_NETPLAY", "1", 1);
+}
+
 /* The title calls this with the row id (event-0x7F00) from its own UI
  * thread; there is no window to bounce through, so commit directly. */
 void windows_port_setting_change(int id)
@@ -284,15 +309,21 @@ void windows_port_setting_change(int id)
             xbox_touchpad_reload();
     } return;
     case 22:{
-        /* Online is one switch over two keys: the relay room (free roam and
-         * races) and the System Link transport. Off clears the address so no
-         * socket is opened at boot. Takes effect on the next launch, like the
-         * frame rate. */
-        const char *cur = getenv("MC3_ROAM_JOIN");
-        int on = !(cur && *cur);
-        if (save_env_pair("MC3_ROAM_JOIN", on ? "162.35.56.66" : ""))
-            save_env_pair("MC3_NETPLAY", on ? "1" : "0");
-        fprintf(stderr, "[PORT] online %s saved (restart to apply)\n", on ? "on" : "off");
+        /* Online is on unless the player switched it off (ios_host.c applies
+         * the same default at boot). One switch, three keys: the state, the
+         * address and the System Link transport. Restart to apply. */
+        const char *off = getenv("MC3_ONLINE");
+        int on = !(off && off[0] == '0');      /* currently on */
+        if (save_env_pair("MC3_ONLINE", on ? "0" : "1")) {
+            if (on) {
+                save_env_pair("MC3_ROAM_JOIN", "");
+                save_env_pair("MC3_NETPLAY", "0");
+            } else {
+                save_env_pair("MC3_ROAM_JOIN", MC3_ONLINE_SERVER);
+                save_env_pair("MC3_NETPLAY", "1");
+            }
+        }
+        fprintf(stderr, "[PORT] online %s saved (restart to apply)\n", on ? "off" : "on");
     } return;
     default: return;
     }
@@ -362,8 +393,9 @@ void windows_port_setting_label(int id, char *out, size_t size)
         snprintf(out, size, "INVERT TILT: %s",
                  env_on("RECOMP_TOUCH_TILT_INVERT", 0) ? "ON" : "OFF");
     if (id == 22) {
-        const char *j = getenv("MC3_ROAM_JOIN");
-        snprintf(out, size, "ONLINE: %s (RESTART)", (j && *j) ? "ON" : "OFF");
+        const char *off = getenv("MC3_ONLINE");
+        int on = !(off && off[0] == '0');
+        snprintf(out, size, "ONLINE: %s (RESTART)", on ? "ON" : "OFF");
     }
 }
 
@@ -483,6 +515,7 @@ void ios_boot(void)
                  doc ? doc : home, MC3_APP);
     }
     load_env_file();
+    apply_online_default();
     settings_from_env();
     log_open();
     if (home) {

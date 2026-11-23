@@ -86,6 +86,10 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  [[NSFileManager defaultManager] createDirectoryAtPath:Documents() withIntermediateDirectories:YES attributes:nil error:nil];
  NSString *raw=[NSString stringWithContentsOfFile:Env() encoding:NSUTF8StringEncoding error:nil];
  for(NSString *line in [raw componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]){NSRange r=[line rangeOfString:@"="];if(r.location!=NSNotFound && ![line hasPrefix:@"#"]){NSString *k=[[line substringToIndex:r.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];self.settings[k]=[line substringFromIndex:r.location+1];}}
+ /* Online is on unless the file says MC3_ONLINE=0 (ios_host.c applies the
+  * same default at boot, so the row and the game agree). */
+ if(!self.settings[@"MC3_ROAM_JOIN"] && ![self.settings[@"MC3_ONLINE"] isEqual:@"0"])
+  self.settings[@"MC3_ROAM_JOIN"]=@"162.35.56.66";
  /* Recover interrupted transactional install before exposing Play. */
  NSFileManager *fm=NSFileManager.defaultManager;NSString *backup=[Documents() stringByAppendingPathComponent:@"game.previous"];
  if(!Exists(Game())&&Exists(backup))[fm moveItemAtPath:backup toPath:Game() error:nil];
@@ -315,8 +319,8 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
   * and the System Link transport. Off removes both, so the game is exactly
   * offline rather than pointing at a room it will not use. */
  if([r[2] isEqual:@"MC3_ROAM_JOIN"]) {
-  if(next.length) updated[@"MC3_NETPLAY"]=@"1";
-  else { [updated removeObjectForKey:r[2]]; [updated removeObjectForKey:@"MC3_NETPLAY"]; }
+  if(next.length) { updated[@"MC3_NETPLAY"]=@"1"; updated[@"MC3_ONLINE"]=@"1"; }
+  else { [updated removeObjectForKey:r[2]]; [updated removeObjectForKey:@"MC3_NETPLAY"]; updated[@"MC3_ONLINE"]=@"0"; }
  }
  NSMutableString *text=[NSMutableString stringWithString:@"# ReDUB iOS settings\n"];
  for(NSString *k in [[updated allKeys] sortedArrayUsingSelector:@selector(compare:)])[text appendFormat:@"%@=%@\n",k,updated[k]];
