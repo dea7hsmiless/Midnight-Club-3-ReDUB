@@ -2,7 +2,7 @@ $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
 $repo=Split-Path -Parent $PSScriptRoot
 $art=Join-Path $repo 'launcher\art'
-$source=Join-Path $art 'logo.png'
+$source=Join-Path $art 'icon.png'
 $target=Join-Path $art 'redub.ico'
 if(!(Test-Path -LiteralPath $source)){throw 'The prepared ReDUB logo is missing.'}
 $original=[Drawing.Image]::FromFile($source)

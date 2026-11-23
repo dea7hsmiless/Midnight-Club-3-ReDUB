@@ -17,3 +17,14 @@ tools/appimage/** text eol=lf
 # checkout is folded into the value by `source` and breaks version matching,
 # so store and check them out as LF everywhere.
 config/*/app.env text eol=lf
+
+# Art is binary: git's text normalisation silently rewrote the small AppImage
+# PNGs (CRLF into LF) when they were committed, which would have shipped
+# corrupt icons to anyone cloning. Never treat these as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.ipa binary
+*.zip binary
+*.gz binary
