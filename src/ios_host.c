@@ -283,6 +283,17 @@ void windows_port_setting_change(int id)
         if (save_env_pair("RECOMP_TOUCH_TILT_INVERT", n ? "1" : "0"))
             xbox_touchpad_reload();
     } return;
+    case 22:{
+        /* Online is one switch over two keys: the relay room (free roam and
+         * races) and the System Link transport. Off clears the address so no
+         * socket is opened at boot. Takes effect on the next launch, like the
+         * frame rate. */
+        const char *cur = getenv("MC3_ROAM_JOIN");
+        int on = !(cur && *cur);
+        if (save_env_pair("MC3_ROAM_JOIN", on ? "162.35.56.66" : ""))
+            save_env_pair("MC3_NETPLAY", on ? "1" : "0");
+        fprintf(stderr, "[PORT] online %s saved (restart to apply)\n", on ? "on" : "off");
+    } return;
     default: return;
     }
 }
@@ -350,6 +361,10 @@ void windows_port_setting_label(int id, char *out, size_t size)
     if (id == 21)
         snprintf(out, size, "INVERT TILT: %s",
                  env_on("RECOMP_TOUCH_TILT_INVERT", 0) ? "ON" : "OFF");
+    if (id == 22) {
+        const char *j = getenv("MC3_ROAM_JOIN");
+        snprintf(out, size, "ONLINE: %s (RESTART)", (j && *j) ? "ON (RELAY)" : "OFF");
+    }
 }
 
 /* nv2a_pb_replay.c expects these from the front end. The front-end cursor

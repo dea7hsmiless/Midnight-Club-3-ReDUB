@@ -202,7 +202,8 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  @[@"Diagnostics",@"GL error log",@"RECOMP_GL_ERRORS",@[@"0",@"1",@"2"],@"0",@[@"Off",@"Step",@"Call"],@"Step names the stage that raised a GL error; Call names the exact GL call and is slow, for chasing a driver problem."],
  @[@"Diagnostics",@"Renderer trace",@"RECOMP_GL_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Writes shader sources, surface and texture creation, and any texture mode the renderer does not implement (bump, dot, cube) to the launch log. Diagnostic only: it slows loading and makes a large log. Turn it off when done."],
  @[@"Diagnostics",@"Texgen trace",@"RECOMP_GL_TEXGEN_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Logs fixed-function texture-coordinate generation that the renderer cannot yet do. Use with Renderer trace when chasing graphics bugs in the garage or menus."],
- @[@"Diagnostics",@"Feedback trace",@"RECOMP_GL_FEEDBACK_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Logs draws that sample the surface they are drawing into, which GL does not define. Changes nothing on screen."]];}
+ @[@"Diagnostics",@"Feedback trace",@"RECOMP_GL_FEEDBACK_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Logs draws that sample the surface they are drawing into, which GL does not define. Changes nothing on screen."],
+ @[@"Online",@"Online play",@"MC3_ROAM_JOIN",@[@"",@"162.35.56.66"],@"",@[@"Off",@"On (relay)"],@"Puts you in the relay's room: free roam shows the other players, and System Link races travel the same way. Applies on the next launch."]];}
 - (NSString*)settingLabel:(NSArray*)row value:(NSString*)value {
  NSUInteger index=[row[3] indexOfObject:value];
  return index==NSNotFound?value:row[5][index];
@@ -210,6 +211,7 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
 - (NSString*)settingsGroup:(NSArray*)r {
  NSString *k=r[2];
  if([k isEqual:@"MC3_FPS_OVERLAY"])return @"Display";
+ if([k isEqual:@"MC3_ROAM_JOIN"])return @"Online";
  if([r[0] isEqual:@"Diagnostics"])return @"Diagnostics";
  if([r[0] isEqual:@"Advanced"]||[k isEqual:@"RECOMP_GL_VSYNC"]||[k isEqual:@"RECOMP_GL_QUEUE_FRAMES"])return @"Advanced";
  if([k containsString:@"HAPTICS"]||[k isEqual:@"MC3_RUMBLE_STRENGTH"])return @"Feedback";
@@ -237,7 +239,7 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
   NSArray *saved=[NSUserDefaults.standardUserDefaults arrayForKey:@"ReDUBExpandedSettingsV2"];
   self.expandedSettings=[NSMutableSet setWithArray:saved?:@[@"Display",@"Graphics"]];
  }
- for(NSString *group in @[@"Display",@"Graphics",@"Touch controls",@"Tilt & steering",@"Feedback",@"Advanced",@"Diagnostics"]){
+ for(NSString *group in @[@"Display",@"Online",@"Graphics",@"Touch controls",@"Tilt & steering",@"Feedback",@"Advanced",@"Diagnostics"]){
   BOOL expanded=[self.expandedSettings containsObject:group];
   UIButton *section=[self button:[NSString stringWithFormat:@"%@  %@",expanded?@"▼":@"▶",group] frame:CGRectMake(22,y,cw-44,44) parent:self.pane action:@selector(toggleSettingsSection:) primary:NO];
   section.accessibilityIdentifier=group;section.accessibilityLabel=group;
@@ -309,6 +311,13 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  NSString *next=values[(index+d+count)%count];
  NSMutableDictionary *updated=[self.settings mutableCopy];updated[r[2]]=next;
  if([r[2] isEqual:@"MC3_GRAPHICS_PRESET"])[updated addEntriesFromDictionary:PresetValues(next)];
+ /* Online is one choice in the UI and two keys in the file: the relay room
+  * and the System Link transport. Off removes both, so the game is exactly
+  * offline rather than pointing at a room it will not use. */
+ if([r[2] isEqual:@"MC3_ROAM_JOIN"]) {
+  if(next.length) updated[@"MC3_NETPLAY"]=@"1";
+  else { [updated removeObjectForKey:r[2]]; [updated removeObjectForKey:@"MC3_NETPLAY"]; }
+ }
  NSMutableString *text=[NSMutableString stringWithString:@"# ReDUB iOS settings\n"];
  for(NSString *k in [[updated allKeys] sortedArrayUsingSelector:@selector(compare:)])[text appendFormat:@"%@=%@\n",k,updated[k]];
  NSError *error=nil;if(![text writeToFile:Env() atomically:YES encoding:NSUTF8StringEncoding error:&error]){[self alert:error.localizedDescription];return;}

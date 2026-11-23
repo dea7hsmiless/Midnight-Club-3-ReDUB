@@ -213,12 +213,16 @@ static int refresh_screen_target(void)
 #endif
     return 1;
 }
-/* The window's target: the UIKit framebuffer on iOS, zero elsewhere. */
+/* The window's target: the UIKit framebuffer on iOS, zero elsewhere.
+ *
+ * The UIKit values are resolved once per frame (gl_flip) and cached here. Each
+ * resolution is an SDL_GetWindowWMInfo call: an autorelease pool plus an
+ * isKindOfClass: on the render thread. Doing it on every bind (eight or so a
+ * frame) is measurable at 60 fps. */
 static void bind_screen(GLenum target)
 {
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
     (void)target;
-    refresh_screen_target();
     glBindFramebuffer(GL_FRAMEBUFFER, s_screen_fbo);
 #else
     glBindFramebuffer(target, 0);
@@ -229,7 +233,6 @@ static void bind_screen(GLenum target)
 static void screen_present_begin(void)
 {
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
-    refresh_screen_target();
     glBindRenderbuffer(GL_RENDERBUFFER, s_screen_colorbuffer);
 #endif
 }
