@@ -25,6 +25,12 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#if defined(__APPLE__)
+/* TARGET_OS_IPHONE lives here. Without this include it is simply undefined, and
+ * every "&& TARGET_OS_IPHONE" guard in this file and the game layer compiles
+ * out silently -- an iOS build that starts with no launcher and no error. */
+#include <TargetConditionals.h>
+#endif
 
 #ifdef _WIN32
 /* The Windows C runtime has no setenv. */
@@ -908,6 +914,20 @@ int main(int argc, char **argv)
     extern int xbox_host_main_run(int (*fn)(int, char **), int argc, char **argv);
 #if defined(__ANDROID__)
     android_boot();
+#endif
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    /* iOS: the writable folder, the log and the settings (ios_host.c), then the
+     * native launcher, which is the app's first screen and picks the disc.
+     * ios_launcher_run returns 1 once the player pressed Play and 0 if there is
+     * no window scene yet. SDL creates its game window just after this returns,
+     * so nothing may take the screen away here afterwards. */
+    {
+        extern void ios_boot(void);
+        extern int ios_launcher_run(void);
+        ios_boot();
+        if (!ios_launcher_run())
+            fprintf(stderr, "[IOS STARTUP] no window scene: starting the game anyway\n");
+    }
 #endif
 #ifdef _WIN32
     /* Settings files, the disc and the log when started on its own

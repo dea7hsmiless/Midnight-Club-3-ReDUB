@@ -52,6 +52,33 @@ typedef struct __GLsync *GLsync;
 #define GL_SRC_ALPHA                      0x0302
 #define GL_ONE_MINUS_SRC_ALPHA            0x0303
 #define GL_TRIANGLES                      0x0004
+/* The rest of the primitive and compare modes, and the blend factors, that
+ * d3d8_gl.c maps D3D onto. GLES 3 has all of these; gl_api.h simply had only the
+ * subset the renderer itself used before the D3D8 layer started sharing it on
+ * iOS (where libepoxy does not exist). */
+#define GL_POINTS                         0x0000
+#define GL_LINES                          0x0001
+#define GL_LINE_STRIP                     0x0003
+#define GL_TRIANGLE_STRIP                 0x0005
+#define GL_TRIANGLE_FAN                   0x0006
+#define GL_NEVER                          0x0200
+#define GL_LESS                           0x0201
+#define GL_EQUAL                          0x0202
+#define GL_LEQUAL                         0x0203
+#define GL_GREATER                        0x0204
+#define GL_NOTEQUAL                       0x0205
+#define GL_GEQUAL                         0x0206
+#define GL_ALWAYS                         0x0207
+#define GL_NONE                           0
+#define GL_ZERO                           0
+#define GL_SRC_COLOR                      0x0300
+#define GL_ONE_MINUS_SRC_COLOR            0x0301
+#define GL_DST_ALPHA                      0x0304
+#define GL_ONE_MINUS_DST_ALPHA            0x0305
+#define GL_DST_COLOR                      0x0306
+#define GL_ONE_MINUS_DST_COLOR            0x0307
+#define GL_SRC_ALPHA_SATURATE             0x0308
+#define GL_SHADING_LANGUAGE_VERSION       0x8B8C
 #define GL_NEVER                          0x0200
 #define GL_ALWAYS                         0x0207
 #define GL_FRONT                          0x0404
@@ -200,6 +227,9 @@ X(GLboolean, glUnmapBuffer, (GLenum)) \
     X(void, glEnableVertexAttribArray, (GLuint)) \
     X(void, glDisableVertexAttribArray, (GLuint)) \
     X(void, glVertexAttrib4f, (GLuint, GLfloat, GLfloat, GLfloat, GLfloat)) \
+    X(void, glVertexAttrib2f, (GLuint, GLfloat, GLfloat)) \
+    X(void, glUniformMatrix4fv, (GLint, GLsizei, GLboolean, const GLfloat *)) \
+    X(void, glDeleteBuffers, (GLsizei, const GLuint *)) \
     X(void, glDrawElements, (GLenum, GLsizei, GLenum, const void *)) \
     X(void, glDrawArrays, (GLenum, GLint, GLsizei))
 
@@ -334,6 +364,9 @@ int nv2a_gl_load(void *(*getproc)(const char *name));
 #define glEnableVertexAttribArray p_glEnableVertexAttribArray
 #define glDisableVertexAttribArray p_glDisableVertexAttribArray
 #define glVertexAttrib4f         p_glVertexAttrib4f
+#define glVertexAttrib2f         p_glVertexAttrib2f
+#define glUniformMatrix4fv       p_glUniformMatrix4fv
+#define glDeleteBuffers          p_glDeleteBuffers
 #define glDrawElements           p_glDrawElements
 #define glDrawArrays             p_glDrawArrays
 #define glGetProgramBinary       p_glGetProgramBinary

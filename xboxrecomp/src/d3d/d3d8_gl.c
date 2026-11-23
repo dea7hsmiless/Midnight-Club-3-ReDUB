@@ -25,7 +25,15 @@
 #include "d3d8_fvf.h"
 
 #include <SDL.h>
+#if defined(__APPLE__)
+/* iOS has no libepoxy, and it cannot have: epoxy dlopen()s the GL library, which
+ * the App Store forbids. gl_api.h declares the same entry points the renderer
+ * uses (it is what nv2a_gl.c, gl_api.c and gl_check.c compile against here), so
+ * this one file takes the declarations from there instead. */
+#include "gl_api.h"
+#else
 #include <epoxy/gl.h>
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
