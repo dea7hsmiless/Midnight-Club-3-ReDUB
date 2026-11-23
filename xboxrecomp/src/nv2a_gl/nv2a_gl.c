@@ -394,6 +394,9 @@ typedef struct {
     uint32_t aa_sx, aa_sy;
     uint32_t wseq, eseq;                /* drawn into / edge filled (rt_edge_fill) */
     uint32_t gseq;                      /* s_gseq when last bound for drawing */
+    GLuint   fb_tex;                    /* feedback snapshot (feedback_tex) */
+    uint32_t fb_gen;                    /* gseq the snapshot holds */
+    int      fb_valid;
 } GlSurf;
 
 /* Depth buffers belong to the title's zeta address, not to a colour surface:
@@ -539,6 +542,7 @@ static GlSurf *surf_get(uint32_t va, uint32_t w, uint32_t h,
     if (s->fbo) {
         glDeleteFramebuffers(1, &s->fbo);
         glDeleteTextures(1, &s->tex);
+        if (s->fb_tex) glDeleteTextures(1, &s->fb_tex);   /* feedback snapshot */
         tex_bind_forget();
         glDeleteRenderbuffers(1, &s->ds);
     }
@@ -2623,6 +2627,71 @@ static float tex_lod_bias(void)
 }
 
 /* Bind stage `i` from the method shadow; returns the texcoord scale. */
+/* ── feedback: a draw that samples the surface it is drawing into ───────────
+ *
+ * GL leaves this undefined, and Apple's GL-on-Metal is allowed to hand back a
+ * stale or black copy -- the garage's 256x256 car target sampled on stage 0
+ * showed exactly that. (This is the fix the 0.2.4 iOS IPA had and main never
+ * received; Android shares the GLES path and the same risk.)
+ *
+ * A snapshot texture is copied from the target once per draw into it, and the
+ * stage samples the copy instead of the attachment. Vulkan does the same thing
+ * first (nv2a_vk.c surface_snapshot); the copy is also why this is legal on
+ * iOS, where a same-framebuffer blit is not.
+ *
+ * RECOMP_GL_FEEDBACK=0 turns it off (sample the target directly, as before);
+ * RECOMP_GL_FEEDBACK_TRACE=1 reports each (target, stage) pair once.
+ */
+static GlSurf *s_fb_target;             /* the surface this draw renders into */
+static int      s_fb_trace = -1;
+static uint32_t s_fb_seen[64][2];       /* (target va, stage) already reported */
+static int      s_fb_nseen;
+
+static GLuint feedback_tex(GlSurf *s)
+{
+    static int on = -1, reported;
+    if (on < 0) {
+        const char *e = getenv("RECOMP_GL_FEEDBACK");
+        on = !(e && e[0] == '0');
+        if (!on)
+            fprintf(stderr, "  [GL] feedback snapshot off (RECOMP_GL_FEEDBACK=0)\n");
+    }
+    if (!on || !s->fbo || !s->tex)
+        return 0;
+    if (!s->fb_tex) {
+        glGenTextures(1, &s->fb_tex);
+        tex_param_forget(s->fb_tex);
+        active_unit(0);
+        glBindTexture(GL_TEXTURE_2D, s->fb_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)s->pw, (GLsizei)s->ph,
+                     0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        tex_bind_forget();
+        s->fb_valid = 0;
+    }
+    if (s->fb_valid && s->fb_gen == s->gseq)
+        return s->fb_tex;
+    /* The target is bound; copy its texels into a texture that is not an
+     * attachment (legal on iOS, unlike a same-framebuffer blit). */
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, s->fbo);
+    active_unit(0);
+    glBindTexture(GL_TEXTURE_2D, s->fb_tex);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0,
+                        (GLsizei)s->pw, (GLsizei)s->ph);
+    glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
+    tex_bind_forget();
+    state_dirty();
+    s->fb_gen = s->gseq;
+    s->fb_valid = 1;
+    if (reported++ < 4)
+        fprintf(stderr, "  [GL] feedback snapshot: %08X %ux%u\n", s->va, s->pw, s->ph);
+    return s->fb_tex;
+}
+
 static void bind_stage(const uint32_t *regs, int i, float scale[2])
 {
     uint32_t base = (0x1B00u + (uint32_t)i * 0x40u) / 4;
@@ -2687,6 +2756,37 @@ static void bind_stage(const uint32_t *regs, int i, float scale[2])
         }
         mipped = s_tex_cur && ((s_tex_cur->tex == tex && s_tex_cur->mips > 1)
                                || (s_tex_cur->hd == tex && s_tex_cur->hd_mips));
+    }
+    if (tex && s_fb_target && tex == s_fb_target->tex) {
+        if (s_fb_trace < 0) {
+            const char *e = getenv("RECOMP_GL_FEEDBACK_TRACE");
+            s_fb_trace = e && e[0] == '1';
+            if (s_fb_trace)
+                fprintf(stderr, "  [GL] feedback trace: draws that sample their own target"
+                                " (RECOMP_GL_FEEDBACK_TRACE)\n");
+        }
+        if (s_fb_trace) {
+            int k, known = 0;
+            for (k = 0; k < s_fb_nseen; k++)
+                if (s_fb_seen[k][0] == s_fb_target->va
+                    && s_fb_seen[k][1] == (uint32_t)i) { known = 1; break; }
+            if (!known && s_fb_nseen < 64) {
+                s_fb_seen[s_fb_nseen][0] = s_fb_target->va;
+                s_fb_seen[s_fb_nseen][1] = (uint32_t)i;
+                s_fb_nseen++;
+                fprintf(stderr, "  [GL] feedback: target %08X %ux%u sampled on stage %d\n",
+                        s_fb_target->va, s_fb_target->w, s_fb_target->h, i);
+            }
+        }
+        {
+            /* Sample a copy, not the attachment being written (undefined on
+             * GL, and Apple's GL-on-Metal may hand back a stale image). */
+            GLuint snap = feedback_tex(s_fb_target);
+            if (snap) {
+                tex = snap;
+                mipped = 0;
+            }
+        }
     }
     bind_tex(tex);
     {
@@ -5271,10 +5371,12 @@ static void gl_draw_raw(const Nv2aRawBatch *b)
     s_draw_changed = 0;
     s_draw_uf = 0;
     s_mg_was_active = s_mg_active;
+    s_fb_target = NULL;
     s = surf_bind(&b->surface, b->zeta_va);
     pf_mark(PF_SURF);
     if (!s)
         return;
+    s_fb_target = s;                    /* what this draw renders into */
     s_drew_any = 1;
     ft_note(s->va, 'd');
     psh_key(r, &pk);
