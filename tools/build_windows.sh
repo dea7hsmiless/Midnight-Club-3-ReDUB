@@ -133,7 +133,14 @@ fi
     for kv in ${SETTINGS:-}; do echo "$kv"; done
 } | sed 's/$/\r/' > "$DIST/${MC3_APP}_defaults.txt"
 if [ ! -f "$DIST/${MC3_APP}_env.example.txt" ]; then
-    sed 's/$/\r/' "$MC3_REPO/switch/mcdub3_env.example.txt" > "$DIST/${MC3_APP}_env.example.txt"
+    # The Windows example, not the Switch one: the Switch file talks about
+    # sdmc:, Joy-Cons and NROs, and this is the file a first run copies to
+    # ${MC3_APP}_env.txt for the player to read.
+    if [ -f "$MC3_REPO/windows/${MC3_APP}_env.example.txt" ]; then
+        sed 's/$/\r/' "$MC3_REPO/windows/${MC3_APP}_env.example.txt" > "$DIST/${MC3_APP}_env.example.txt"
+    else
+        sed 's/$/\r/' "$MC3_REPO/switch/mcdub3_env.example.txt" > "$DIST/${MC3_APP}_env.example.txt"
+    fi
 fi
 
 # The launcher, optional (the exe finds the disc and saves itself,

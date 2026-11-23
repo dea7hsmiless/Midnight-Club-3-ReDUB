@@ -1,0 +1,173 @@
+# mcdub3remix_env.txt -- settings for Midnight Club 3: DUB Edition Remix
+# (the Windows build). This is the reference copy; the game writes its own
+# copy of it beside the executable on the first run and rewrites single keys
+# there as you change them in game (Options > Port Options).
+#
+# One KEY=VALUE per line. '#' starts a comment. Read once at start, so restart
+# the game after editing. Every setting below is commented out and shows the
+# default: remove the '#' in front of a line to change it.
+#
+# The log's "settings:" line lists every setting actually in effect, which is
+# the quickest way to check that a line took effect (it is written to
+# mcdub3remix_log.txt beside the executable, or to the console if one is open).
+
+# ============================================================================
+# Disc and saves
+# ============================================================================
+
+# The folder holding the game: default.xbe (or default.xbe inside a
+# game-<edition> folder next to it). Leave unset to let the game look beside
+# the executable, in game\ and in game-<edition>\.
+#MC3_GAME_DIR=C:\Games\ReDUB\game-remix
+
+# Where career saves live. Default: save\ beside the executable.
+#MC3_SAVE_DIR=C:\Games\ReDUB\save
+
+# The disc edition to use when both region packages are present (usa, eur).
+#EDITION=usa
+
+# ============================================================================
+# Picture
+# ============================================================================
+
+# Rendering resolution as a multiple of the Xbox's 720x480 (1 .. 5).
+# 1.5 gives 1280x720; 2 is the published release value.
+#RECOMP_GL_SCALE=2
+
+# Menu and HUD art redrawn N times larger on the GPU (1 = off, up to 5).
+#RECOMP_GL_UI_SCALE=5
+
+# Anti-aliasing of edges (FXAA): 0 off, 1 FXAA, 2 FXAA low, 3 FXAA high.
+#RECOMP_GL_FXAA=1
+
+# Anisotropic filtering, 1 (off) to 16: sharp textures at shallow angles.
+#RECOMP_GL_ANISO=16
+
+# Sharpening strength, 0 (off) to 1.
+#RECOMP_GL_SHARPEN=0.5
+
+# Vertical sync: 0 off, 1 on, -1 adaptive.
+#RECOMP_GL_VSYNC=0
+
+# 30 is the Xbox's cadence and the default. 60 lifts the title's 30 Hz
+# gameplay cap (menus and pause stay 30); pick it only if the machine holds it.
+#MC3_FRAME_RATE=30
+
+# Windowed, borderless fullscreen, or exclusive fullscreen (restart).
+#MC3_FULLSCREEN=0
+
+# A fixed window size, or auto for the desktop's own.
+#MC3_RESOLUTION=auto
+
+# Tell the game the screen is widescreen: it renders 16:9 itself.
+#RECOMP_GL_ASPECT=auto
+
+# One of the ready-made looks (0 custom, 1 performance, 2 balanced, 3 quality),
+# applied once and then saved as individual settings.
+#MC3_GRAPHICS_PRESET=0
+
+# Gamma (0.8 .. 1.4) and brightness in percent (80 .. 120).
+#MC3_GAMMA=1.0
+#MC3_BRIGHTNESS=100
+
+# Frame rate drawn at the top of the screen.
+#MC3_FPS_OVERLAY=0
+
+# Folder of replacement textures made with make hd-dump / make hd-upscale.
+#RECOMP_GL_HD_DIR=C:\Games\ReDUB\hd
+
+# ============================================================================
+# Sound
+# ============================================================================
+
+# Play the game's driving music from the PC instead of the emulated disc
+# audio. Off by default: the emulated soundtrack is the game's own.
+#MC3_PC_MUSIC=0
+
+# Volume for PC music in percent, or auto to follow the system volume.
+#MC3_PC_MUSIC_VOLUME=auto
+
+# Show the song title overlay (1) or the radio + fallback display (0).
+#MC3_PC_MUSIC_HUD=1
+
+# ============================================================================
+# Controllers
+# ============================================================================
+
+# Vibration strength in percent (0 .. 200).
+#MC3_RUMBLE_STRENGTH=100
+
+# ============================================================================
+# Online play (free roam and System Link races)
+# ============================================================================
+
+# Online play is ON unless this is 0. Nothing below has to be set: the game
+# ships with a server and turns MC3_NETPLAY and the join address on itself.
+# Set MC3_ONLINE=0 to play entirely offline (no online rows, no session).
+#MC3_ONLINE=1
+
+# Players who want to play together pick the same room number, in game:
+# Options > ROOM (0 .. 255; eight players per room). Options > FIND A ROOM
+# moves to the fullest room with a free slot. Two players in the same room
+# meet in Online > Free Roam and in Online > Online Race.
+#MC3_ROAM_ROOM=0
+
+# What the other players see in the player list and over the car.
+#MC3_ROAM_NAME=
+
+# A different server, or a server on another port.
+#MC3_ROAM_JOIN=203.0.113.10
+#MC3_ROAM_HUB_PORT=47210
+
+# System Link (the console's LAN mode, which the online races use). On by
+# default with online play; 0 reports no cable, as a console without one.
+#MC3_NETPLAY=1
+
+# Only when a broadcast will not reach the other machine (two copies on one PC,
+# or a VPN): this copy's local address and the peers to send broadcasts to.
+#RECOMP_NET_ADDR=192.168.1.20
+#RECOMP_NET_PEERS=192.168.1.31
+# The host port is this base plus the game's guest port. Allow UDP 20000-21000
+# through the firewall if it asks.
+#RECOMP_NET_PORT_BASE=20000
+
+# ============================================================================
+# Unattended runs and mods
+# ============================================================================
+
+# Press A and Start through the intro movies.
+#MC3_SKIP_MOVIES=0
+
+# Start in Arcade, Cruise without pressing through the menus (needs a profile;
+# any input of yours stops it).
+#MC3_AUTOSTART=cruise
+
+# Every car, part, rim, paint and driving ability is available, and every race
+# and city is open. Career saves and money are untouched (restart to apply).
+#MC3_UNLOCK_ALL=0
+
+# ============================================================================
+# Diagnostics
+# ============================================================================
+
+# Frame rate in the log every 10 seconds.
+#RECOMP_FPS_LOG=0
+
+# Performance report every N seconds: guest-lock waits, where the main thread
+# blocks, CPU per thread. Enable for a short race, then share the log.
+#MC3_PERF=
+
+# When no new frame has been shown for N seconds, the game's state (registers,
+# stack, recent calls) goes to the log once, and the game keeps running.
+#MC3_HANG_SECS=
+
+# Frame timing log once per second: game steps and presentation waits.
+#MC3_TIME_TRACE=0
+
+# ============================================================================
+# Required: set by the build, do not change
+# ============================================================================
+# RECOMP_VBLANK=1  RECOMP_FLIP_VBLANK=1  RECOMP_PB_EXEC=1  RECOMP_USB=1
+# RECOMP_AC97_READY=plain  RECOMP_NET_LINK=0
+# These make the emulated hardware behave (vblank, GPU, USB pads, sound chip,
+# no network cable). Changing them stops the game booting or running.
