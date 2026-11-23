@@ -42,10 +42,18 @@
 #include <sys/mman.h>
 #endif
 #if defined(__APPLE__)
+#include <TargetConditionals.h>
 #include <sys/sysctl.h>
 #include <sys/stat.h>
 #include <mach/mach.h>
+/* iOS has no mach_vm.h: the iPhoneOS SDK ships it as a file that is nothing
+ * but "#error mach_vm.h unsupported." So the mach_vm_map path below is macOS
+ * only, and iOS uses the mmap claim-then-replace the other POSIX platforms
+ * use. (Xcode refuses mach_vm to App Store apps outright.) */
+#if !TARGET_OS_IPHONE
+#define HAVE_MACH_VM 1
 #include <mach/mach_vm.h>
+#endif
 #elif !defined(__SWITCH__)
 #include <sys/sysinfo.h>
 #endif
@@ -1771,7 +1779,7 @@ static int prot_from_page(DWORD protect)
  * alone -- UnmapViewOfFile takes no length and VirtualFree(MEM_RELEASE) is
  * documented to take size 0 -- so the length has to be recoverable here or
  * munmap cannot be called at all. */
-#if defined(__APPLE__)
+#if defined(HAVE_MACH_VM)
 /* Darwin has no MAP_FIXED_NOREPLACE, and the two mmap options are both wrong
  * for VirtualAlloc: MAP_FIXED silently unmaps whatever already occupies the
  * range, and a bare address hint can be relocated by the kernel for reasons
@@ -1836,7 +1844,7 @@ LPVOID VirtualAlloc(LPVOID address, SIZE_T size, DWORD allocationType, DWORD pro
 #endif
 
     void *p;
-#if defined(__APPLE__)
+#ifdef HAVE_MACH_VM
     if (address) {
         p = mach_map_fixed(address, size, prot ? prot : PROT_READ | PROT_WRITE);
     } else
@@ -1849,7 +1857,7 @@ LPVOID VirtualAlloc(LPVOID address, SIZE_T size, DWORD allocationType, DWORD pro
     /* Remember the length: VirtualFree(MEM_RELEASE) is passed size 0 by every
      * Win32 caller, and munmap cannot be called without one. */
     view_register(p, size);
-#if !defined(MAP_FIXED_NOREPLACE) && !defined(__APPLE__)
+#if !defined(MAP_FIXED_NOREPLACE) && !defined(HAVE_MACH_VM)
     /* Older kernels without MAP_FIXED_NOREPLACE: plain MAP_FIXED would silently
      * unmap whatever already lives there, so we pass the address as a hint and
      * treat a different result as "taken". Apple goes through mach_map_fixed
@@ -2481,11 +2489,26 @@ LPVOID MapViewOfFileEx(HANDLE mapping, DWORD access, DWORD offHigh, DWORD offLow
     if (baseAddr) {
 #if defined(MAP_FIXED_NOREPLACE)
         flags |= MAP_FIXED_NOREPLACE;
-#elif defined(__APPLE__)
+#elif defined(HAVE_MACH_VM)
         /* Darwin has no MAP_FIXED_NOREPLACE. Claim the range first with
          * mach_vm_map(VM_FLAGS_FIXED), which refuses rather than displaces;
          * MAP_FIXED below can then only replace the placeholder we now own. */
         if (mach_map_fixed(baseAddr, len, PROT_READ | PROT_WRITE) == MAP_FAILED) {
+            SetLastError(ERROR_INVALID_ADDRESS);
+            return NULL;
+        }
+        flags |= MAP_FIXED;
+#elif defined(__APPLE__)
+        /* iOS: no MAP_FIXED_NOREPLACE and no mach_vm. The same claim, with an
+         * anonymous mapping as the placeholder: a hint-only mmap either lands
+         * exactly where asked or reports where it did land, and "somewhere
+         * else" is refused as taken. Then MAP_FIXED can only replace our own
+         * claim. Racy in principle between the two calls, but this runs once
+         * at startup on one thread, and it fails cleanly rather than
+         * unmapping something live. */
+        void *claim = mmap(baseAddr, len, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (claim == MAP_FAILED || claim != baseAddr) {
+            if (claim != MAP_FAILED) munmap(claim, len);
             SetLastError(ERROR_INVALID_ADDRESS);
             return NULL;
         }
