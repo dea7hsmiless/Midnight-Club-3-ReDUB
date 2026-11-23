@@ -136,6 +136,19 @@ static int port_wanted(void)
 }
 
 /* 0: park; 1: press ROOM; 2: press FIND A ROOM. */
+/* MC3_TEST_PORT=1: the options page is driven by recomp_manual.c's event hook
+ * (the parent screen's pagination made pad counting unreliable), so the walker
+ * only has to reach the options screen and stop pressing. */
+static int port_test_hook(void)
+{
+    static int want = -1;
+    if (want < 0) {
+        const char *e = getenv("MC3_TEST_PORT");
+        want = e && e[0] == '1';
+    }
+    return want;
+}
+
 static int port_press(void)
 {
     static int what = -1;
@@ -145,6 +158,20 @@ static int port_press(void)
              : e && !strcasecmp(e, "find") ? 2 : 0;
     }
     return what;
+}
+
+/* MC3_AUTOSTART_JOIN=1: the other half of MC3_AUTOSTART_HOST. On the
+ * Networking screen go Right to System Link, open its lobby, move to Join
+ * Game and take the first match listed. Stops once the press is made: a
+ * lobby is not "in game", and pressing on could cancel the join. */
+static int join_wanted(void)
+{
+    static int want = -1;
+    if (want < 0) {
+        const char *e = getenv("MC3_AUTOSTART_JOIN");
+        want = e && e[0] == '1';
+    }
+    return want;
 }
 
 static void on_path(const char *p)
@@ -453,6 +480,25 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
          * next screen, and the last of them loads the cruise (which the game
          * reports as in_game, ending this walk). A screen that never answers
          * still stops the walk, so this cannot spin for ever. */
+        if (join_wanted()) {
+            /* Right to System Link, A to open its lobby, Down to Join Game,
+             * A, then A on the first host in the list. */
+            if (s_downs < 1) {
+                if (ready_busy(now, 2500, 1500)) { press(PAD_RIGHT, 0, now); s_downs++; }
+            } else if (s_downs < 2) {
+                if (ready_busy(now, 2500, 2000)) { press(0, PAD_A, now); s_downs++; }
+            } else if (s_downs < 3) {
+                if (ready_busy(now, 2500, 1500)) { press(PAD_DOWN, 0, now); s_downs++; }
+            } else if (s_downs < 4) {
+                if (ready_busy(now, 2500, 2000)) { press(0, PAD_A, now); s_downs++; }
+            } else if (s_downs < 5) {
+                if (ready_busy(now, 2500, 2000)) { press(0, PAD_A, now); s_downs++; }
+            } else {
+                finish("joining: host picked, waiting for the match");
+                return;
+            }
+            break;
+        }
         if (host_wanted()) {
             /* Right once: the Networking screen lays its two items out
              * side by side (Xbox Live, System Link), so Down did not move and
@@ -482,6 +528,15 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
         }
         break;
     case ST_OPTIONS:                /* Down to Port Options (the last item), A */
+        if (port_test_hook()) {
+            static int noted;
+            if (!noted) {
+                noted = 1;
+                fprintf(stderr, "[AUTOSTART] %s options screen reached; the"
+                        " event hook opens Port Options\n", stamp());
+            }
+            break;                  /* no presses: MC3_TEST_PORT drives the page */
+        }
         if (s_downs < 7) {
             if (ready(now, 1500, 450)) {
                 if (port_wanted()) {
@@ -522,11 +577,17 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
             int row = port_press() == 1 ? 13 : 14;
             if (s_nav < 20) {
                 if (ready(now, 900, 250)) {
+                    char tag[40];
+                    snprintf(tag, sizeof tag, "page up %d", s_nav);
+                    mc3_menu_debug_dump(tag);
                     press(PAD_UP, 0, now);
                     s_nav++;
                 }
             } else if (s_nav < 20 + row) {
                 if (ready(now, 900, 250)) {
+                    char tag[40];
+                    snprintf(tag, sizeof tag, "page down %d", s_nav - 20);
+                    mc3_menu_debug_dump(tag);
                     press(PAD_DOWN, 0, now);
                     s_nav++;
                 }

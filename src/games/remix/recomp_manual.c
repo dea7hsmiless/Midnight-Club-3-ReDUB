@@ -3063,6 +3063,8 @@ void sub_0018C580(void) { online_leave("Tokyo Challenge"); sub_0018C580_gen(); }
  * not need a second path that fakes the front end's state.
  *
  * With MC3_ONLINE_SESSION unset this is the untouched menu item. */
+static void net_rows_arm(void);          /* the Online screen's two rows */
+static void network_rows_pass(void);
 extern void sub_0018C5A0_gen(void);
 void sub_0018C5A0(void)
 {
@@ -3185,6 +3187,10 @@ static void online_ready_note(int k)
 {
     if (k == 0)
         online_labels_ready = 1;
+    /* ROOM and FIND A ROOM are NOT added to the Online screen: its movie draws
+     * only its own two items, and a row appended to that list is never drawn
+     * (measured: added, confirmed in the list, invisible on screen). The rows
+     * live on the options page, which is a real list. */
 }
 
 static int online_guest_ok(uint32_t va, uint32_t n)
@@ -3522,6 +3528,46 @@ static void online_input_pass(void)
 
 }
 
+static int  port_context_valid(void);
+static int  port_page_open(void);
+static void port_fire_event(uint32_t ev);
+extern void sub_00163830(void);
+
+/* MC3_TEST_PORT=1 MC3_TEST_PORT_ROW=room|find: open Port Options from the
+ * options screen and press one of its online rows, without a controller. The
+ * options screen itself is still reached by the walker; only the pad walk
+ * inside the page is replaced. */
+static void port_test_pass(void)
+{
+    static int want = -1, opened, frames, fired;
+    if (want < 0) {
+        const char *e = getenv("MC3_TEST_PORT");
+        want = e && e[0] == '1';
+    }
+    if (!want || !port_context_valid())
+        return;
+    if (!opened) {
+        if (!port_page_open()) {
+            port_fire_event(0x7F10u);        /* the "Port Options" row */
+            opened = 1;
+            frames = 0;
+        }
+        return;
+    }
+    if (!port_page_open() || fired)
+        return;
+    if (++frames < 90)                       /* let the page settle and draw */
+        return;
+    fired = 1;
+    {
+        const char *e = getenv("MC3_TEST_PORT_ROW");
+        if (e && e[0] == 'r')
+            port_fire_event(0x7F18u);        /* ROOM */
+        else if (e && e[0] == 'f')
+            port_fire_event(0x7F19u);        /* FIND A ROOM */
+    }
+}
+
 /* Opens Arcade for the Online screen's cruise item, one frame after the press:
  * Go(screen) runs here at the top of a normal game frame, with no front-end
  * layout or animation half-done around it, which is what keeps the Online
@@ -3550,6 +3596,8 @@ void sub_0020B6F0(void)
     float dt, real;
     int frame_rate_mode = mc3_frame_rate_mode();
     online_cruise_pass();
+    network_rows_pass();
+    port_test_pass();
     online_menu_patch();
     online_input_pass();       /* MC3_TEST_MENU only */
     if (on < 0) {
@@ -4136,6 +4184,16 @@ static void port_room_apply(int room)
      * player cannot reach again with the D-pad. */
     room %= PORT_ROOMS;
     if (room < 0) room += PORT_ROOMS;
+    /* Eight is the room's limit. Do not walk into a full one: the ninth
+     * player would be refused by the relay and the row would look wrong. */
+    if (room != port_room_get()) {
+        int there = roam_census_players(room);
+        if (there >= 8) {                 /* the room seats eight, self included */
+            fprintf(stderr, "[PORT] room %d is full (%d/8), staying in %d\n",
+                    room, there, port_room_get());
+            return;
+        }
+    }
     port_room = room;
     roam_set_group((unsigned)room);
     (void)v;
@@ -4189,16 +4247,24 @@ static void port_find_poll(void)
 int port_online_label(int id, char *out, size_t size)
 {
     if (id == PORT_ROW_ROOM) {
-        snprintf(out, size, "ROOM: %d", port_room_get());
+        int age = roam_census_age_ms();
+        int here = roam_census_players(port_room_get());
+        if (age >= 0 && age < 30000 && here >= 0)
+            snprintf(out, size, "ROOM: %d (%d/8)", port_room_get(), here);
+        else
+            snprintf(out, size, "ROOM: %d", port_room_get());
         return 1;
     }
     if (id == PORT_ROW_FIND) {
         int age = roam_census_age_ms();
-        int here = roam_census_players(port_room_get());
+        int players = 0;
+        int best = roam_census_best(&players);
         if (port_find_pending)
             snprintf(out, size, "FIND A ROOM: SEARCHING...");
-        else if (age >= 0 && age < 30000 && here > 0)
-            snprintf(out, size, "FIND A ROOM (%d/8 HERE)", here);
+        else if (age >= 0 && age < 30000 && best >= 0 && best != port_room_get())
+            snprintf(out, size, "FIND A ROOM (%d/8 IN %d)", players, best);
+        else if (age >= 0 && age < 30000 && best >= 0)
+            snprintf(out, size, "FIND A ROOM (%d/8 HERE)", players);
         else
             snprintf(out, size, "FIND A ROOM");
         return 1;
@@ -4221,6 +4287,199 @@ int port_online_change(int id, int step)
     }
     return 0;
 }
+
+/* ROOM and FIND A ROOM on the Online screen
+ *
+ * The player decides who to play with on the screen that says Free Roam, so
+ * the two rows are appended beneath the game's own two items there. Port
+ * Options is the settings page and carries neither.
+ *
+ * Mechanism: the same row API Port Options uses (sub_00348BE0 adds a row,
+ * sub_00163830 receives its press), with the front end's current list. The
+ * screen is recognised by having exactly two rows just after its menu item was
+ * pressed, so the main menu (more rows) and the options list can never match.
+ */
+#define NET_ROWS_WINDOW   600      /* frames to find the screen's list */
+#define NET_CENSUS_FRAMES 90       /* ask the relay this often while it is up */
+
+static uint32_t net_rows[2];
+static int      net_rows_count;    /* 0, or 2 once they are in place */
+static uint32_t net_list;
+static uint32_t net_state;         /* logged only: it is 0 when the labels go in */
+static uint32_t net_added_list;    /* the list object the rows went into */
+static int      net_added;         /* and that they went in */
+static int      net_window;
+static int      net_accept_down;
+static int      net_census_wait;
+
+static int net_context(uint32_t *lst, uint32_t *self)
+{
+    uint32_t fe = MEM32(0x0050F148u), own, list, page, cap, cols, count;
+    if (!online_guest_ok(fe, 16))
+        return 0;
+    own = MEM32(fe + 0xCu);
+    if (!online_guest_ok(own, 0x100))
+        return 0;
+    list = MEM32(own + 0xFCu);
+    if (!online_guest_ok(list, 0x300))
+        return 0;
+    page = MEM32(list + 0x258u);
+    cap = MEM32(list + 0x230u);
+    cols = MEM32(list + 0x234u);
+    if (page > 15u || cap < 4u || cap > 64u || cols < 1u || cols > 32u)
+        return 0;
+    count = MEM32(list + 0x238u + 4u * page);
+    if (count > cap)
+        return 0;
+    *lst = list;
+    *self = own;
+    return 1;
+}
+
+static uint32_t net_row_count(uint32_t lst)
+{
+    uint32_t page = MEM32(lst + 0x258u);
+    return MEM32(lst + 0x238u + 4u * page);
+}
+
+static uint32_t net_add(uint32_t lst, uint32_t self, uint32_t event)
+{
+    uint32_t args[] = { net_row_count(lst), 0, 0, MEM32(self + 0xCu),
+                        0x00163830u, event, 2 };
+    PortRegs r = port_save();
+    uint32_t row;
+    for (int k = 6; k >= 0; k--)
+        port_push(args[k]);
+    port_push(0);
+    g_ecx = lst;
+    sub_00348BE0();
+    row = g_eax;
+    port_restore(r);
+    return row;
+}
+
+static void net_text(uint32_t lst, uint32_t row, const char *text)
+{
+    uint32_t column = MEM32(lst + 0x244u), cell = MEM32(row + 8u), cap, dst;
+    size_t n, i;
+    if (!port_ram(column, 32) || !port_ram(cell, 20))
+        return;
+    cap = MEM32(column + 28u);
+    if (cap < 2u || cap > 1024u)
+        return;
+    dst = MEM32(cell + 16u);
+    if (!port_ram(dst, cap * 2u))
+        return;
+    n = strlen(text);
+    if (n >= cap) n = cap - 1;
+    for (i = 0; i < n; i++)
+        MEM16(dst + i * 2u) = (unsigned char)text[i];
+    MEM16(dst + n * 2u) = 0;
+}
+
+static void net_labels(void)
+{
+    char text[96];
+    if (net_rows_count != 2 || !port_ram(net_list, 0x300))
+        return;
+    text[0] = 0;
+    if (port_online_label(PORT_ROW_ROOM, text, sizeof text))
+        net_text(net_list, net_rows[0], text);
+    text[0] = 0;
+    if (port_online_label(PORT_ROW_FIND, text, sizeof text))
+        net_text(net_list, net_rows[1], text);
+}
+
+/* Called when the Online screen's own labels are renamed: that screen, and no
+ * other, is now up. The front-end state word is recorded here and checked
+ * before anything is added, so a list that belongs to another screen can
+ * never be touched (the profile screen was, once, and its names were lost). */
+static void net_rows_arm(void)
+{
+    net_window = NET_ROWS_WINDOW;
+    net_rows_count = 0;
+    net_list = 0;
+    net_census_wait = 0;
+    net_state = MEM32(0x0050F14Cu);
+}
+
+static void network_rows_pass(void)
+{
+    static int diag;
+    uint32_t lst, self, count;
+    if (net_window <= 0)
+        return;
+    net_window--;
+    if (!net_context(&lst, &self))
+        return;
+    count = net_row_count(lst);
+
+    if (net_rows_count == 2) {
+        if (lst != net_list || count < 2u) {
+            net_rows_count = 0;
+            net_list = 0;
+            return;
+        }
+        if (--net_census_wait <= 0) {
+            net_census_wait = NET_CENSUS_FRAMES;
+            if (roam_census_request() == 0)
+                fprintf(stderr, "[ONLINE] census asked for the room rows\n");
+        }
+        net_labels();
+        return;
+    }
+    /* Already extended this very list: a rebuild asks again, and answering it
+     * is what doubled the rows. */
+    if (net_added && lst == net_added_list)
+        return;
+    /* The Online screen's list holds no rows of its own. Anything else is
+     * another screen's list (the profile screen has its profiles in it) and is
+     * not ours to touch. */
+    if (count != 0u) {
+        if (diag == 0) {
+            diag = 30;
+            fprintf(stderr, "[ONLINE] rows: list has %u rows, not the Online screen\n",
+                    (unsigned)count);
+        } else {
+            diag--;
+        }
+        return;
+    }
+
+    net_list = lst;
+    net_rows[0] = net_add(lst, self, 0x7F18u);
+    net_rows[1] = net_add(lst, self, 0x7F19u);
+    net_rows_count = (net_rows[0] && net_rows[1]) ? 2 : 0;
+    if (net_rows_count) {
+        net_added = 1;
+        net_added_list = lst;
+        fprintf(stderr, "[ONLINE] ROOM and FIND A ROOM added to the Online screen"
+                " (state %08X)\n", (unsigned)net_state);
+        net_census_wait = 0;
+        net_labels();
+    } else {
+        fprintf(stderr, "[ONLINE] rows: the list refused the two rows\n");
+    }
+}
+
+/* Test hook: invoke a row's event through the game's own dispatcher, the way
+ * pressing it does (src/autostart.c uses it when the pad walk cannot reach the
+ * row). Nothing below this line is bypassed: the handler, the setting change
+ * and the room change all run. */
+static void port_fire_event(uint32_t ev)
+{
+    PortRegs r;
+    if (!port_context_valid())
+        return;
+    r = port_save();
+    port_push(0);          /* the return address the dispatcher pops */
+    port_push(ev);
+    sub_00163830();
+    port_restore(r);
+    fprintf(stderr, "[PORT] test hook: event %04X fired\n", (unsigned)ev);
+}
+
+static int port_page_open(void) { return port_open; }
 
 static void port_labels(void)
 {
@@ -4278,10 +4537,9 @@ static void port_build(void)
      * (ROOM and FIND A ROOM), so each order here is two shorter than the page
      * has room for: 16 slots, less BACK, less those two. */
 #if defined(__ANDROID__)
-    /* 16-slot page: 13 rows + the two online rows + BACK. The always-fullscreen
-     * status and the graphics preset (both also in the Android launcher) give
-     * up their slots to phone music and controller vibration (15), which was
-     * implemented but in no order at all; sharpening (6) gives up the last. */
+    /* 13 settings + ROOM + FIND A ROOM + BACK = 16. The always-fullscreen
+     * status, the graphics preset and sharpening give up their slots to the
+     * phone music, controller vibration and the two online rows. */
     const int order[]={1,2,3,4,7,8,9,10,11,12,13,14,15};
     int settings=13;
 #elif defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
@@ -4291,14 +4549,13 @@ static void port_build(void)
     const int main_order[]={0,1,8,9,10,11,2,12,3,13,15};
     const int adv_order[]={5,7,4,6,19,20,21,17,18,22};
     const int *order=port_page?adv_order:main_order;
-    /* 15 is "Advanced...", the only row that fires 0x7F0F. Without it the
-     * whole advanced page (ids 17..22) was unreachable in game. 11 + 15 + the
-     * two online rows + BACK = 14 of the page's 16 slots. */
+    /* 15 is "Advanced...", the only row that fires 0x7F0F; without it the
+     * whole advanced page (ids 17..22) was unreachable. */
     int settings=port_page?10:11;
 #else
-    /* Desktop: 13 rows + the two online rows + BACK = the page's 16 slots.
-     * SHARPENING and HUD TEXTURES gave up their two slots to them; both still
-     * come from the settings file (RECOMP_GL_SHARPEN, RECOMP_GL_UI_SCALE). */
+    /* 13 settings + ROOM + FIND A ROOM + BACK = the page's 16 slots.
+     * SHARPENING and HUD TEXTURES give up their two; both still come from the
+     * settings file (RECOMP_GL_SHARPEN, RECOMP_GL_UI_SCALE). */
     const int order[]={0,5,2,3,4,13,14,1,16,7,9,11,15};
     int settings=13;
 #endif
@@ -4313,8 +4570,9 @@ static void port_build(void)
         port_rows[i]=port_add(ev,NULL);
         port_row_id[port_row_n++]=i;
     }
-    /* ONLINE rows, on the main page only, paid for by the two settings each
-     * order above leaves out. They stay inside the 16-slot capacity. */
+    /* ROOM and FIND A ROOM: their own two rows, paid for by two settings the
+     * orders below leave out. They show the room number, how full it is, and
+     * (Find a Room) which room it would move to. */
     if (!port_page) {
         static const int online[2] = { 24, 25 };
         for (int k = 0; k < 2; k++) {
@@ -4432,6 +4690,13 @@ void sub_00163830(void)
         windows_port_setting_change(17+(int)(event-0x7F20));
         port_labels();g_eax=0;g_esp+=8;return;
     }
+    if(net_rows_count==2 && event>=0x7F18 && event<0x7F1A) {
+        if(net_accept_down){g_eax=0;g_esp+=8;return;}
+        net_accept_down=1;
+        port_online_change((int)(event-0x7F00u),0);
+        net_labels();
+        g_eax=0;g_esp+=8;return;
+    }
     if(port_open && event>=0x7F18 && event<0x7F1A) {
         if(port_accept_down){g_eax=0;g_esp+=8;return;}
         port_accept_down=1;
@@ -4456,7 +4721,7 @@ void sub_0018D590(void)
     if(port_open || port_back_release) {
         XBOX_INPUT_STATE input={0};
         int down=xbox_InputGetState(0,&input)==0 && input.Gamepad.bAnalogButtons[XBOX_BUTTON_B]>XBOX_ANALOG_BUTTON_THRESHOLD;
-        if(input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]<=XBOX_ANALOG_BUTTON_THRESHOLD)port_accept_down=0;
+        if(input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]<=XBOX_ANALOG_BUTTON_THRESHOLD){port_accept_down=0;net_accept_down=0;}
         if(port_open && down && !port_back_down) {
             port_parent();port_back_release=1;port_back_down=down;g_esp+=4;return;
         }

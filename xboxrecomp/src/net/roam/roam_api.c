@@ -174,7 +174,10 @@ int roam_start(const char *name, uint32_t vip){
     rc_config c;
     memset(&c, 0, sizeof c);
     c.self_id = roam_plat_random();
-    c.port = ROAM_PORT;
+    /* MC3_ROAM_PORT: this copy's own roam port, advertised in HELLO. Two
+     * copies on one machine (hosting one side, joining from the other) need
+     * different ones; on a LAN the default is what everything already uses. */
+    c.port = (uint16_t)env_int("MC3_ROAM_PORT", ROAM_PORT, 1, 65535);
     snprintf(c.name, sizeof c.name, "%s", name ? name : "");
     c.platform = RC_PLAT_WEB;
     c.discovery = 1;                 /* only while no hub answers */
@@ -269,7 +272,11 @@ int roam_start(const char *name, uint32_t vip){
     /* a tunnelling handler set before the session existed (the XNet transport
      * installs its queue at start) is registered now */
     if (g_tun_cb) rc_set_tunnel(&g_s, tunnel_adapter, 0);
-    if (roam_plat_start(&g_s, ROAM_PORT) != 0) return -1;
+    if (roam_plat_start(&g_s, c.port) != 0) {
+        fprintf(stderr, "[roam] could not bind UDP %u%s\n", (unsigned)c.port,
+                c.port == ROAM_PORT ? "" : " (set by MC3_ROAM_PORT)");
+        return -1;
+    }
     g_on = 1; g_last_eval = 0;
     fprintf(stderr, "[roam] started as \"%s\" (id %08x, %d links wanted)\n", g_s.conf.name, (unsigned)c.self_id, g_k);
     return 0;
