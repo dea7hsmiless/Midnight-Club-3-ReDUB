@@ -1,4 +1,4 @@
-/* Ported by tools/port_overrides.py from src/games/dub/recomp_manual.c: every guest address
+﻿/* Ported by tools/port_overrides.py from src/games/dub/recomp_manual.c: every guest address
  * rewritten for this build. Places marked PORT? could not be mapped;
  * each needs a look before its override is trusted. */
 
@@ -45,6 +45,21 @@
 #if defined(_WIN32) || defined(__linux__)
 static void port_media_frame(void);
 #endif
+typedef struct {uint32_t a,c,d,b,si,di,sp,bp,seh;} PortRegs;
+static PortRegs port_save(void) {return (PortRegs){g_eax,g_ecx,g_edx,g_ebx,g_esi,g_edi,g_esp,g_ebp,g_seh_ebp};}
+static void port_restore(PortRegs r) {g_eax=r.a;g_ecx=r.c;g_edx=r.d;g_ebx=r.b;g_esi=r.si;g_edi=r.di;g_esp=r.sp;g_ebp=r.bp;g_seh_ebp=r.seh;}
+
+/* Native frame hooks have no guest CALL instruction. Supply its return slot
+ * and restore the interrupted register context after the guest action. */
+static void online_frame_call(void (*action)(void))
+{
+    PortRegs r = port_save();
+    g_esp -= 4;
+    MEM32(g_esp) = 0;  /* generated RET consumes this slot; no guest dispatch */
+    action();
+    port_restore(r);
+}
+
 static atomic_int port_gameplay_active;
 static void port_gameplay_update(void);
 
@@ -3134,6 +3149,7 @@ void sub_00180160(void)
      * instead, where Go(screen) is called the way the game calls it. */
     online_cruise_pending = 1;
     fprintf(stderr, "[ONLINE] cruise: requested\n");
+    g_esp += 4;  /* guest RET: this callback has no stack arguments */
 }
 /** "Online" keeps the Networking item's place
  *
@@ -3400,7 +3416,7 @@ void online_menu_patch(void)
             if (arc && !done && online_labels_ready && ++wait >= 60) {
                 done = 1;
                 usb_gamepad_set_held(0, 0, 0);
-                sub_0018C530_gen();
+                online_frame_call(sub_0018C530_gen);
                 fprintf(stderr, "[ONLINE] test hook: Arcade opened\n");
             }
         }
@@ -3410,14 +3426,14 @@ void online_menu_patch(void)
             if (online_labels_ready && ++idle >= 60) {
                 opened = 1;
                 usb_gamepad_set_held(0, 0, 0);
-                sub_0018C5A0();
+                online_frame_call(sub_0018C5A0);
                 fprintf(stderr, "[ONLINE] test hook: Online screen opened\n");
             }
         } else if (wanted && opened && test_cruise) {
             if (++frames >= 90) {
                 test_cruise = 0;
                 frames = 0;
-                sub_00180160();
+                online_frame_call(sub_00180160);
                 fprintf(stderr, "[ONLINE] test hook: cruise item picked\n");
             }
         }
@@ -3577,7 +3593,7 @@ static void online_cruise_pass(void)
     if (!online_cruise_pending)
         return;
     online_cruise_pending = 0;
-    sub_0018C530_gen();
+    online_frame_call(sub_0018C530_gen);
     fprintf(stderr, "[ONLINE] cruise: Arcade opened from the frame hook\n");
 }
 
@@ -3888,9 +3904,7 @@ extern int windows_media_gameplay_get(void),windows_media_banner_get(wchar_t *,i
 #if defined(_WIN32) || defined(__linux__)
 extern void sub_00139520(void),sub_001395E0(void);
 #endif
-typedef struct {uint32_t a,c,d,b,si,di,sp,bp,seh;} PortRegs;
-static PortRegs port_save(void) {return (PortRegs){g_eax,g_ecx,g_edx,g_ebx,g_esi,g_edi,g_esp,g_ebp,g_seh_ebp};}
-static void port_restore(PortRegs r) {g_eax=r.a;g_ecx=r.c;g_edx=r.d;g_ebx=r.b;g_esi=r.si;g_edi=r.di;g_esp=r.sp;g_ebp=r.bp;g_seh_ebp=r.seh;}
+
 static void port_push(uint32_t x) {g_esp-=4;MEM32(g_esp)=x;}
 static int port_ram(uint32_t p,uint32_t n)
 {
