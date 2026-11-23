@@ -56,12 +56,24 @@ BASE=(-target arm64-apple-ios16.0 -isysroot "$SDK" -O2 -w -fno-strict-aliasing -
 
 fail=0
 n=0
+# A header newer than the last full compile invalidates every object: the
+# per-file check below only compares source timestamps, so without this a header
+# edit silently leaves stale objects (it did: the GL entry-point table grew but
+# gl_api.o still had the old pointers, and the link reported them undefined).
+FORCE=0
+if [ -f "$OBJ/.headers" ]; then
+    stale=$(find src config work-remix/gen xboxrecomp -name '*.h' -newer "$OBJ/.headers" -print -quit 2>/dev/null)
+    [ -n "$stale" ] && FORCE=1
+else
+    FORCE=1
+fi
+[ "$FORCE" = 1 ] && echo "a header changed: recompiling everything"
 while IFS= read -r src <&3; do
     src=${src%$'\r'}                       # the list may have CRLF endings
     [ -n "$src" ] || continue
     n=$((n + 1))
     obj="$OBJ/$(echo "$src" | tr '/' '_' | sed 's/\.c$/.o/;s/\.m$/.o/')"
-    [ -f "$obj" ] && [ "$obj" -nt "$src" ] && continue
+    [ "$FORCE" = 0 ] && [ -f "$obj" ] && [ "$obj" -nt "$src" ] && continue
     extra=()
     case "$src" in *.m) extra=(-fobjc-arc -fblocks);; esac
     if ! out=$("$CLANG" "${BASE[@]}" "${extra[@]}" -c "$src" -o "$obj" 2>&1); then
@@ -74,15 +86,18 @@ done 3< "$LIST"
 echo "---"
 echo "compiled $n, failed $fail"
 [ "$fail" -eq 0 ] || exit 1
+touch "$OBJ/.headers"
 echo "linking..."
 
 # The Swift toolchain's own ld64.lld refuses "-platform_version ios" (LLD 21 is
 # too old); the LLVM 23 linker in the iOS tool folder accepts it, and is what the
 # 0.2.4 IPA was linked with.
 LD=${IOS_LD:-/e/AI/iosc/tools/ld64.lld.exe}
-SDLLIB=$(win_path "${SDLDIR}/lib")
+# ios/build_sdl2.sh produces this; it is not inside the SDL source tree.
+SDLLIB=${IOS_SDL_LIB:-work-remix/iossdl}
 LIBS=("$SDLLIB/libSDL2.a")
 [ -f "$SDLLIB/libSDL2main.a" ] && LIBS+=("$SDLLIB/libSDL2main.a")
+[ -f "$SDLLIB/libSDL2.a" ] || { echo "no $SDLLIB/libSDL2.a (run ios/build_sdl2.sh)"; exit 2; }
 objs=$(find "$OBJ" -name '*.o' | tr '\n' ' ')
 "$LD" -arch arm64 -platform_version ios 16.0 16.0 -syslibroot "$SDK" -o "$OBJ/mcdub3remix" \
     $objs "${LIBS[@]}" \
@@ -92,5 +107,5 @@ objs=$(find "$OBJ" -name '*.o' | tr '\n' ' ')
     -framework CoreMotion -framework Security -framework SystemConfiguration \
     -framework CoreHaptics -framework ImageIO -framework CoreText -framework UniformTypeIdentifiers \
     -framework CoreBluetooth \
-    -lobjc -lc++ -lz -liconv 2>&1 | head -40
+    -lSystem -lobjc -lc++ -lz -liconv 2>&1 | head -40
 [ -f "$OBJ/mcdub3remix" ] && echo "binary: $OBJ/mcdub3remix ($(stat -c %s "$OBJ/mcdub3remix") bytes)"

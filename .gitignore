@@ -76,3 +76,8 @@ TODO.md
 # Local Explorer copies and ad-hoc archives are never source inputs.
 * - Copy*
 tools.zip
+
+# iOS build output: objects, the SDL static library and the multi-GB IPA
+/ios/dist/
+/work-remix/ios-build/
+/work-remix/iossdl/

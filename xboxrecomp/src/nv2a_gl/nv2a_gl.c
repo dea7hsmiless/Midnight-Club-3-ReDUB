@@ -179,6 +179,10 @@ int nv2a_gl_draw_placeholder(void);
 int nv2a_gl_screen_size(int *w, int *h);
 static SDL_Window   *s_win;
 static SDL_GLContext s_ctx;
+static int           s_resume_pending;   /* foreground: re-assert GL at the next flip */
+/* Called from the iOS scene delegate when the app becomes active. Plain atomic
+ * because the caller is the main thread and this is read by the render thread. */
+void nv2a_gl_note_resume(void) { __atomic_store_n(&s_resume_pending, 1, __ATOMIC_SEQ_CST); }
 static int           s_state;           /* 0 untried, 1 ready, -1 failed */
 static int           s_trace;
 static int           s_finish = -1;      /* RECOMP_GL_FINISH */
@@ -7163,6 +7167,20 @@ static void gl_blit(const Nv2aBlit *b)
 static void gl_flip(void)
 {
     state_dirty();
+#if defined(__APPLE__)
+    /* Back from the lock screen or another app. The EAGL drawable may have moved
+     * and the render thread's context needs re-asserting before the next
+     * submission, or the game comes back to a frozen picture. (The 0.2.4 iOS
+     * tree also rebuilt an explicit renderbuffer chain here; this renderer
+     * presents through SDL like the Android build does, so re-asserting the
+     * context and marking the state dirty is what applies.) */
+    if (__atomic_exchange_n(&s_resume_pending, 0, __ATOMIC_SEQ_CST)) {
+        if (s_win && s_ctx)
+            SDL_GL_MakeCurrent(s_win, s_ctx);
+        state_dirty();
+        fprintf(stderr, "[IOS LIFECYCLE] GL resumed: context re-asserted, state dirty\n");
+    }
+#endif
     static int dump_every = -1;
     static uint32_t dump_from, dump_to;     /* RECOMP_GL_DUMP=prefix,every,from,to */
     static char dump_prefix[256];

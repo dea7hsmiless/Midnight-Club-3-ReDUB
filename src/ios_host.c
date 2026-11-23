@@ -32,6 +32,7 @@ void ios_host_unused(void) { }
 #include <string.h>
 #include <stdatomic.h>
 #include <pthread.h>
+#include <mach-o/dyld.h>          /* _NSGetExecutablePath: the bundle beside it */
 #include <sys/stat.h>
 #include <TargetConditionals.h>
 #if TARGET_OS_IPHONE
@@ -375,6 +376,34 @@ static void log_open(void)
     pthread_detach(th);
 }
 
+/* First run: the settings file the app was built with becomes the player's, so
+ * a fresh install starts with something to edit instead of an empty folder --
+ * and a test build can arrive with the server line already in it. Same shape as
+ * windows_host.c's seed_player_settings(); never overwrites an existing file. */
+static void seed_env_file(const char *home)
+{
+    char exe[4096], src[4200], dst[4200], buf[4096];
+    uint32_t n = (uint32_t)sizeof exe;
+    FILE *in, *out, *probe;
+    size_t got;
+    char *slash;
+
+    if (!home || !*home) return;
+    snprintf(dst, sizeof dst, "%s/Documents/%s_env.txt", home, MC3_APP);
+    if ((probe = fopen(dst, "rb")) != NULL) { fclose(probe); return; }
+    if (_NSGetExecutablePath(exe, &n) != 0) return;
+    if ((slash = strrchr(exe, '/')) == NULL) return;
+    *slash = 0;                                  /* the .app bundle */
+    snprintf(src, sizeof src, "%s/%s_env.txt", exe, MC3_APP);
+    if ((in = fopen(src, "rb")) == NULL) return;
+    if ((out = fopen(dst, "wb")) == NULL) { fclose(in); return; }
+    while ((got = fread(buf, 1, sizeof buf, in)) > 0)
+        fwrite(buf, 1, got, out);
+    fclose(in);
+    fclose(out);
+    fprintf(stderr, "[IOS] settings: created %s from the bundle\n", dst);
+}
+
 void ios_boot(void)
 {
     const char *home;
@@ -382,6 +411,7 @@ void ios_boot(void)
 
     home = getenv("HOME");           /* the app sandbox container */
     doc = getenv("MC3_DOC_DIR");
+    seed_env_file(home);
     if (home) {
         snprintf(env_path, sizeof env_path, "%s/Documents/%s_env.txt",
                  doc ? doc : home, MC3_APP);
@@ -406,6 +436,30 @@ void ios_boot(void)
  * through fprintf(stderr) which the app's stderr already captures via
  * dup2 in the launcher; expand if per-write overhead shows up). */
 #endif
+
+/* ── the rest of the host contract ──────────────────────────────────────────
+ * Symbols the engine core and the renderer expect from a host, which the
+ * desktop builds get from windows_media.c / the settings dialogs. iOS has no
+ * phone-music bridge and its settings live in the launcher, so these are the
+ * honest answers rather than stubs that pretend to do something. */
+
+/* Is the game in gameplay? Only the phone-music bridge asks, to duck the game's
+ * audio under outside music. iOS has no such bridge: nothing ever ducks. */
+int windows_media_gameplay_get(void) { return 0; }
+
+/* Gain applied to the game's own audio while phone music plays: none. */
+float mc3_output_gain(void) { return 1.0f; }
+
+/* The in-game Port Options "attach" opens the desktop settings window. On iOS
+ * the launcher owns the settings UI (it writes the same env file), so there is
+ * nothing to attach to a window. */
+struct SDL_Window;
+void windows_port_settings_attach(struct SDL_Window *win) { (void)win; }
+
+/* The input layer caches the rumble strength and re-reads MC3_RUMBLE_STRENGTH
+ * when it is -1, which is what a change in the launcher needs to take effect. */
+extern void xbox_InputSetRumbleStrength(int percent);
+void xbox_rumble_strength_reset(void) { xbox_InputSetRumbleStrength(-1); }
 
 #endif /* TARGET_OS_IPHONE */
 #endif /* __APPLE__ */
