@@ -3096,6 +3096,9 @@ void sub_0018C5A0(void)
  * Outside a session this is the untouched callback. */
 extern void sub_00180160_gen(void);
 extern void sub_0018C530_gen(void);
+/* Set by the Online screen's cruise item; online_cruise_pass() opens Arcade on
+ * the next frame, outside the press handler. */
+static int online_cruise_pending;
 /* Online play is on unless MC3_ONLINE=0 says otherwise (ios_host.c applies * that default at boot; the file can carry the address on any platform). */
 static int online_play_enabled(void)
 {
@@ -3121,13 +3124,14 @@ void sub_00180160(void)
     }
     if (online_session_wanted())
         online_enter("networking screen, Online Cruise");
-    /* Arcade's own menu callback, called directly: the front end accepts this
-     * during the item press (moving the cursor there and pressing A by input
-     * was tried and could not be made reliable, because the menu puts its
-     * cursor back on the first item). The cost is that this screen's scene
-     * keeps animating over Arcade and the loading screen for a few seconds. */
-    sub_0018C530_gen();
-    fprintf(stderr, "[ONLINE] cruise: networking item -> Arcade's cruise path\n");
+    /* Do not change screens from inside this press handler. The front end calls
+     * it mid-layout: opening Arcade from here re-enters Go(screen) while the
+     * Online screen is still half-built, and that screen's backdrop is never
+     * torn down, so it keeps drawing over Arcade and the cruise loading screen.
+     * online_cruise_pass() makes the move at the top of the next game frame
+     * instead, where Go(screen) is called the way the game calls it. */
+    online_cruise_pending = 1;
+    fprintf(stderr, "[ONLINE] cruise: requested\n");
 }
 /** "Online" keeps the Networking item's place
  *
@@ -3479,6 +3483,19 @@ static void online_input_pass(void)
 
 }
 
+/* Opens Arcade for the Online screen's cruise item, one frame after the press:
+ * Go(screen) runs here at the top of a normal game frame, with no front-end
+ * layout or animation half-done around it, which is what keeps the Online
+ * screen's scene from being left alive on top of the next screens. */
+static void online_cruise_pass(void)
+{
+    if (!online_cruise_pending)
+        return;
+    online_cruise_pending = 0;
+    sub_0018C530_gen();
+    fprintf(stderr, "[ONLINE] cruise: Arcade opened from the frame hook\n");
+}
+
 void sub_0020B6F0(void)
 {
     extern void online_menu_patch(void);
@@ -3493,6 +3510,7 @@ void sub_0020B6F0(void)
     static unsigned ped_steps;
     float dt, real;
     int frame_rate_mode = mc3_frame_rate_mode();
+    online_cruise_pass();
     online_menu_patch();
     online_input_pass();       /* MC3_TEST_MENU only */
     if (on < 0) {

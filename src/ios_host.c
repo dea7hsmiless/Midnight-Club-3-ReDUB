@@ -340,17 +340,6 @@ void windows_port_setting_change(int id)
         }
         fprintf(stderr, "[PORT] online %s saved (restart to apply)\n", on ? "off" : "on");
     } return;
-    case 23:{
-        /* Room number: the relay groups players by it and allows eight per
-         * room (the game's slot count). Everyone who wants to see each other
-         * must pick the same number. */
-        const char *cur = getenv("MC3_ROAM_ROOM");
-        int n = cur && *cur ? atoi(cur) : 0;
-        n = (n + 1) % 10;
-        snprintf(v, sizeof v, "%d", n);
-        if (save_env_pair("MC3_ROAM_ROOM", v))
-            fprintf(stderr, "[PORT] room %d saved (restart to apply)\n", n);
-    } return;
     default: return;
     }
 }
@@ -423,11 +412,6 @@ void windows_port_setting_label(int id, char *out, size_t size)
         const char *off = getenv("MC3_ONLINE");
         int on = !(off && off[0] == '0');
         snprintf(out, size, "ONLINE: %s (RESTART)", on ? "ON" : "OFF");
-    }
-    if (id == 23) {
-        const char *r = getenv("MC3_ROAM_ROOM");
-        snprintf(out, size, "ROOM: %s  (EIGHT PER ROOM)",
-                 (r && *r) ? r : "0");
     }
 }
 

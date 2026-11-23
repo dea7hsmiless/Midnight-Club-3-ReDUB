@@ -207,8 +207,8 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  @[@"Diagnostics",@"Renderer trace",@"RECOMP_GL_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Writes shader sources, surface and texture creation, and any texture mode the renderer does not implement (bump, dot, cube) to the launch log. Diagnostic only: it slows loading and makes a large log. Turn it off when done."],
  @[@"Diagnostics",@"Texgen trace",@"RECOMP_GL_TEXGEN_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Logs fixed-function texture-coordinate generation that the renderer cannot yet do. Use with Renderer trace when chasing graphics bugs in the garage or menus."],
  @[@"Diagnostics",@"Feedback trace",@"RECOMP_GL_FEEDBACK_TRACE",@[@"0",@"1"],@"0",@[@"Off",@"On"],@"Logs draws that sample the surface they are drawing into, which GL does not define. Changes nothing on screen."],
- @[@"Online",@"Online play",@"MC3_ROAM_JOIN",@[@"",@"162.35.56.66"],@"",@[@"Off",@"On"],@"Join other players online: free roam shows them in the city, and System Link races travel the same way. Applies on the next launch."],
- @[@"Online",@"Room",@"MC3_ROAM_ROOM",@[@"0",@"1",@"2",@"3",@"4",@"5",@"6",@"7",@"8",@"9"],@"0",@[@"Room 0",@"Room 1",@"Room 2",@"Room 3",@"Room 4",@"Room 5",@"Room 6",@"Room 7",@"Room 8",@"Room 9"],@"Eight players per room. Everyone who wants to play together picks the same number; a different number is a different city. Applies on the next launch."]];}
+ @[@"Online",@"Online play",@"MC3_ROAM_JOIN",@[@"",@"162.35.56.66"],@"",@[@"Off",@"On"],@"Join other players online: Online > Free Roam shows other players in the city, and Online > Online Race travels the same way. Pick the room in game (Options > ROOM). Applies on the next launch."],
+];}
 - (NSString*)settingLabel:(NSArray*)row value:(NSString*)value {
  NSUInteger index=[row[3] indexOfObject:value];
  return index==NSNotFound?value:row[5][index];
@@ -217,7 +217,7 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  NSString *k=r[2];
  if([k isEqual:@"MC3_FPS_OVERLAY"])return @"Display";
  if([k isEqual:@"MC3_ROAM_JOIN"])return @"Online";
- if([k isEqual:@"MC3_ROAM_ROOM"])return @"Online";
+
  if([r[0] isEqual:@"Diagnostics"])return @"Diagnostics";
  if([r[0] isEqual:@"Advanced"]||[k isEqual:@"RECOMP_GL_VSYNC"]||[k isEqual:@"RECOMP_GL_QUEUE_FRAMES"])return @"Advanced";
  if([k containsString:@"HAPTICS"]||[k isEqual:@"MC3_RUMBLE_STRENGTH"])return @"Feedback";
