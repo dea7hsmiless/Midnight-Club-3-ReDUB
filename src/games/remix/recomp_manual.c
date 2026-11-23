@@ -3159,7 +3159,7 @@ static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
  * names back if the front end re-interns a string. */
 static const char *const online_label_from[3] = { "Networking",  "Xbox Live", "System Link" };
 static const char *const online_label_to[3]   = { "Online",      "Online Cruise Mode", "Online Race Mode" };
-static const char *const online_label_short[3] = { "Online",     "Online Cruise", "Online Races" };
+static const char *const online_label_short[3] = { "Online",     "Online Cruise", "Online Race" };
 static struct { uint32_t va; } online_label[3][8];
 static int online_label_n[3];
 
@@ -3296,6 +3296,20 @@ void online_menu_patch(void)
             discovered = online_label_n[0] > 0;
         }
         online_labels_apply();
+    }
+    {   /* MC3_OPEN_ONLINE=1: test hook. Opens the Online screen exactly the way
+         * the main menu item does, so the screen can be inspected without a
+         * controller. */
+        static int wanted = -1, opened;
+        if (wanted < 0) {
+            const char *e = getenv("MC3_OPEN_ONLINE");
+            wanted = e && e[0] == '1';
+        }
+        if (wanted && !opened && count >= 8u) {
+            opened = 1;
+            sub_0018C5A0();
+            fprintf(stderr, "[ONLINE] test hook: Online screen opened\n");
+        }
     }
 }
 
