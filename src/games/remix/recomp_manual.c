@@ -3041,6 +3041,9 @@ static void unlock_all_pass(void);      /* unlock_all.c, included at the end */
  * These are added only when the override exists in the lift; LIFT_ONLY=1
  * tools/regen.sh keeps them. */
 extern void sub_0018C530_gen(void);
+/* Set when the Online screen's cruise item is chosen; online_input_pass()
+ * performs the same presses a player would to reach Arcade. */
+static int online_cruise_pending;
 void sub_0018C530(void) { online_leave("Arcade"); sub_0018C530_gen(); }
 extern void sub_0018C560_gen(void);
 void sub_0018C560(void) { online_leave("Career"); sub_0018C560_gen(); }
@@ -3118,6 +3121,11 @@ void sub_00180160(void)
     }
     if (online_session_wanted())
         online_enter("networking screen, Online Cruise");
+    /* Arcade's own menu callback, called directly: the front end accepts this
+     * during the item press (moving the cursor there and pressing A by input
+     * was tried and could not be made reliable, because the menu puts its
+     * cursor back on the first item). The cost is that this screen's scene
+     * keeps animating over Arcade and the loading screen for a few seconds. */
     sub_0018C530_gen();
     fprintf(stderr, "[ONLINE] cruise: networking item -> Arcade's cruise path\n");
 }
@@ -3156,9 +3164,12 @@ static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
  *
  * The swaps run every frame: they are no-ops once applied, and they put the
  * names back if the front end re-interns a string. */
-static const char *const online_label_from[3] = { "Networking",  "Xbox Live", "System Link" };
-static const char *const online_label_to[3]   = { "Online",      "Online Cruise Mode", "Online Race Mode" };
-static const char *const online_label_short[3] = { "Online",     "Online Cruise", "Online Race" };
+/* The front end draws each label up to the length it shipped with -- "Xbox
+ * Live" is nine units, "Xbox System Link" sixteen -- so the names below are
+ * chosen to fit those lengths exactly rather than being clipped. */
+static const char *const online_label_from[3] = { "Networking",  "Xbox Live", "Xbox System Link" };
+static const char *const online_label_to[3]   = { "Online",      "Free Roam", "Online Race" };
+static const char *const online_label_short[3] = { "Online",     "Free Roam", "Races" };
 static struct { uint32_t va; } online_label[3][8];
 static int online_label_n[3];
 static int online_labels_ready;            /* the main menu's label was renamed */
@@ -3239,7 +3250,9 @@ static void online_labels_discover(void)
             for (n = 0; n < (unsigned)online_label_n[1]; n++) {
                 uint32_t va = online_label[1][n].va, slack = 0;
                 uint16_t next = MEM16(va + 2u * 9u);
-                while (slack < 64u && MEM16(va + 2u * (9u + slack)) == 0xCDCDu)
+                while (slack < 64u &&
+                       (MEM16(va + 2u * (9u + slack)) == 0xCDCDu ||
+                        MEM16(va + 2u * (9u + slack)) == 0))
                     slack++;
                 fprintf(stderr, "[ONLINE]   xboxlive %08X next %04X slack %u\n",
                         va, next, slack);
@@ -3274,7 +3287,12 @@ static void online_labels_apply(void)
             next = MEM16(va + 2u * len);
             if (next != 0 && next < 0xCD00u)
                 continue;              /* part of a longer string: not ours */
-            while (slack < 64u && MEM16(va + 2u * (len + slack)) == 0xCDCDu)
+            /* A string in these tables ends either at its NUL (a fixed
+             * buffer, the zeroes after it are its room) or at the 0xCDCD
+             * filler of a fresh one. Count both. */
+            while (slack < 64u &&
+                   (MEM16(va + 2u * (len + slack)) == 0xCDCDu ||
+                    MEM16(va + 2u * (len + slack)) == 0))
                 slack++;
             to = online_label_to[k];
             if (strlen(to) > len + slack)
@@ -3367,6 +3385,92 @@ void online_menu_patch(void)
     }
 }
 
+/* The Online screen's cruise item is reached with real presses: Back out of
+ * that screen, then Up to Arcade and A. Calling the menu's own action from
+ * here does not work -- the front end is mid-frame and ends up frozen on a
+ * half-drawn panel -- and jumping straight to Arcade leaves the Online scene
+ * drawing over the next screens. Pad input is the one path the front end
+ * treats exactly like a player.
+ *
+ * MC3_TEST_MENU=1 drives the first half (Down x3, A) so the Online screen can
+ * be inspected and the second half exercised without a controller. */
+static uint32_t online_fe_list(void)
+{
+    uint32_t fe, lst;
+    if (!online_guest_ok(MEM32(0x0050F148u), 16))
+        return 0;
+    fe = MEM32(MEM32(0x0050F148u) + 0xCu);
+    if (!online_guest_ok(fe, 0x100))
+        return 0;
+    lst = MEM32(fe + 0xFCu);
+    return online_guest_ok(lst, 0x300) ? lst : 0;
+}
+
+/* True while the front end shows the main menu (the Online screen and the
+ * others have their own shape). */
+static int online_at_main_menu(void)
+{
+    uint32_t lst = online_fe_list(), col, count;
+    if (!lst)
+        return 0;
+    col = MEM32(lst + 0x258u);
+    count = MEM32(lst + 0x238u + 4u * col);
+    return col <= 15u && count >= 4u && count <= 16u;
+}
+
+static void online_input_pass(void)
+{
+    /* 0 idle, 1 back held, 2 back released, 3 wait menu, 4 up held,
+     * 5 up released, 6 a held, 7 a released */
+    static int step, frames, idle;
+    static int test_menu = -1, test_step, test_frames;
+
+    if (test_menu < 0) {
+        const char *e = getenv("MC3_TEST_MENU");
+        test_menu = e && e[0] == '1';
+    }
+    if (test_menu) {
+        /* Down x3 to Online, A, then A on its cruise item -- with retries,
+         * because a press made while the screen is still sliding in is
+         * swallowed. The presses stop the moment the item is chosen, so the
+         * product sequence below takes over cleanly. */
+        static int phase, hold, tries;
+        if (!online_cruise_pending) {
+            if (phase < 3) {
+                if (online_labels_ready && online_at_main_menu() && ++test_frames > 40) {
+                    usb_gamepad_set_held(0, 0x02u, 0);      /* Down */
+                    if (++hold >= 4) {
+                        usb_gamepad_set_held(0, 0, 0);
+                        phase++; hold = 0; test_frames = 0;
+                    }
+                }
+            } else if (phase < 4) {
+                if (++test_frames > 30) {
+                    usb_gamepad_set_held(0, 0, 0x01u);      /* A: open Online */
+                    if (++hold >= 4) {
+                        usb_gamepad_set_held(0, 0, 0);
+                        phase++; hold = 0; test_frames = 0;
+                        fprintf(stderr, "[ONLINE] test: menu walked to Online\n");
+                    }
+                }
+            } else {
+                if (++test_frames > 45) {
+                    usb_gamepad_set_held(0, 0, 0x01u);      /* A: Online Cruise */
+                    if (++hold >= 4) {
+                        usb_gamepad_set_held(0, 0, 0);
+                        hold = 0; test_frames = 0;
+                        if (++tries >= 3)
+                            phase = 5;
+                        fprintf(stderr, "[ONLINE] test: cruise press %d\n", tries);
+                    }
+                }
+            }
+            return;
+        }
+    }
+
+}
+
 void sub_0020B6F0(void)
 {
     extern void online_menu_patch(void);
@@ -3382,6 +3486,7 @@ void sub_0020B6F0(void)
     float dt, real;
     int frame_rate_mode = mc3_frame_rate_mode();
     online_menu_patch();
+    online_input_pass();       /* MC3_TEST_MENU only */
     if (on < 0) {
         const char *e = getenv("MC3_TIME_TRACE");
         on = e && e[0] == '1';
