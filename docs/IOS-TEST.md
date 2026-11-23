@@ -86,6 +86,12 @@ each System Link packet appears as `(11)`.
 
 ## What this build does not include
 
-- The iOS Port Options pages (the touch-friendly main/Advanced split). The in-game
-  settings menu is the desktop one.
-- A 60 Hz default. Set `MC3_FRAME_RATE=60` in the settings file if you want it.
+- A 60 Hz default. Set `MC3_FRAME_RATE=60` in the settings file (or use Port
+  Options → FRAME RATE), and restart.
+- An in-app online settings page. `MC3_ROAM_JOIN` / `MC3_NETPLAY` are edited in
+  the settings file, as above.
+
+The in-game Port Options menu **is** the touch-friendly two-page layout in this
+build: the main page has the touch controls and FRAME RATE, `ADVANCED...` opens
+the second page (steering, tilt, haptics, filtering, sharpening), and
+`BACK TO OPTIONS` returns to the first page.
