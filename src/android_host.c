@@ -47,6 +47,9 @@ extern void xbox_touchpad_reload(void);
 extern void xbox_touchpad_recenter_tilt(void);
 extern void xbox_touchpad_test_haptics(void);
 extern void xbox_InputSetRumbleStrength(int percent);
+#ifndef MC3_ONLINE_SERVER
+#  define MC3_ONLINE_SERVER "162.35.56.66"
+#endif
 static char s_dir[512];
 static int  s_pipe[2] = { -1, -1 };
 static FILE *s_log;
@@ -114,10 +117,26 @@ static void env_file_apply(const char *dir)
         if (!(eq = strchr(key, '=')))
             continue;
         *eq = '\0';
+        {   /* a hand edit with a space before '=' or a quoted value must
+             * mean the same here as on Windows and Linux */
+            char *name_end = eq;
+            while (name_end > key && (name_end[-1] == ' ' || name_end[-1] == '\t'))
+                name_end--;
+            *name_end = '\0';
+        }
         end = eq + 1 + strcspn(eq + 1, "\r\n");
         *end = '\0';
-        setenv(key, eq + 1, 1);
-        printf("[android] %s=%s\n", key, eq + 1);
+        {
+            char *value = eq + 1;
+            while (*value == ' ' || *value == '\t') value++;
+            size_t n = strlen(value);
+            if (n >= 2 && (value[0] == '"' || value[0] == '\'') && value[n - 1] == value[0]) {
+                value[n - 1] = '\0';
+                value++;
+            }
+            setenv(key, value, 1);
+            printf("[android] %s=%s\n", key, value);
+        }
     }
     fclose(f);
 }
@@ -237,8 +256,36 @@ void android_boot(void)
     /* Back (the gesture, a pad's or keyboard's) is the Xbox's Back, not
      * "leave the game". */
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+    {   /* The settings file has to exist on a fresh install: created here,
+         * beside the game data, before anything reads it. */
+        char env[700];
+        FILE *f;
+        snprintf(env, sizeof env, "%s/" MC3_APP "_env.txt", s_dir);
+        if ((f = fopen(env, "rb")) == NULL && (f = fopen(env, "wb")) != NULL) {
+            fputs("# " MC3_APP " settings. One NAME=value per line.\n", f);
+            fputs("# Online play is on by default; MC3_ONLINE=0 turns it off.\n", f);
+            fputs("# The room is picked in game: Options > ROOM.\n", f);
+            fclose(f);
+            __android_log_print(ANDROID_LOG_INFO, MC3_APP, "settings: created %s", env);
+        } else if (f) {
+            fclose(f);
+        }
+    }
     env_file_apply(s_dir);
     env_file_apply("/storage/emulated/0/" MC3_SD_DIR);   /* reachable by a file manager */
+    {   /* Online play on unless the player turned it off, the same default
+         * iOS has always had. */
+        const char *off = getenv("MC3_ONLINE");
+        if (off && off[0] == '0') {
+            unsetenv("MC3_ROAM_JOIN");
+            unsetenv("MC3_NETPLAY");
+        } else {
+            if (!getenv("MC3_ROAM_JOIN"))
+                setenv("MC3_ROAM_JOIN", MC3_ONLINE_SERVER, 1);
+            if (!getenv("MC3_NETPLAY"))
+                setenv("MC3_NETPLAY", "1", 1);
+        }
+    }
     {   /* the start screen's choice (android/LauncherActivity.java) wins */
         const char *l = getenv("MC3_LAUNCHER_GAME_DIR");
         if (l && *l)
@@ -645,6 +692,7 @@ void windows_port_setting_change(int id)
 void windows_port_setting_label(int id, char *out, size_t size)
 {
     if (port_online_label(id, out, size)) return;
+    if (out && size) out[0] = 0;   /* unknown id: blank, never stale */
     static const char *aa_names[] = { "OFF", "FXAA", "FXAA LOW", "FXAA HIGH" };
     if (id == 1)
         snprintf(out, size, "VSYNC: %s", s_vsync < 0 ? "ADAPTIVE" : s_vsync ? "ON" : "OFF");

@@ -132,10 +132,11 @@ static int save_env_pair(const char *key, const char *value)
     }
     if (last != '\n') fputs("\n", out);
     fprintf(out, "%s=%s\n", key, value);
-    fclose(out);
+    /* A full disk or an I/O error must not be renamed over the good file. */
+    { int bad = ferror(out); if (fclose(out) != 0 || bad) { remove(tmp); return 0; } }
     /* rename() replaces atomically on Darwin; a failed write never
      * truncates the player's settings. */
-    if (rename(tmp, env_path) != 0) return 0;
+    if (rename(tmp, env_path) != 0) { remove(tmp); return 0; }
     setenv((char *)key, (char *)value, 1);   /* the runtime reads env live */
     return 1;
 }
@@ -155,10 +156,23 @@ static void load_env_file(void)
         if (!eq) continue;
         *eq = 0;
         {
-            char *eol = eq + 1 + strlen(eq + 1);
-            while (eol > eq + 1 && (eol[-1] == '\n' || eol[-1] == '\r')) *--eol = 0;
+            char *name_end = eq;
+            char *value = eq + 1;
+            char *eol;
+            while (name_end > p && (name_end[-1] == ' ' || name_end[-1] == '\t')) name_end--;
+            *name_end = 0;
+            eol = value + strlen(value);
+            while (eol > value && (eol[-1] == '\n' || eol[-1] == '\r')) *--eol = 0;
+            while (*value == ' ' || *value == '\t') value++;
+            {
+                size_t n = strlen(value);
+                if (n >= 2 && (value[0] == '"' || value[0] == '\'') && value[n - 1] == value[0]) {
+                    value[n - 1] = 0;
+                    value++;
+                }
+            }
+            if (eq != name_end && *p && *value) setenv(p, value, 1);
         }
-        setenv(p, eq + 1, 1);
     }
     fclose(in);
 }
@@ -347,6 +361,7 @@ void windows_port_setting_change(int id)
 void windows_port_setting_label(int id, char *out, size_t size)
 {
     if (port_online_label(id, out, size)) return;
+    if (out && size) out[0] = 0;   /* unknown id: blank */
     if (id == 0) {
         const char *names[] = {"AUTO", "ALWAYS", "OFF"};
         int m = env_int("RECOMP_TOUCH_PAD", -1);
@@ -509,7 +524,18 @@ static void seed_env_file(const char *home)
     if ((slash = strrchr(exe, '/')) == NULL) return;
     *slash = 0;                                  /* the .app bundle */
     snprintf(src, sizeof src, "%s/%s_env.txt", exe, MC3_APP);
-    if ((in = fopen(src, "rb")) == NULL) return;
+    if ((in = fopen(src, "rb")) == NULL) {
+        /* No bundled example: create the file anyway, so the player always
+         * has somewhere to look and the game always has somewhere to save. */
+        if ((out = fopen(dst, "wb")) != NULL) {
+            fputs("# " MC3_APP " settings. One NAME=value per line.\n", out);
+            fputs("# Online play is on by default; MC3_ONLINE=0 turns it off.\n", out);
+            fputs("# The room is picked in game: Options > ROOM.\n", out);
+            fclose(out);
+            fprintf(stderr, "[IOS] settings: created %s\n", dst);
+        }
+        return;
+    }
     if ((out = fopen(dst, "wb")) == NULL) { fclose(in); return; }
     while ((got = fread(buf, 1, sizeof buf, in)) > 0)
         fwrite(buf, 1, got, out);
@@ -525,7 +551,9 @@ void ios_boot(void)
 
     home = getenv("HOME");           /* the app sandbox container */
     doc = getenv("MC3_DOC_DIR");
-    seed_env_file(home);
+    /* Same base for the seed and for every later read/write: MC3_DOC_DIR
+     * could otherwise seed one file and use another. */
+    seed_env_file(doc ? doc : home);
     if (home) {
         snprintf(env_path, sizeof env_path, "%s/Documents/%s_env.txt",
                  doc ? doc : home, MC3_APP);

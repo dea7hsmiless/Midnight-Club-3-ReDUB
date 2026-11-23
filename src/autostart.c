@@ -38,9 +38,22 @@
 #include <time.h>
 
 extern void (*xbox_path_hook)(const char *xbox_path);
+extern int mc3_menu_item_count(void);      /* recomp_manual.c */
+extern int mc3_port_options_open(void);    /* recomp_manual.c */
+
+/* MC3_AUTOSTART_PORT: the target index is the menu's own last item, not a
+ * count of Downs. Options is the last item on the main menu, and the main
+ * menu's order moves when an Online session reorders it, so the number of
+ * items on screen is the only honest way to reach it. */
+static int port_last_index(void)
+{
+    int n = mc3_menu_item_count();
+    return n > 0 ? n - 1 : 6;
+}
 extern void usb_gamepad_set_held(int dev, uint8_t digital, uint8_t analog);
 extern int  usb_gamepad_host_input(int dev);
 
+#define PAD_UP    0x01u     /* digital: d-pad up */
 #define PAD_DOWN  0x02u     /* digital: d-pad down */
 #define PAD_RIGHT 0x08u     /* digital: d-pad right */
 #define PAD_START 0x10u     /* digital */
@@ -55,10 +68,13 @@ enum {
     SEEN_LOADING  = 1 << 5,
     SEEN_WRONG    = 1 << 6,
     SEEN_NETWORK  = 1 << 7,
+    SEEN_OPTIONS  = 1 << 8,
 };
-enum { ST_BOOT, ST_TITLE, ST_PROFILE, ST_MAIN, ST_ARCADE, ST_LOADING, ST_NETWORK, ST_DONE };
+enum { ST_BOOT, ST_TITLE, ST_PROFILE, ST_MAIN, ST_ARCADE, ST_LOADING, ST_NETWORK,
+       ST_OPTIONS, ST_DONE };
 static const char *const k_stage[] = {
-    "boot", "title", "profile", "main menu", "Arcade", "loading", "Networking", "done"
+    "boot", "title", "profile", "main menu", "Arcade", "loading", "Networking",
+    "options", "done"
 };
 
 static int s_seen;                  /* SEEN_*, set from any thread */
@@ -101,6 +117,35 @@ static int host_wanted(void)
     return want;
 }
 
+/* MC3_AUTOSTART_STOP=port: walk to the game's Options page, open the last item
+ * (Port Options) and park there, so the page can be looked at without racing
+ * the front end with timed presses.
+ *
+ * MC3_AUTOSTART_PORT=room|find: go on from there, move the cursor to that row
+ * and press it once -- the live room change, and the matchmaking request and
+ * its answer. Used to check the online rows on a build that has no screen. */
+static int port_wanted(void)
+{
+    static int want = -1;
+    if (want < 0) {
+        const char *e = getenv("MC3_AUTOSTART_STOP");
+        want = e && !strcasecmp(e, "port");
+    }
+    return want;
+}
+
+/* 0: park; 1: press ROOM; 2: press FIND A ROOM. */
+static int port_press(void)
+{
+    static int what = -1;
+    if (what < 0) {
+        const char *e = getenv("MC3_AUTOSTART_PORT");
+        what = e && !strcasecmp(e, "room") ? 1
+             : e && !strcasecmp(e, "find") ? 2 : 0;
+    }
+    return what;
+}
+
 static void on_path(const char *p)
 {
     const char *base = p, *q;
@@ -118,6 +163,8 @@ static void on_path(const char *p)
         bit = SEEN_ARCADE;
     else if (!strcasecmp(base, "bg_network.xbck"))
         bit = SEEN_NETWORK;
+    else if (!strcasecmp(base, "bg_options.xbck"))
+        bit = SEEN_OPTIONS;
     else if (!strncasecmp(base, "loadscreen_arcade", 17))
         bit = SEEN_LOADING;
     else if (!strncasecmp(base, "bg_", 3) || !strncasecmp(base, "loadscreen_", 11)) {
@@ -160,6 +207,7 @@ static int s_stage = ST_BOOT;
 static uint32_t s_stage_ms, s_press_ms, s_release_ms;
 static unsigned s_stage_frames, s_press_frames, s_release_frames;
 static int s_holding, s_presses, s_downs;
+static int s_nav;                   /* Downs taken on the current sub-page */
 
 int mc3_autostart_at_network(void)
 {
@@ -247,6 +295,17 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
     s_stage_frames++;
     s_press_frames++;
     s_release_frames++;
+    /* A screen that keeps asking for files makes ready() permanently false,
+     * so its press limit is never reached and the walk waits for ever with
+     * nothing in the log. Boot is exempt (measured at up to 100 s) and the
+     * loading screen has its own, longer limit. */
+    if (s_stage != ST_BOOT && s_stage != ST_LOADING &&
+        now - s_stage_ms > 120000) {
+        char msg[80];
+        snprintf(msg, sizeof msg, "stopped: %s never settled", k_stage[s_stage]);
+        finish(msg);
+        return;
+    }
     if (s_holding && s_press_frames >= 3 && now - s_press_ms >= 150) {
         usb_gamepad_set_held(0, 0, 0);
         s_holding = 0;
@@ -261,8 +320,8 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
      * so in a session it presses A through them instead of refusing them:
      * bounded by s_presses, and it still stops on the first screen that never
      * responds. Outside a session nothing changes. */
-    if ((seen & SEEN_WRONG) && !(online_wanted() && (s_stage == ST_NETWORK ||
-                                                     (seen & SEEN_NETWORK)))) {
+    if ((seen & SEEN_WRONG) && !(port_wanted() && (seen & SEEN_OPTIONS)) &&
+        !(online_wanted() && (s_stage == ST_NETWORK || (seen & SEEN_NETWORK)))) {
         char msg[96];
         snprintf(msg, sizeof msg, "stopped: %s opened, not the way to Cruise", s_wrong);
         finish(msg);
@@ -270,6 +329,7 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
     }
     to = seen & SEEN_LOADING ? ST_LOADING
        : seen & SEEN_ARCADE ? ST_ARCADE
+       : (seen & SEEN_OPTIONS) && port_wanted() ? ST_OPTIONS
        : (seen & SEEN_NETWORK) && online_wanted() ? ST_NETWORK
        : seen & SEEN_MAIN ? ST_MAIN : s_stage;
     if (to == s_stage && s_stage == ST_BOOT && (seen & SEEN_TITLE))
@@ -294,6 +354,8 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
             stop = e && !strcasecmp(e, "main") ? ST_MAIN
                  : e && !strcasecmp(e, "network") ? ST_NETWORK : -2;
         }
+        if (port_wanted())
+            stop = -2;          /* port mode walks past the main menu */
         if (stop == s_stage) {
             finish(stop == ST_MAIN ? "stopped: MC3_AUTOSTART_STOP=main"
                                    : "stopped: MC3_AUTOSTART_STOP=network");
@@ -338,6 +400,29 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
         }
         break;
     case ST_MAIN:                   /* Down to Arcade, A; bg_arcade follows */
+        if (port_wanted()) {
+            static int target = -1, waited;
+            /* The main menu's list object does not report its item count the
+             * way the options list does (it reads 0), so count to Options:
+             * six Downs from Career on the shipped order. The item count is
+             * used when it is readable, and MC3_MAIN_DOWNS still overrides. */
+            if (target < 0) {
+                const char *e = getenv("MC3_MAIN_DOWNS");
+                int items = mc3_menu_item_count();
+                if (e && *e) {
+                    target = atoi(e);
+                } else if (items > 0) {
+                    target = items - 1;
+                } else if (++waited >= 45) {
+                    target = 6;
+                    fprintf(stderr, "[AUTOSTART] %s main menu: no item count,"
+                            " using the shipped order (Options is 6 Downs)\n",
+                            stamp());
+                }
+            }
+            if (target >= 0)
+                downs_to_arcade = target;
+        }
         if (s_downs < downs_to_arcade) {
             if (ready(now, 3000, 400)) {
                 press(PAD_DOWN, 0, now);
@@ -393,6 +478,61 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
                 return;
             }
             press(0, PAD_A, now);
+        }
+        break;
+    case ST_OPTIONS:                /* Down to Port Options (the last item), A */
+        if (s_downs < 7) {
+            if (ready(now, 1500, 450)) {
+                press(PAD_DOWN, 0, now);
+                s_downs++;
+            }
+        } else if (s_downs < 8) {
+            if (ready(now, 1500, 600)) {
+                press(0, PAD_A, now);
+                s_downs++;
+                s_nav = 0;
+            }
+        } else if (!mc3_port_options_open()) {
+            /* The A landed on a different item (the parent list's cursor
+             * position varies): say so instead of pressing keys blindly on
+             * whatever screen did open. */
+            if (now - s_press_ms > 6000) {
+                finish("stopped: Port Options did not open from the last item");
+                return;
+            }
+        } else if (!port_press()) {
+            finish("parked on Port Options");
+            return;
+        } else {
+            /* The two online rows are the last two before BACK: 13 settings,
+             * then ROOM, then FIND A ROOM. s_nav is the cursor, not the press
+             * count -- s_presses is already 8 from getting here, which made
+             * this press a setting row and toggled it.
+             *
+             * The page opens with the cursor where the parent screen left it
+             * (observed: three Downs landed on ANTI-ALIASING, i.e. row 3), so
+             * go to the top first: 20 Ups cover the page's 16 rows whether Up
+             * clamps or wraps. */
+            int row = port_press() == 1 ? 13 : 14;
+            if (s_nav < 20) {
+                if (ready(now, 900, 250)) {
+                    press(PAD_UP, 0, now);
+                    s_nav++;
+                }
+            } else if (s_nav < 20 + row) {
+                if (ready(now, 900, 250)) {
+                    press(PAD_DOWN, 0, now);
+                    s_nav++;
+                }
+            } else if (s_nav == 20 + row) {
+                if (ready(now, 900, 600)) {
+                    press(0, PAD_A, now);
+                    s_nav++;
+                }
+            } else {
+                finish(port_press() == 1 ? "pressed ROOM" : "pressed FIND A ROOM");
+                return;
+            }
         }
         break;
     case ST_LOADING:                /* nothing to press: wait for the cruise */

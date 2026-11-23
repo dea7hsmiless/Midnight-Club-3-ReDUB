@@ -69,6 +69,8 @@ EXPIRE_S = 30.0
 # HELLOs and pings) and low enough that a flood is cheap to drop.
 MAX_DGRAMS_PER_S = 300
 MAX_MEMBERS_PER_ROOM = 8        # the game's own player-slot count; docs/0.2.6-PLAN.md
+CENSUS_MAX_ROOMS = 32           # what the client parses, and what fits one datagram
+MAX_MEMBERS = 2048              # 256 rooms x 8, with slack: memory is not a client's to spend
 
 # A client this quiet is not "gone" yet, but it must not be relayed to for ever.
 T_HELLO = 1
@@ -118,12 +120,38 @@ class Relay:
         for pid in gone:
             m = self.members.pop(pid)
             self.say(f"gone     {m.name or '?'} {pid:08x}  ({len(self.members)} here)")
+        # A source that has not sent for a second has no budget to keep: the
+        # table was one entry per source address, for ever.
+        now = time.monotonic()
+        if len(self._flood) > 256:
+            self._flood = {a: s for a, s in self._flood.items() if now - s[0] < 1.0}
 
     def room_of(self, room: int, except_id: int) -> list[Member]:
+        """Members to *send* this room's traffic to: the exact key, city included.
+
+        Two players who picked room 3 but loaded different cities are in
+        different maps and cannot see each other, so their datagrams are not
+        forwarded across the divide."""
         return [m for m in self.members.values() if m.room == room and m.id != except_id]
 
+    def room_number_of(self, room: int, except_id: int) -> list[Member]:
+        """Members who share this player's room, for the eight-player cap.
+
+        A room number the player picked is the high half of the key, and it
+        counts across cities: room 3 is full at eight however many cities its
+        players are spread over. Room 0 is the default -- nobody picked a
+        number -- and there the city is all that separates players, so the cap
+        stays per city (otherwise a dozen players in a dozen cities would make
+        room 0 "full" for someone alone in their own city)."""
+        group = room >> 16
+        if group:
+            return [m for m in self.members.values()
+                    if (m.room >> 16) == group and m.id != except_id]
+        return [m for m in self.members.values()
+                if m.room == room and m.id != except_id]
+
     def room_full(self, room: int, except_id: int) -> bool:
-        return len(self.room_of(room, except_id)) >= MAX_MEMBERS_PER_ROOM
+        return len(self.room_number_of(room, except_id)) >= MAX_MEMBERS_PER_ROOM
 
     def census(self, addr) -> bytes:
         """Reply to a client's MC3Q: the rooms that have players in them.
@@ -142,8 +170,20 @@ class Relay:
         counts: dict[int, int] = {}
         for m in self.members.values():
             group = m.room >> 16
-            counts[group] = counts.get(group, 0) + 1
-        groups = sorted(counts)
+            if group > 255:
+                continue        # the room row only reaches 0..255; do not send
+                                # players to a room they cannot pick again
+            # Never advertise more than a room seats: room 0 is the default
+            # and aggregates every city, so its count can pass eight without
+            # any one city being full.
+            counts[group] = min(counts.get(group, 0) + 1, MAX_MEMBERS_PER_ROOM)
+        # The client keeps 32 rooms and drops any answer of 512 bytes or
+        # more outright, so a busy server has to choose what to say instead
+        # of listing every room: the fullest first, then by number so the
+        # answer is stable between asks. A truncated list is invisible to
+        # the client, which only wants the fullest room with a free slot.
+        busiest = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        groups = sorted(g for g, _n in busiest[:CENSUS_MAX_ROOMS])
         parts = [b"MC3ROOMS", b"1", str(len(groups)).encode()]
         for g in groups:
             parts.append(f"{g}:{counts[g]}".encode())
@@ -184,14 +224,22 @@ class Relay:
         known = self.members.get(sender)
 
         if mtype == T_BYE:
+            out = []
             if known:
+                # Tell the room before forgetting them: otherwise the others
+                # keep a peer that has left until their own T_DROP fires.
+                out = [(data, other.addr) for other in self.room_of(known.room, sender)]
                 self.members.pop(sender, None)
                 self.say(f"left     {known.name or '?'} {sender:08x}"
                          f"  ({len(self.members)} here)")
-            return []
+            return out
 
-        if mtype == T_PING:
-            # The client pings whoever it talks to; answer so its timing works.
+        if mtype == T_PING and known is None:
+            # An unknown sender's ping still gets an answer, so a player can
+            # tell the server is up. A member's ping is relayed below like any
+            # other datagram: only a peer's id is a PONG the client accepts.
+            if len(payload) < 4:
+                return []
             return [(build(T_PONG, 0x52454C41, payload[:4] + struct.pack("<II", 0, 0),
                            seq=seq), addr)]
 
@@ -204,7 +252,12 @@ class Relay:
             (_core_ver, _platform, _status, _port, _cfg_rev, room, name,
              _links) = hello
 
+            self.reap()                 # expired members must not hold slots
             if known is None:
+                if len(self.members) >= MAX_MEMBERS:
+                    self.say(f"refused  {name or '?'} {sender:08x} {addr[0]}:{addr[1]}"
+                             f": the server is at its {MAX_MEMBERS}-player limit")
+                    return []
                 if self.room_full(room, sender):
                     self.refused_full += 1
                     # Heard by whoever runs the server, not only under --verbose:
@@ -218,6 +271,16 @@ class Relay:
                 self.say(f"joined   {name or '?'} {sender:08x} {addr[0]}:{addr[1]}"
                          f"  room {room}  ({len(self.members)} here)")
             else:
+                # Re-HELLO is also how a player moves rooms. Without this
+                # check the cap is only advisory: join an empty room and
+                # re-HELLO into a full one to be the ninth.
+                if known.room != room and self.room_full(room, sender):
+                    self.refused_full += 1
+                    self.say(f"refused  {name or '?'} {sender:08x} {addr[0]}:{addr[1]}"
+                             f": room {room >> 16} is full"
+                             f" ({MAX_MEMBERS_PER_ROOM} here), staying in"
+                             f" {known.room >> 16}")
+                    return []
                 known.last_seen = now
                 known.addr = addr          # follow a NAT re-binding
                 known.room = room

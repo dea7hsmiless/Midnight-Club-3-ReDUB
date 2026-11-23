@@ -308,6 +308,18 @@ int roam_set_group(unsigned group){
     if (base == g_room_base)
         return (int)group;
     g_room_base = base;
+    {   /* Keep the environment in step: roam_start re-reads MC3_ROAM_ROOM,
+         * so without this a session that stops and starts again (leaving
+         * online play and coming back) silently rejoins the old room while
+         * the menu still shows the new one. */
+        char v[16];
+        snprintf(v, sizeof v, "%u", (unsigned)group);
+#ifdef _WIN32
+        _putenv_s("MC3_ROAM_ROOM", v);
+#else
+        setenv("MC3_ROAM_ROOM", v, 1);
+#endif
+    }
     /* Apply now: rc_set_room drops every peer of the old room and makes the
      * hub hear the new one at its next tick. Persisting the value is the
      * caller's business (the settings layer owns the env file). */

@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+
+#ifndef MC3_ONLINE_SERVER
+#  define MC3_ONLINE_SERVER "162.35.56.66"
+#endif
 #include <unistd.h>
 #include <limits.h>
 #include "input/xinput_xbox.h"
@@ -57,10 +61,24 @@ static void settings_path(char out[PATH_MAX])
 
 /* Read the same NAME=value file Windows uses. This is called before the GL
  * context and renderer caches are created. */
+/* Create the settings file at boot when it is missing, so a player always
+ * has somewhere to look and the game always has somewhere to save. */
+static void seed_settings_file(const char *path)
+{
+    FILE *f=fopen(path,"rb");
+    if(f){fclose(f);return;}
+    f=fopen(path,"wb");if(!f)return;
+    fputs("# " MC3_APP " settings. One NAME=value per line.\n",f);
+    fputs("# Online play is on by default; MC3_ONLINE=0 turns it off.\n",f);
+    fputs("# The room is picked in game: Options > ROOM.\n",f);
+    fclose(f);
+    fprintf(stderr,"settings: created %s\n",path);
+}
+
 static void load_settings(void)
 {
     char path[PATH_MAX],line[2048];FILE *f;
-    settings_path(path);f=fopen(path,"rb");if(!f)return;
+    settings_path(path);seed_settings_file(path);f=fopen(path,"rb");if(!f)return;
     while(fgets(line,sizeof line,f)){
         char *p=line,*eq,*end,*name_end,*value;
         while(*p==' '||*p=='\t')p++;
@@ -75,6 +93,12 @@ static void load_settings(void)
         if(*p&&*value)setenv(p,value,1);
     }
     fclose(f);
+    /* Online play on unless the player turned it off (the iOS default). */
+    {   const char *off=getenv("MC3_ONLINE");
+        if(off&&off[0]=='0'){unsetenv("MC3_ROAM_JOIN");unsetenv("MC3_NETPLAY");}
+        else{if(!getenv("MC3_ROAM_JOIN"))setenv("MC3_ROAM_JOIN",MC3_ONLINE_SERVER,1);
+             if(!getenv("MC3_NETPLAY"))setenv("MC3_NETPLAY","1",1);}
+    }
 }
 
 static int save_settings(const char **keys,const char **values,int count)
@@ -167,6 +191,7 @@ void windows_port_setting_change(int id)
 void windows_port_setting_label(int id,char *out,size_t size)
 {
     if (port_online_label(id, out, size)) return;
+    if (out && size) out[0] = 0;   /* unknown id: blank */
     int n=windows_port_vsync_get();
     if(id==0)snprintf(out,size,"FULLSCREEN: %s",s_fullscreen?"ON":"OFF");
     if(id==1)snprintf(out,size,"VSYNC: %s",n<0?"ADAPTIVE":n?"ON":"OFF");

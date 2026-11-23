@@ -239,15 +239,47 @@ static void pick_game_dir(void)
  * update cannot overwrite it; this only fills the gap once. */
 static void seed_player_settings(void)
 {
-    char env[MAX_PATH], example[MAX_PATH];
+    char env[sizeof s_exe_dir + 64], example[sizeof s_exe_dir + 64];
     snprintf(env, sizeof env, "%s\\" MC3_APP "_env.txt", s_exe_dir);
     if (GetFileAttributesA(env) != INVALID_FILE_ATTRIBUTES)
         return;
     snprintf(example, sizeof example, "%s\\" MC3_APP "_env.example.txt", s_exe_dir);
-    if (GetFileAttributesA(example) == INVALID_FILE_ATTRIBUTES)
-        return;
-    if (CopyFileA(example, env, FALSE))
+    if (GetFileAttributesA(example) != INVALID_FILE_ATTRIBUTES &&
+        CopyFileA(example, env, FALSE)) {
         fprintf(stderr, "settings: created %s from the example\n", env);
+        return;
+    }
+    /* No example shipped with this build: create the file anyway. A player
+     * who opens it must find it, and the game must have somewhere to save. */
+    {
+        FILE *f = fopen(env, "wb");
+        if (f) {
+            fputs("# " MC3_APP " settings. One NAME=value per line.\r\n", f);
+            fputs("# Online play is on by default; MC3_ONLINE=0 turns it off.\r\n", f);
+            fputs("# The room is picked in game: Options > ROOM.\r\n", f);
+            fclose(f);
+            fprintf(stderr, "settings: created %s\n", env);
+        }
+    }
+}
+
+/* Online play on unless the player turned it off, the same default iOS has
+ * always had: an install nobody configured must still be online. */
+#ifndef MC3_ONLINE_SERVER
+#  define MC3_ONLINE_SERVER "162.35.56.66"
+#endif
+static void apply_online_default(void)
+{
+    const char *off = getenv("MC3_ONLINE");
+    if (off && off[0] == '0') {
+        _putenv_s("MC3_ROAM_JOIN", "");
+        _putenv_s("MC3_NETPLAY", "");
+        return;
+    }
+    if (!getenv("MC3_ROAM_JOIN"))
+        _putenv_s("MC3_ROAM_JOIN", MC3_ONLINE_SERVER);
+    if (!getenv("MC3_NETPLAY"))
+        _putenv_s("MC3_NETPLAY", "1");
 }
 
 void windows_boot(void)
@@ -262,6 +294,7 @@ void windows_boot(void)
     load_settings(MC3_APP "_defaults.txt");
     seed_player_settings();
     load_settings(MC3_APP "_env.txt");
+    apply_online_default();
     pick_game_dir();
     find_dir("MC3_SAVE_DIR", save);
 }

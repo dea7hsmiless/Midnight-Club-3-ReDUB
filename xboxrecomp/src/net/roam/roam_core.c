@@ -652,7 +652,12 @@ static void peer_clear(rc_peer *p, int keep_addr){
 int rc_add_peer(rc_session *s, uint32_t ip, uint16_t port, int configured, int64_t now_us){
     if (!ip || !port) return -1;
     if (!configured && !rc_addr_private(ip)) return -1;
-    int i = find(s, ip, port);
+    /* In relay mode every player's datagrams arrive from the relay's single
+     * address, so an address lookup finds whichever player got here first --
+     * adding a second player then "restarted" (evicted) the first, which is
+     * why a relay room could never hold more than one other car. The caller
+     * has already looked the sender id up in that case. */
+    int i = s->conf.relay ? -1 : find(s, ip, port);
     if (i >= 0){ if (configured) s->peer[i].configured = 1; return i; }
     for (i = 0; i < RC_TABLE; i++) if (s->peer[i].state == RC_PS_FREE) break;
     if (i == RC_TABLE){ s->rx_unknown_full++; return -1; }
@@ -734,6 +739,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
     if (e == RC_E_VERSION){ s->rx_version++; return; }
     if (e){ s->rx_bad++; return; }
     if (m.h.sender == s->conf.self_id) return;                 /* our own beacon */
+    if (s->closed) return;              /* shut down: do not adopt peers again */
     if (!s->conf.relay && s->conf.hub_ip && ip == s->conf.hub_ip && port == s->conf.hub_port){
         /* the players beyond our links: map markers only */
         if (m.h.type == RC_MSG_FAR){
@@ -742,6 +748,11 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
             int part = m.h.flags & 0xFF, parts = m.h.flags >> 8;
             if (parts < 1) parts = 1;
             if (part >= parts || parts > RC_FAR_PARTS) return;
+            /* The parts add up to more than a full table (13 x 20 = 260 for
+             * 256), and a hub that says so would write past far_in and then
+             * have the merge copy the overflow into far. Refuse a part that
+             * does not fit its own slice. */
+            if (part * RC_FAR_PART + m.u.far.n > ROAM_FAR_MAX) return;
             if (m.h.seq != s->far_seq){ s->far_seq = m.h.seq; s->far_got = 0; }
             memcpy(s->far_in + part * RC_FAR_PART, m.u.far.e, sizeof *s->far * m.u.far.n);
             s->far_cnt[part] = m.u.far.n; s->far_got |= 1u << part;
@@ -749,6 +760,7 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
             s->nfar = 0;
             for (int k = 0; k < parts; k++)
                 if (s->far_got >> k & 1){
+                    if (s->nfar + s->far_cnt[k] > ROAM_FAR_MAX) break;
                     memcpy(s->far + s->nfar, s->far_in + k * RC_FAR_PART, sizeof *s->far * s->far_cnt[k]);
                     s->nfar += s->far_cnt[k];
                 }
@@ -810,7 +822,15 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
     p->rx++; p->last_rx_us = now; p->lost = 0;
     switch (m.h.type){
     case RC_MSG_HELLO: {
-        if (m.u.hello.room != s->conf.room){ s->rx_room++; if (p->state == RC_PS_EST) drop_peer(s, i, "other room"); return; }
+        if (m.u.hello.room != s->conf.room){
+            s->rx_room++;
+            if (p->state == RC_PS_EST) drop_peer(s, i, "other room");
+            /* Releasing the slot matters after a room change: otherwise the
+             * old room's peer sits in the table for ever, keeps its id, and
+             * has a HELLO sent to it every second. */
+            peer_clear(p, p->configured);
+            return;
+        }
         int first = !p->name[0];
         memcpy(p->name, m.u.hello.name, sizeof p->name);
         p->platform = m.u.hello.platform; p->status = m.u.hello.status; p->cfg_rev_seen = m.u.hello.cfg_rev;

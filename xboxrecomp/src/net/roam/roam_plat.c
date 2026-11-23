@@ -21,7 +21,10 @@
 #include <string.h>
 
 /* The room census (matchmaking) is parsed before the core sees a datagram. */
-static int census_take(const uint8_t *buf, int n);
+static int census_take(const uint8_t *buf, int n, uint32_t from_ip,
+                       uint16_t from_port);
+static uint32_t s_census_ip;            /* who may answer, from the request */
+static uint16_t s_census_port;
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -135,7 +138,11 @@ static void plat_broadcast(void *user, uint16_t port, const uint8_t *buf, int le
 static void plat_receive_all(void)
 {
     uint8_t buf[ROAM_DGRAM_MAX];
-    for (;;) {        struct sockaddr_in from;
+    /* Bounded: under a flood the socket may never be empty, and without a
+     * budget the loop would never return to rc_tick -- no HELLOs, everyone
+     * times out, one core pinned. */
+    for (int budget = 64; budget > 0; budget--) {
+        struct sockaddr_in from;
         int n;
         socklen_t fl = (socklen_t)sizeof from;
         n = (int)recvfrom(g_sock, (char *)buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
@@ -143,7 +150,7 @@ static void plat_receive_all(void)
             return;
         /* A room census answer is text, not a roam datagram: the core would
          * drop it as RC_E_MAGIC, so take it here. */
-        if (census_take(buf, n))
+        if (census_take(buf, n, ntohl(from.sin_addr.s_addr), ntohs(from.sin_port)))
             continue;
         roam_plat_lock();
         if (g_run && g_s)
@@ -330,7 +337,8 @@ static struct { int room, players; } s_census[CENSUS_ROOMS];
 static int      s_census_n = -1;         /* -1: no answer yet */
 static int64_t  s_census_at;
 
-static int census_take(const uint8_t *buf, int n)
+static int census_take(const uint8_t *buf, int n, uint32_t from_ip,
+                       uint16_t from_port)
 {
     /* "MC3ROOMS 1 2 3:4 7:1" -- only the shape matters, so a hand-typed
      * answer works too. */
@@ -338,10 +346,20 @@ static int census_take(const uint8_t *buf, int n)
     char *p;
     int count, i, room, players;
 
-    if (n <= 0 || n >= (int)sizeof text)
+    if (n <= 0)
         return 0;
     if (n < 8 || memcmp(buf, "MC3ROOMS", 8) != 0)
         return 0;
+    /* Only the server that was asked may answer: otherwise any datagram on
+     * this port can choose the room Find a Room sends the player to. */
+    if (s_census_ip && (from_ip != s_census_ip || from_port != s_census_port))
+        return 0;
+    /* Take what fits instead of rejecting the answer: a relay listing more
+     * rooms than this table holds is still useful, and dropping the whole
+     * answer made Find a Room silently do nothing. The parser stops at the
+     * last pair it can read, so a truncation cannot invent a room. */
+    if (n >= (int)sizeof text)
+        n = (int)sizeof text - 1;
     memcpy(text, buf, (size_t)n);
     text[n] = 0;
     p = text + 8;
@@ -359,15 +377,21 @@ static int census_take(const uint8_t *buf, int n)
         if (*p != ':')
             break;
         players = (int)strtol(p + 1, &p, 10);
+        if (room < 0 || room > 0xFFFF || players < 0 || players > 0xFF)
+            break;                 /* an entry this game cannot use: stop */
         s_census[i].room = room;
         s_census[i].players = players;
     }
+    if (i == 0 && count > 0)
+        return 1;                  /* garbage: keep the last good answer */
+    roam_plat_lock();
     s_census_n = i;
     s_census_at = plat_now_us();
-    fprintf(stderr, "[roam] rooms: %d with players\n", s_census_n);
-    for (i = 0; i < s_census_n; i++)
+    roam_plat_unlock();
+    fprintf(stderr, "[roam] rooms: %d with players\n", i);
+    for (int k = 0; k < i; k++)
         fprintf(stderr, "[roam]   room %d: %d/8\n",
-                s_census[i].room, s_census[i].players);
+                s_census[k].room, s_census[k].players);
     return 1;
 }
 
@@ -377,6 +401,15 @@ int roam_plat_census_request(uint32_t relay_ip, uint16_t relay_port)
     struct sockaddr_in a;
     if (g_sock == RSOCK_BAD || !relay_ip || !relay_port)
         return -1;
+    /* The answer to *this* question, not the previous one: an old census
+     * applied immediately would send the player to a room chosen from stale
+     * data (and possibly now full). */
+    roam_plat_lock();
+    s_census_n = -1;
+    s_census_at = 0;
+    s_census_ip = relay_ip;
+    s_census_port = relay_port;
+    roam_plat_unlock();
     memset(&a, 0, sizeof a);
     a.sin_family = AF_INET;
     a.sin_port = htons(relay_port);
@@ -389,8 +422,10 @@ int roam_plat_census_request(uint32_t relay_ip, uint16_t relay_port)
  * preferring the room we are already in when it is empty. */
 int roam_plat_census_best(int *players_out)
 {
-    int i, best = -1, best_n = 0;
-    for (i = 0; i < s_census_n; i++) {
+    int i, best = -1, best_n = 0, n;
+    roam_plat_lock();
+    n = s_census_n;
+    for (i = 0; i < n; i++) {
         if (s_census[i].players >= ROAM_ROOM_PLAYERS)
             continue;
         if (s_census[i].players > best_n) {
@@ -398,6 +433,7 @@ int roam_plat_census_best(int *players_out)
             best_n = s_census[i].players;
         }
     }
+    roam_plat_unlock();
     if (players_out)
         *players_out = best_n;
     return best;
@@ -405,16 +441,23 @@ int roam_plat_census_best(int *players_out)
 
 int roam_plat_census_players(int room)
 {
-    int i;
-    for (i = 0; i < s_census_n; i++)
-        if (s_census[i].room == room)
-            return s_census[i].players;
-    return -1;
+    int i, n, got = -1;
+    roam_plat_lock();
+    n = s_census_n;
+    for (i = 0; i < n; i++)
+        if (s_census[i].room == room) { got = s_census[i].players; break; }
+    roam_plat_unlock();
+    return got;
 }
 
 int roam_plat_census_age_ms(void)
 {
-    if (s_census_n < 0)
+    int n; int64_t at; int age;
+    roam_plat_lock();
+    n = s_census_n; at = s_census_at;
+    roam_plat_unlock();
+    if (n < 0 || at == 0)
         return -1;
-    return (int)((plat_now_us() - s_census_at) / 1000);
+    age = (int)((plat_now_us() - at) / 1000);
+    return age < 0 ? 0 : age;
 }

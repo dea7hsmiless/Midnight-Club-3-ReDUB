@@ -70,13 +70,15 @@ T_PING = 6
 T_PONG = 7
 T_BYE = 8
 
-FLAG_HELLO_ALL = 0x01          # a HELLO addressed to everyone
-FLAG_CREW = 0x02               # the crew extension is present in HELLO
+FLAG_HELLO_ALL = 0x0020        # RC_HF_ALL: a HELLO addressed to everyone
+FLAG_CREW = 0x0200             # RC_HF_CREW: the crew block is present
 
 # A player is forgotten after this long without a datagram. The client's own
 # T_DROP is 10 s; a hub should be at least as patient, or it would hand out
 # players the sender has already dropped.
 EXPIRE_S = 30.0
+NAME_MAX = 24                  # RC_NAME_MAX: the client rejects longer names
+LIST_MAX = 96                  # RC_LIST_MAX: entries a PEERS reply may carry
 
 
 class Player:
@@ -136,10 +138,17 @@ def parse_hello(payload: bytes, flags: int):
         off = 12
         nlen = payload[off]
         off += 1
+        if nlen > NAME_MAX or off + nlen > len(payload):
+            return None
         name = payload[off:off + nlen].decode("latin-1")
+        if any(not (0x20 <= ord(c) <= 0x7E) for c in name):
+            return None                # the client keeps printable ASCII only
         off += nlen
         n_seen = payload[off]
-        off += 1 + 4 * n_seen
+        off += 1
+        if n_seen > 64 or off + 4 * n_seen > len(payload):
+            return None
+        off += 4 * n_seen
         links = 0
         if flags & FLAG_CREW:
             n_crews = payload[off] if off < len(payload) else 0
@@ -160,10 +169,16 @@ def parse_hello(payload: bytes, flags: int):
 def peers_payload(members: list[Player], exclude_id: int) -> bytes:
     """PEERS: everybody but the receiver."""
     out = bytearray()
-    entries = [p for p in members if p.id != exclude_id]
+    # The client keeps 96 entries and drops any reply of 1200 bytes or more,
+    # and a count past 255 would wrap and misdescribe the payload.
+    entries = [p for p in members if p.id and p.id != exclude_id][:LIST_MAX]
     out.append(len(entries) & 0xFF)
     for p in entries:
-        out += socket.inet_aton(p.ip)          # 4 bytes, big-endian
+        try:
+            addr = socket.inet_aton(p.ip)      # 4 bytes, big-endian
+        except OSError:
+            continue                           # IPv6 or a malformed address
+        out += addr
         out += struct.pack("<H", p.port)
         out += struct.pack("<I", p.id)
     return bytes(out)

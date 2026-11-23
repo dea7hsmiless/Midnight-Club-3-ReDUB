@@ -47,27 +47,54 @@ int windows_port_overlay_get(void){return atomic_load(&overlay);}
 int windows_port_vsync_get(void) { return atomic_load(&swap_interval); }
 /* Preserve comments and unrelated settings; replace all active copies of a key.
  * Commit by rename so a failed write never truncates the player's settings. */
+/* Settings are saved from two threads: the guest thread re-saves the room
+ * the moment ROOM is pressed, and the window thread saves everything else
+ * through the queued handler. With one shared temp path the slower save
+ * could rename its half-written file over the other's finished one. */
+static CRITICAL_SECTION s_save_lock;
+static volatile LONG s_save_lock_state;
+static void save_lock(void)
+{
+    if (InterlockedCompareExchange(&s_save_lock_state, 1, 0) == 0)
+        InitializeCriticalSection(&s_save_lock);
+    EnterCriticalSection(&s_save_lock);
+}
+static void save_unlock(void) { LeaveCriticalSection(&s_save_lock); }
+
 static int save_settings(const char **keys,const char **values,int count)
 {
-    char path[2048],tmp[2056],line[4096],*slash;FILE *in,*out;int last='\n';
+    char path[2048],tmp[2064],line[4096],*slash;FILE *in,*out;int last='\n',unreadable=0;
     GetModuleFileNameA(NULL,path,sizeof path);slash=strrchr(path,'\\');if(!slash)return 0;
-    snprintf(slash+1,sizeof path-(slash+1-path),MC3_APP "_env.txt");snprintf(tmp,sizeof tmp,"%s.tmp",path);
-    out=fopen(tmp,"wb");if(!out)goto fail;
+    snprintf(slash+1,sizeof path-(slash+1-path),MC3_APP "_env.txt");
+    /* A temp name per thread: even with the lock below, a save that dies
+     * half-way must not leave a file another save then renames into place. */
+    snprintf(tmp,sizeof tmp,"%s.%lu.tmp",path,(unsigned long)GetCurrentThreadId());
+    save_lock();
+    out=fopen(tmp,"wb");if(!out){save_unlock();goto fail;}
     in=fopen(path,"rb");
+    if(!in && GetFileAttributesA(path)!=INVALID_FILE_ATTRIBUTES)
+        unreadable=1;      /* the file is there but locked: never rewrite it */
+
     if(in){while(fgets(line,sizeof line,in)){
         char *p=line;int skip=0;while(*p==' '||*p=='\t')p++;
         /* Match "KEY=" and "KEY = " so a rewritten key never duplicates. */
         for(int i=0;i<count;i++)if(!strncmp(p,keys[i],strlen(keys[i]))){const char *q=p+strlen(keys[i]);while(*q==' '||*q=='\t')q++;if(*q=='='){skip=1;break;}}
         if(!skip){size_t len=strlen(line);fputs(line,out);if(len)last=(unsigned char)line[len-1];}
-    }if(ferror(in)){fclose(in);fclose(out);goto fail;}fclose(in);}
+    }if(ferror(in)){fclose(in);fclose(out);unreadable=1;}else fclose(in);}
     /* Add a separator only for a preserved final line without a newline.
      * Unconditional leading blank lines accumulated on every menu adjustment. */
     if(last!='\n')fputs("\r\n",out);
     for(int i=0;i<count;i++)fprintf(out,"%s=%s\r\n",keys[i],values[i]);
-    {int bad=ferror(out);if(fclose(out)!=0||bad)goto fail;}
-    if(!MoveFileExA(tmp,path,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))goto fail;
+    if(unreadable){fclose(out);DeleteFileA(tmp);save_unlock();goto fail;}
+    {int bad=ferror(out);if(fclose(out)!=0||bad){DeleteFileA(tmp);save_unlock();goto fail;}}
+    if(!MoveFileExA(tmp,path,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){DeleteFileA(tmp);save_unlock();goto fail;}
+    save_unlock();
     return 1;
-fail:DeleteFileA(tmp);MessageBoxA(hwnd,"Could not save settings beside the game executable.","Port Options",MB_OK|MB_ICONERROR);return 0;
+fail:
+    /* Reached from the guest thread by the ROOM row, where a modal dialog
+     * would freeze the game behind a box owned by another thread. */
+    fprintf(stderr,"[PORT] could not save settings beside the game executable\n");
+    return 0;
 }
 static int save_setting(const char *key,const char *value){return save_settings(&key,&value,1);}
 
@@ -161,6 +188,7 @@ void windows_port_setting_change(int id)
 void windows_port_setting_label(int id,char *out,size_t size)
 {
     if (port_online_label(id, out, size)) return;
+    if (out && size) out[0]=0;              /* unknown id: blank, never stale */
     int n=windows_port_vsync_get();
     if(id==0) snprintf(out,size,"FULLSCREEN: %s",fullscreen?"ON":"OFF");
     if(id==1) snprintf(out,size,"VSYNC: %s",n<0?"ADAPTIVE":n?"ON":"OFF");
@@ -227,6 +255,7 @@ void windows_port_settings_attach(SDL_Window *win)
     v=getenv("MC3_PC_MUSIC_HUD");music_hud=!v||atoi(v)!=0;
     v=getenv("MC3_RUMBLE_STRENGTH");{int n=v?atoi(v):100;if(n<0)n=0;if(n>200)n=200;atomic_store(&rumble_strength,n);xbox_InputSetRumbleStrength(n);}
     previous=(WNDPROC)SetWindowLongPtrA(hwnd,GWLP_WNDPROC,(LONG_PTR)settings_proc);
+    if(!previous) previous=DefWindowProcA;   /* never chain to a null proc */
     SDL_SetWindowTitle(win,MC3_GAME_TITLE);
     v=getenv("MC3_RESOLUTION");
     if(v&&strcmp(v,"auto")){

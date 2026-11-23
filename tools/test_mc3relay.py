@@ -75,14 +75,22 @@ def main() -> int:
     dests = sorted(d for _p, d in out)
     check("alice's SNAP now reaches bob and dave", dests == sorted([B, D]), str(dests))
 
-    # --- PING is answered, never relayed ---------------------------------
-    ping = h.build(h.T_PING, 0x11111111, struct.pack("<I", 1234))
-    out = relay.handle(ping, A)
-    check("ping is answered", len(out) == 1)
+    # --- PING ------------------------------------------------------------
+    # A stranger's ping is answered so a player can tell the server is up; a
+    # member's ping is relayed to the room, because the client only accepts a
+    # PONG carrying a known peer's id (the relay's own would be discarded).
+    ping = h.build(h.T_PING, 0x99999999, struct.pack("<I", 1234))
+    out = relay.handle(ping, ("10.0.0.9", 40009))
+    check("a stranger's ping is answered", len(out) == 1)
     if out:
         got = h.parse(out[0][0])
         check("answer is PONG to the pinger", got is not None and got[0] == h.T_PONG
-              and out[0][1] == A)
+              and out[0][1] == ("10.0.0.9", 40009))
+    member_ping = h.build(h.T_PING, 0x11111111, struct.pack("<I", 1234))
+    out = relay.handle(member_ping, A)
+    dests = sorted(d for _p, d in out)
+    check("a member's ping reaches the room, not the relay alone",
+          dests == sorted([B, D]), str(dests))
 
     # --- BYE leaves -------------------------------------------------------
     relay.handle(h.build(h.T_BYE, 0x22222222, bytes([0])), B)

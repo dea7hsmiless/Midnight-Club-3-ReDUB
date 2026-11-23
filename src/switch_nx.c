@@ -365,6 +365,28 @@ void switch_boot(void)
     }
 }
 
+/* Port Options is the same page on every platform, and it asks the platform
+ * for a label, a change and a way to keep the room. The Switch has no settings
+ * host of its own (settings there are the env file on the SD card), so these
+ * are the no-ops that keep the shared page linking and harmless: the rows show
+ * nothing and change nothing, exactly as a platform without the option should.
+ * Without them the Switch target no longer links at all. */
+void windows_port_setting_label(int id, char *out, size_t size)
+{
+    (void)id;
+    if (size) out[0] = 0;
+}
+void windows_port_setting_change(int id) { (void)id; }
+int windows_port_save_room(int room) { (void)room; return 0; }
+void windows_port_settings_attach(SDL_Window *win) { (void)win; }
+int windows_port_pc_music_get(void) { return 0; }
+int windows_port_vsync_get(void) { return 0; }
+int windows_port_overlay_get(void) { return 0; }
+float windows_port_gamma_get(void) { return 1.0f; }
+float windows_port_brightness_get(void) { return 1.0f; }
+void windows_port_gamma_set(float g) { (void)g; }
+void windows_port_brightness_set(float b) { (void)b; }
+
 void switch_shutdown(void)
 {
     appletSetMediaPlaybackState(false);

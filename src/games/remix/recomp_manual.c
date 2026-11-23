@@ -3274,6 +3274,7 @@ static void online_labels_discover(void)
     }
 }
 
+static uint32_t online_readable_units(uint32_t va);
 static void online_labels_apply(void)
 {
     unsigned k, n;
@@ -3303,10 +3304,17 @@ static void online_labels_apply(void)
             /* A string in these tables ends either at its NUL (a fixed
              * buffer, the zeroes after it are its room) or at the 0xCDCD
              * filler of a fresh one. Count both. */
-            while (slack < 64u &&
-                   (MEM16(va + 2u * (len + slack)) == 0xCDCDu ||
-                    MEM16(va + 2u * (len + slack)) == 0))
-                slack++;
+            /* The scan below reads up to 64 units past the text, so it may
+             * only go as far as the mapping actually reaches: the label sits
+             * at the end of a heap allocation, and reading past it was an
+             * unmapped-page access on some runs. */
+            {
+                uint32_t units = online_readable_units(va);
+                while (slack < 64u && len + slack < units &&
+                       (MEM16(va + 2u * (len + slack)) == 0xCDCDu ||
+                        MEM16(va + 2u * (len + slack)) == 0))
+                    slack++;
+            }
             to = online_label_to[k];
             if (strlen(to) > len + slack)
                 to = online_label_short[k];
@@ -3347,6 +3355,13 @@ void online_menu_patch(void)
         if (sig != last) {
             last = sig;
             online_labels_discover();
+        } else if (online_label_n[0] == 0 && (sig & 0xFFu) == 0) {
+            /* Discovery can run before the screen has interned its strings
+             * and find nothing; without a retry the rename is lost for the
+             * rest of the session. Cheap: only while nothing was found. */
+            static unsigned retry;
+            if ((++retry & 63u) == 0 && retry < 4096u)
+                online_labels_discover();
         }
         online_labels_apply();
     }
@@ -3418,6 +3433,22 @@ static uint32_t online_fe_list(void)
     return online_guest_ok(lst, 0x300) ? lst : 0;
 }
 
+/* The number of items the front end's current list holds, or 0 when the list
+ * is not a menu. The autostart walker asks for this: the main menu's order
+ * changes with the Online session's reorder, so counting Downs from a fixed
+ * number silently opens whichever item happens to be there. */
+int mc3_menu_item_count(void)
+{
+    uint32_t lst = online_fe_list(), col, count;
+    if (!lst)
+        return 0;
+    col = MEM32(lst + 0x258u);
+    if (col > 15u)
+        return 0;
+    count = MEM32(lst + 0x238u + 4u * col);
+    return (count >= 1u && count <= 16u) ? (int)count : 0;
+}
+
 /* True while the front end shows the main menu (the Online screen and the
  * others have their own shape). */
 static int online_at_main_menu(void)
@@ -3426,8 +3457,10 @@ static int online_at_main_menu(void)
     if (!lst)
         return 0;
     col = MEM32(lst + 0x258u);
+    if (col > 15u)                 /* guest-controlled: check before using it */
+        return 0;
     count = MEM32(lst + 0x238u + 4u * col);
-    return col <= 15u && count >= 4u && count <= 16u;
+    return count >= 4u && count <= 16u;
 }
 
 static void online_input_pass(void)
@@ -3725,7 +3758,16 @@ static int online_scan_readable(uint32_t va, uint32_t *size)
     MEMORY_BASIC_INFORMATION mbi;
     if (!VirtualQuery((LPCVOID)XBOX_PTR(va), &mbi, sizeof mbi) || !mbi.RegionSize)
         return 0;
-    *size = (uint32_t)mbi.RegionSize;
+    {
+        /* RegionSize is measured from the region's base, which can be below
+         * va; what the caller wants is what is readable *from va*. */
+        uintptr_t base = (uintptr_t)mbi.BaseAddress;
+        uintptr_t host = (uintptr_t)XBOX_PTR(va);
+        uintptr_t left = (uintptr_t)mbi.RegionSize - (host - base);
+        if (left < 2u)
+            return 0;
+        *size = left > 0x04000000u ? 0x04000000u : (uint32_t)left;
+    }
     if (mbi.State != MEM_COMMIT ||
         !(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
                          PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
@@ -3736,16 +3778,33 @@ static int online_scan_readable(uint32_t va, uint32_t *size)
 }
 #endif
 
+/* How many 16-bit units may be read from va. The label tables are scanned past
+ * the end of the text (looking for its NUL or 0xCDCD filler), so the amount of
+ * room that actually exists has to bound that scan. */
+static uint32_t online_readable_units(uint32_t va)
+{
+    uint32_t size = 0;
+    if (!online_scan_readable(va, &size))
+        return 0;
+    return size / 2u;
+}
 
 static uint32_t port_self,port_list,port_rows[32];
 static uint32_t port_list_vtable;
 static int port_open,port_back_down,port_back_release;
 static int port_accept_down;
 static int port_building;
+static int port_find_pending;            /* FIND A ROOM waiting for an answer */
+
+/* Read by the autostart walker (src/autostart.c) so a test can wait for the
+ * Port Options page instead of guessing that its press opened it. */
+int mc3_port_options_open(void) { return port_open; }
+static time_t port_find_t0;
 static int port_page;                   /* Port Options page: 0 main, 1 advanced (iOS) */
 static int port_row_id[32];             /* id behind each row of the current page */
 static int port_row_n;
 static char port_saved_title[120];
+static int  port_title_saved;
 extern void windows_port_setting_change(int id);
 extern void windows_port_setting_label(int id,char *out,size_t size);
 #if defined(_WIN32) || defined(__linux__)
@@ -3796,6 +3855,7 @@ static int port_context_valid(void)
 }
 static void port_invalidate(void)
 {
+    port_find_pending=0;              /* the search belonged to that page */
     port_open=port_back_release=port_back_down=port_accept_down=0;
     port_page=0;port_row_n=0;
     port_self=port_list=port_list_vtable=0;memset(port_rows,0,sizeof port_rows);
@@ -4052,8 +4112,11 @@ static int port_room_get(void)
 static void port_room_apply(int room)
 {
     char v[16];
+    /* A census answer can name any 16-bit room; the cycle this UI offers is
+     * 0..255, so fold anything outside it instead of showing a number the
+     * player cannot reach again with the D-pad. */
+    room %= PORT_ROOMS;
     if (room < 0) room += PORT_ROOMS;
-    if (room >= PORT_ROOMS) room -= PORT_ROOMS;
     port_room = room;
     roam_set_group((unsigned)room);
     (void)v;
@@ -4063,8 +4126,6 @@ static void port_room_apply(int room)
 
 /* FIND A ROOM: ask, then move to the answer once it arrives (checked on every
  * label refresh, which runs while the list is on screen). */
-static int port_find_pending;
-
 static void port_find_start(void)
 {
     if (roam_census_request() != 0) {
@@ -4072,6 +4133,7 @@ static void port_find_start(void)
         return;
     }
     port_find_pending = 1;
+    port_find_t0 = time(NULL);
     fprintf(stderr, "[PORT] find a room: asking the server\n");
 }
 
@@ -4080,6 +4142,16 @@ static void port_find_poll(void)
     int players = 0, best, age;
     if (!port_find_pending)
         return;
+    /* Ask once, then give up. Without a deadline the row reads
+     * "FIND A ROOM: SEARCHING..." for ever whenever the relay is unreachable
+     * (offline, wrong address, UDP blocked), and the player has no way to
+     * tell that from a server still thinking. */
+    if (time(NULL) - port_find_t0 > 6) {
+        port_find_pending = 0;
+        fprintf(stderr, "[PORT] find a room: no answer, staying in %d\n",
+                port_room_get());
+        return;
+    }
     age = roam_census_age_ms();
     if (age < 0 || age > 3000)
         return;                       /* no answer yet */
@@ -4118,9 +4190,10 @@ int port_online_label(int id, char *out, size_t size)
 /* Row presses for these two rows; step is 0 for a plain press. */
 int port_online_change(int id, int step)
 {
-    (void)step;
     if (id == PORT_ROW_ROOM) {
-        port_room_apply(port_room_get() + 1);
+        /* step is negative for a left press; the row must be able to go down
+         * as well as up or a room 1 away is 255 presses in one direction. */
+        port_room_apply(port_room_get() + (step < 0 ? -1 : 1));
         return 1;
     }
     if (id == PORT_ROW_FIND) {
@@ -4152,8 +4225,15 @@ static void port_title(int enter)
     if(!port_context_valid())return;
     uint32_t title=MEM32(port_self+0xC)+0x60;
     if(!port_ram(title,120))return;
-    if(enter) {if(enter==1)memcpy(port_saved_title,(void *)XBOX_PTR(title),120);memset((void *)XBOX_PTR(title),0,120);memcpy((void *)XBOX_PTR(title),"PORT OPTIONS",12);}
-    else memcpy((void *)XBOX_PTR(title),port_saved_title,120);
+    if(enter==1) {
+        memcpy(port_saved_title,(void *)XBOX_PTR(title),120);
+        port_title_saved=1;
+        memset((void *)XBOX_PTR(title),0,120);
+        memcpy((void *)XBOX_PTR(title),"PORT OPTIONS",12);
+    } else if(enter==0 && port_title_saved) {
+        memcpy((void *)XBOX_PTR(title),port_saved_title,120);
+        port_title_saved=0;
+    }
     uint32_t movie=MEM32(0x50F15Cu);
     if(port_ram(movie,0xFB0) && (movie=MEM32(movie+0xFAC)) && port_ram(movie,4)) {
         uint32_t sp=g_esp;
@@ -4181,20 +4261,27 @@ static void port_build(void)
 #if defined(__ANDROID__)
     /* 16-slot page: 13 rows + the two online rows + BACK. The always-fullscreen
      * status and the graphics preset (both also in the Android launcher) give
-     * up their slots to phone music and controller vibration. */
-    const int order[]={1,2,3,4,6,7,8,9,10,11,12,13,14};
+     * up their slots to phone music and controller vibration (15), which was
+     * implemented but in no order at all; sharpening (6) gives up the last. */
+    const int order[]={1,2,3,4,7,8,9,10,11,12,13,14,15};
     int settings=13;
 #elif defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
     /* iOS: the launcher's touch controls on the main page, the fine-tuning on
      * an Advanced page. 15 opens Advanced, and ids 17..21 get their own event
      * range below. */
-    const int main_order[]={0,1,8,9,10,11,2,12,3,13};
-    const int adv_order[]={5,7,4,6,19,20,21,17,18,22,23};
+    const int main_order[]={0,1,8,9,10,11,2,12,3,13,15};
+    const int adv_order[]={5,7,4,6,19,20,21,17,18,22};
     const int *order=port_page?adv_order:main_order;
-    int settings=port_page?11:10;
+    /* 15 is "Advanced...", the only row that fires 0x7F0F. Without it the
+     * whole advanced page (ids 17..22) was unreachable in game. 11 + 15 + the
+     * two online rows + BACK = 14 of the page's 16 slots. */
+    int settings=port_page?10:11;
 #else
-    const int order[]={0,5,2,12,3,4,6,13,14,1,16,7,9,11,15};
-    int settings=15;
+    /* Desktop: 13 rows + the two online rows + BACK = the page's 16 slots.
+     * SHARPENING and HUD TEXTURES gave up their two slots to them; both still
+     * come from the settings file (RECOMP_GL_SHARPEN, RECOMP_GL_UI_SCALE). */
+    const int order[]={0,5,2,3,4,13,14,1,16,7,9,11,15};
+    int settings=13;
 #endif
     port_row_n=0;
     for(int k=0;k<settings;k++){
@@ -4217,6 +4304,22 @@ static void port_build(void)
         }
     }
     port_add(0x7F11u,port_page?"BACK TO OPTIONS":"BACK");port_labels();
+    /* The page holds 16 rows and the list is a fixed array, so an order that
+     * grows past it would silently write over the next page's rows. Say the
+     * budget out loud once, with the two online rows' current text, so a build
+     * can be checked without a screen. */
+    {
+        char room[96], find[96];
+        uint32_t cap = MEM32(port_list + 0x230);
+        room[0] = find[0] = 0;
+        windows_port_setting_label(PORT_ROW_ROOM, room, sizeof room);
+        windows_port_setting_label(PORT_ROW_FIND, find, sizeof find);
+        fprintf(stderr, "[PORT] page %d: %d rows, %u slots | %s | %s\n",
+                port_page, port_row_n + 1, cap, room, find);
+        if ((uint32_t)(port_row_n + 1) > cap)
+            fprintf(stderr, "[PORT] ERROR: %d rows do not fit in %u\n",
+                    port_row_n + 1, cap);
+    }
     port_building=0;
 }
 static void port_enter(void)
