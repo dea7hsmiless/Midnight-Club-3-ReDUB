@@ -784,6 +784,7 @@ extern int mc3_autostart_on(void);              /* src/autostart.c */
 extern void usb_gamepad_set_held(int dev, uint8_t digital, uint8_t analog);
 #define PAD_START 0x10u                         /* digital mask */
 #define PAD_A     0x01u                         /* analog mask */
+#define PAD_B     0x02u                         /* analog mask */
 static uint32_t s_skip_hbink;                   /* the movie being pressed through */
 static unsigned s_skip_frames;
 
@@ -3092,8 +3093,7 @@ void sub_0018C5A0(void)
  * Outside a session this is the untouched callback. */
 extern void sub_00180160_gen(void);
 extern void sub_0018C530_gen(void);
-/* Online play is on unless MC3_ONLINE=0 says otherwise (ios_host.c applies
- * that default at boot; the file can carry the address on any platform). */
+/* Online play is on unless MC3_ONLINE=0 says otherwise (ios_host.c applies * that default at boot; the file can carry the address on any platform). */
 static int online_play_enabled(void)
 {
     const char *off = getenv("MC3_ONLINE");
@@ -3109,18 +3109,17 @@ void sub_00180160(void)
     extern int online_session_wanted(void);
     extern void online_enter(const char *why);
     /* Without online play this stays the game's own callback (the live
-     * service screen, dead here). With it, the item means Free Roam whenever
-     * the player can actually play online -- a session is not required, the
-     * session only adds the money/unlocks sandbox on top. */
+     * service screen, dead here). With it, the item means Online Cruise
+     * whenever the player can actually play online -- a session is not
+     * required, the session only adds the money/unlocks sandbox on top. */
     if (!online_session_wanted() && !online_play_enabled()) {
         sub_00180160_gen();
         return;
     }
     if (online_session_wanted())
-        online_enter("networking screen, Free Roam");
+        online_enter("networking screen, Online Cruise");
     sub_0018C530_gen();
-    fprintf(stderr, "[ONLINE] Free Roam: networking item -> Arcade's own cruise path"
-            " (sub_0018C530)\n");
+    fprintf(stderr, "[ONLINE] cruise: networking item -> Arcade's cruise path\n");
 }
 /** "Online" keeps the Networking item's place
  *
@@ -3162,6 +3161,7 @@ static const char *const online_label_to[3]   = { "Online",      "Online Cruise 
 static const char *const online_label_short[3] = { "Online",     "Online Cruise", "Online Race" };
 static struct { uint32_t va; } online_label[3][8];
 static int online_label_n[3];
+static int online_labels_ready;            /* the main menu's label was renamed */
 
 static int online_guest_ok(uint32_t va, uint32_t n)
 {
@@ -3226,6 +3226,26 @@ static void online_labels_discover(void)
             va += size;
         }
     }
+    fprintf(stderr, "[ONLINE] labels found: Networking %d, Xbox Live %d, System Link %d\n",
+            online_label_n[0], online_label_n[1], online_label_n[2]);
+    {   /* MC3_LABEL_DEBUG=1: what each occurrence looks like, so a missed
+         * rename can be explained (filler after the text, room after it). */
+        static int dbg = -1;
+        if (dbg < 0) {
+            const char *e = getenv("MC3_LABEL_DEBUG");
+            dbg = e && e[0] == '1';
+        }
+        if (dbg) {
+            for (n = 0; n < (unsigned)online_label_n[1]; n++) {
+                uint32_t va = online_label[1][n].va, slack = 0;
+                uint16_t next = MEM16(va + 2u * 9u);
+                while (slack < 64u && MEM16(va + 2u * (9u + slack)) == 0xCDCDu)
+                    slack++;
+                fprintf(stderr, "[ONLINE]   xboxlive %08X next %04X slack %u\n",
+                        va, next, slack);
+            }
+        }
+    }
 }
 
 static void online_labels_apply(void)
@@ -3264,6 +3284,8 @@ static void online_labels_apply(void)
                 continue;
             for (i = 0; i < len; i++)
                 MEM16(va + 2u * i) = (uint16_t)(uint8_t)(i < to_len ? to[i] : ' ');
+            if (k == 0)
+                online_labels_ready = 1;   /* the main menu is built */
             fprintf(stderr, "[ONLINE] label %08X \"%s\" -> \"%s\"\n",
                     va, online_label_from[k], to);
         }
@@ -3287,28 +3309,60 @@ void online_menu_patch(void)
     if (col > 15u || rows < 1u || rows > 16u)
         return;
     count = MEM32(lst + 0x238u + 4u * col);
-    if (count < 1u || count > 16u)
-        return;
-    {   /* Search once the list is built; retry while it comes up empty. */
-        static int discovered;
-        if (!discovered) {
+    {   /* The visible labels: find them again whenever the screen changes (the
+         * front end interns each screen's strings when that screen is built),
+         * then keep the swaps in place. */
+        static uint32_t last = 0xFFFFFFFFu;
+        uint32_t sig = (col << 8) ^ (rows << 16) ^ (count << 24) ^ (lst >> 4);
+        if (sig != last) {
+            last = sig;
             online_labels_discover();
-            discovered = online_label_n[0] > 0;
         }
         online_labels_apply();
     }
     {   /* MC3_OPEN_ONLINE=1: test hook. Opens the Online screen exactly the way
          * the main menu item does, so the screen can be inspected without a
-         * controller. */
-        static int wanted = -1, opened;
+         * controller. MC3_TEST_CRUISE=1 then picks its cruise item, to exercise
+         * the screen change into Arcade. */
+        static int wanted = -1, opened, idle, frames, test_cruise = -1;
         if (wanted < 0) {
             const char *e = getenv("MC3_OPEN_ONLINE");
             wanted = e && e[0] == '1';
         }
-        if (wanted && !opened && count >= 8u) {
-            opened = 1;
-            sub_0018C5A0();
-            fprintf(stderr, "[ONLINE] test hook: Online screen opened\n");
+        if (test_cruise < 0) {
+            const char *e = getenv("MC3_TEST_CRUISE");
+            test_cruise = e && e[0] == '1';
+        }
+        {   /* MC3_TEST_ARCADE=1: open Arcade from the main menu, the way that
+             * item does, so its screen can be inspected without the walker. */
+            static int arc = -1, done, wait;
+            if (arc < 0) {
+                const char *e = getenv("MC3_TEST_ARCADE");
+                arc = e && e[0] == '1';
+            }
+            if (arc && !done && online_labels_ready && ++wait >= 60) {
+                done = 1;
+                usb_gamepad_set_held(0, 0, 0);
+                sub_0018C530_gen();
+                fprintf(stderr, "[ONLINE] test hook: Arcade opened\n");
+            }
+        }
+        if (wanted && !opened) {
+            /* Wait for the menu to be built and its opening press released: a
+             * held A would activate the Online screen's first item. */
+            if (online_labels_ready && ++idle >= 60) {
+                opened = 1;
+                usb_gamepad_set_held(0, 0, 0);
+                sub_0018C5A0();
+                fprintf(stderr, "[ONLINE] test hook: Online screen opened\n");
+            }
+        } else if (wanted && opened && test_cruise) {
+            if (++frames >= 90) {
+                test_cruise = 0;
+                frames = 0;
+                sub_00180160();
+                fprintf(stderr, "[ONLINE] test hook: cruise item picked\n");
+            }
         }
     }
 }
@@ -3532,6 +3586,7 @@ extern void sub_00348BE0(void),sub_00348950(void),sub_001395E0(void);
 #include <windows.h>
 #endif
 
+#if defined(_WIN32)
 /* Windows: a heap page may be reserved without being committed, so the text
  * searches ask the OS which pages can be read. */
 static int online_scan_readable(uint32_t va, uint32_t *size)
@@ -3548,6 +3603,7 @@ static int online_scan_readable(uint32_t va, uint32_t *size)
         return 0;
     return 1;
 }
+#endif
 
 
 static uint32_t port_self,port_list,port_rows[32];
