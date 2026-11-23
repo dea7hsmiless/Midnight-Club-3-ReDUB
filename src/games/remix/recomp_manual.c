@@ -3406,6 +3406,9 @@ static uint32_t port_list_vtable;
 static int port_open,port_back_down,port_back_release;
 static int port_accept_down;
 static int port_building;
+static int port_page;                   /* Port Options page: 0 main, 1 advanced (iOS) */
+static int port_row_id[32];             /* id behind each row of the current page */
+static int port_row_n;
 static char port_saved_title[120];
 extern void windows_port_setting_change(int id);
 extern void windows_port_setting_label(int id,char *out,size_t size);
@@ -3458,6 +3461,7 @@ static int port_context_valid(void)
 static void port_invalidate(void)
 {
     port_open=port_back_release=port_back_down=port_accept_down=0;
+    port_page=0;port_row_n=0;
     port_self=port_list=port_list_vtable=0;memset(port_rows,0,sizeof port_rows);
 }
 #if defined(_WIN32) || defined(__linux__)
@@ -3671,7 +3675,10 @@ static void port_text(uint32_t row,const char *text)
 static void port_labels(void)
 {
     if(!port_context_valid())return;
-    for(int i=0;i<23;i++) {char text[96]={0};windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);}
+    for(int k=0;k<port_row_n;k++){
+        int i=port_row_id[k];char text[96];text[0]=0;
+        windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);
+    }
 }
 static uint32_t port_add(uint32_t event,const char *text)
 {
@@ -3686,7 +3693,7 @@ static void port_title(int enter)
     if(!port_context_valid())return;
     uint32_t title=MEM32(port_self+0xC)+0x60;
     if(!port_ram(title,120))return;
-    if(enter) {if(enter==1)memcpy(port_saved_title,(void *)XBOX_PTR(title),120);memset((void *)XBOX_PTR(title),0,120);memcpy((void *)XBOX_PTR(title),"Port Options",12);}
+    if(enter) {if(enter==1)memcpy(port_saved_title,(void *)XBOX_PTR(title),120);memset((void *)XBOX_PTR(title),0,120);memcpy((void *)XBOX_PTR(title),"PORT OPTIONS",12);}
     else memcpy((void *)XBOX_PTR(title),port_saved_title,120);
     uint32_t movie=MEM32(0x50F15Cu);
     if(port_ram(movie,0xFB0) && (movie=MEM32(movie+0xFAC)) && port_ram(movie,4)) {
@@ -3716,21 +3723,37 @@ static void port_build(void)
      * labels with no handler. */
     const int order[]={1,2,3,4,6,7,8,9,10,11,12,13,14,15,16};
     int settings=15;
+#elif defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    /* iOS: the launcher's touch controls on the main page, the fine-tuning on
+     * an Advanced page. Ids 0..16 fit; 15 opens Advanced, and ids 17..21 get
+     * their own event range below. Desktop keeps its own order. */
+    const int main_order[]={0,1,8,9,10,11,2,12,3,13,14,16,15};
+    const int adv_order[]={5,7,4,6,19,20,21,17,18};
+    const int *order=port_page?adv_order:main_order;
+    int settings=port_page?9:13;
 #else
     const int order[]={0,5,2,12,3,4,6,13,14,1,16,7,9,11,15,8,10};
     int capacity=MEM32(port_list+0x230);
     int settings=capacity>=18?17:capacity>=17?16:15;
 #endif
-    /* FRAME RATE is id 16: 0x7F10 already opens Port Options, so it needs its
-     * own event instead of the 0x7F00+id range. */
-    for(int k=0;k<settings;k++){int i=order[k];port_rows[i]=port_add(i==16?0x7F12u:0x7F00u+(uint32_t)i,NULL);}
-    port_add(0x7F11u,"BACK");port_labels();
+    port_row_n=0;
+    for(int k=0;k<settings;k++){
+        int i=order[k];
+        /* FRAME RATE is id 16 (0x7F12); the mobile controls are ids 17+ in
+         * their own event range, because 0x7F10 already opens Port Options. */
+        uint32_t ev = i==16 ? 0x7F12u
+                    : i>=17 ? 0x7F20u+(uint32_t)(i-17)
+                    : 0x7F00u+(uint32_t)i;
+        port_rows[i]=port_add(ev,NULL);
+        port_row_id[port_row_n++]=i;
+    }
+    port_add(0x7F11u,port_page?"BACK TO OPTIONS":"BACK");port_labels();
     port_building=0;
 }
 static void port_enter(void)
 {
     if(!port_context_valid()) {port_invalidate();return;}
-    PortRegs r=port_save();port_open=1;
+    PortRegs r=port_save();port_open=1;port_page=0;
     XBOX_INPUT_STATE input={0};
     port_back_down=xbox_InputGetState(0,&input)==0 && input.Gamepad.bAnalogButtons[XBOX_BUTTON_B]>XBOX_ANALOG_BUTTON_THRESHOLD;
     port_accept_down=input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]>XBOX_ANALOG_BUTTON_THRESHOLD;
@@ -3789,11 +3812,34 @@ void sub_00163830(void)
     uint32_t event=MEM32(g_esp+4);
     if(port_open&&!port_context_valid())port_invalidate();
     if(event==0x7F10) {port_enter();g_eax=0;g_esp+=8;return;}
-    if(event==0x7F11) {port_parent();g_eax=0;g_esp+=8;return;}
+    if(event==0x7F11) {
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+        /* On the Advanced page, Back returns to the main page rather than
+         * leaving Port Options. */
+        if(port_page>0){port_page=0;port_build();g_eax=0;g_esp+=8;return;}
+#endif
+        port_parent();g_eax=0;g_esp+=8;return;
+    }
+#if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    if(port_open && event==0x7F0F) {
+        /* The Advanced... row (id 15): switch page and rebuild the list. */
+        if(port_accept_down){g_eax=0;g_esp+=8;return;}
+        port_accept_down=1;
+        port_page=port_page?0:1;
+        port_build();
+        g_eax=0;g_esp+=8;return;
+    }
+#endif
     if(port_open && event==0x7F12) {
         if(port_accept_down){g_eax=0;g_esp+=8;return;}
         port_accept_down=1;
-        windows_port_setting_change(16);g_eax=0;g_esp+=8;return;
+        windows_port_setting_change(16);port_labels();g_eax=0;g_esp+=8;return;
+    }
+    if(port_open && event>=0x7F20 && event<0x7F30) {
+        if(port_accept_down){g_eax=0;g_esp+=8;return;}
+        port_accept_down=1;
+        windows_port_setting_change(17+(int)(event-0x7F20));
+        port_labels();g_eax=0;g_esp+=8;return;
     }
     if(port_open && event>=0x7F00 && event<0x7F10) {
         if(port_accept_down){g_eax=0;g_esp+=8;return;}
@@ -3801,7 +3847,7 @@ void sub_00163830(void)
 #if defined(_WIN32) || defined(__linux__)
         if(event==0x7F09&&!windows_port_pc_music_get())windows_port_music_backup(MEMF(0x53F5E4u));
 #endif
-        windows_port_setting_change(event-0x7F00);g_eax=0;g_esp+=8;return;
+        windows_port_setting_change(event-0x7F00);port_labels();g_eax=0;g_esp+=8;return;
     }
     sub_00163830_gen();
 }

@@ -62,10 +62,13 @@ static atomic_int fullscreen, scale_index = 2, swap_interval, fxaa = 1,
                        aniso = 4, sharp = 2, overlay;
 static atomic_int gamma_index = 2, brightness_index = 4;
 static atomic_int pc_music, music_hud = 1;
+static atomic_int frame_rate = 30;
 static int music_restore = 100;
 
 /* The in-game Port Options can change the touch pad and vibration live. */
 extern void xbox_touchpad_reload(void);
+extern void xbox_touchpad_recenter_tilt(void);
+extern void xbox_touchpad_test_haptics(void);
 extern void xbox_rumble_strength_reset(void);
 
 /* Touch settings live in the env file; the pad reads them there directly. */
@@ -179,6 +182,7 @@ static void settings_from_env(void)
     if ((v = getenv("MC3_PC_MUSIC_HUD")))   atomic_store(&music_hud, atoi(v));
     if ((v = getenv("MC3_GAMMA")))         atomic_store(&gamma_index, (int)((atof(v) - 0.8f) * 10 + 0.5f));
     if ((v = getenv("MC3_BRIGHTNESS")))    atomic_store(&brightness_index, (int)((atof(v) - 0.8f) * 20 + 0.5f));
+    if ((v = getenv("MC3_FRAME_RATE")))    atomic_store(&frame_rate, atoi(v) >= 60 ? 60 : 30);
 }
 
 void ios_settings_refresh(void) { settings_from_env(); }
@@ -252,6 +256,33 @@ void windows_port_setting_change(int id)
     case 14:{int n = (atomic_load(&brightness_index) + 1) % 9;
              snprintf(v, sizeof v, "%.2f", 0.8f + n * 0.05f);
              if (save_env_pair("MC3_BRIGHTNESS", v)) atomic_store(&brightness_index, n);} return;
+    case 16:{int n = atomic_load(&frame_rate) >= 60 ? 30 : 60;
+             snprintf(v, sizeof v, "%d", n);
+             if (save_env_pair("MC3_FRAME_RATE", v)) {
+                 atomic_store(&frame_rate, n);
+                 fprintf(stderr, "[PORT] frame rate %d saved (restart to apply)\n", n);
+             }} return;
+    case 17: xbox_touchpad_recenter_tilt(); return;
+    case 18: xbox_touchpad_test_haptics(); return;
+    case 19:{
+        const char *cur = getenv("RECOMP_TOUCH_STEER");
+        const char *nv = (!cur || !*cur || !strcmp(cur, "stick")) ? "tilt"
+                       : !strcmp(cur, "tilt") ? "both" : "stick";
+        if (save_env_pair("RECOMP_TOUCH_STEER", nv)) xbox_touchpad_reload();
+    } return;
+    case 20:{
+        static const char *sv[] = {"1", "1.35", "1.7", "2"};
+        const char *cur = getenv("RECOMP_TOUCH_STEER_SENS");
+        int i, n = 0;
+        for (i = 0; i < 4; i++) if (cur && !strcmp(cur, sv[i])) n = i;
+        n = (n + 1) % 4;
+        if (save_env_pair("RECOMP_TOUCH_STEER_SENS", sv[n])) xbox_touchpad_reload();
+    } return;
+    case 21:{
+        int n = !env_on("RECOMP_TOUCH_TILT_INVERT", 0);
+        if (save_env_pair("RECOMP_TOUCH_TILT_INVERT", n ? "1" : "0"))
+            xbox_touchpad_reload();
+    } return;
     default: return;
     }
 }
@@ -299,6 +330,26 @@ void windows_port_setting_label(int id, char *out, size_t size)
     if (id == 13) snprintf(out, size, "GAMMA: %.1f", 0.8f + atomic_load(&gamma_index) * 0.1f);
     if (id == 14) snprintf(out, size, "BRIGHTNESS: %.2f", 0.8f + atomic_load(&brightness_index) * 0.05f);
     if (id == 15) snprintf(out, size, "ADVANCED...");
+    if (id == 16) snprintf(out, size, "FRAME RATE: %d FPS (RESTART)",
+                           atomic_load(&frame_rate) >= 60 ? 60 : 30);
+    if (id == 17) snprintf(out, size, "RECENTER TILT");
+    if (id == 18) snprintf(out, size, "TEST HAPTICS");
+    if (id == 19) {
+        const char *m = getenv("RECOMP_TOUCH_STEER");
+        snprintf(out, size, "STEERING: %s",
+                 !m || !*m || !strcmp(m, "stick") ? "STICK"
+                 : !strcmp(m, "tilt") ? "TILT" : "STICK + TILT");
+    }
+    if (id == 20) {
+        const char *s = getenv("RECOMP_TOUCH_STEER_SENS");
+        snprintf(out, size, "STEERING RESPONSE: %s",
+                 !s || !strcmp(s, "1") ? "NORMAL"
+                 : !strcmp(s, "1.35") ? "QUICK"
+                 : !strcmp(s, "1.7") ? "SHARP" : "VERY SHARP");
+    }
+    if (id == 21)
+        snprintf(out, size, "INVERT TILT: %s",
+                 env_on("RECOMP_TOUCH_TILT_INVERT", 0) ? "ON" : "OFF");
 }
 
 /* nv2a_pb_replay.c expects these from the front end. The front-end cursor
