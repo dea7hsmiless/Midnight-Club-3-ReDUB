@@ -1514,7 +1514,7 @@ static void dri_ambient_draw(void)
         const char *e = getenv("MC3_ROAM_AMBIENT_GHOST");
         const char *d = getenv("MC3_ROAM_AMBIENT_DELAY");
         on = e && e[0] == '1';
-        delay_ms = (d && d[0]) ? atoi(d) : 100;   /* the player-car default */
+        delay_ms = (d && d[0]) ? atoi(d) : 50;    /* 100 -> 50: less lag on a driven car */
         if (delay_ms < 0)
             delay_ms = 0;
         if (delay_ms > 500)

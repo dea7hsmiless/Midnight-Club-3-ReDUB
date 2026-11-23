@@ -169,7 +169,7 @@ int roam_start(const char *name, uint32_t vip){
     c.platform = RC_PLAT_WEB;
     c.discovery = 1;                 /* only while no hub answers */
     c.max_players = 8;               /* without a hub; the hub's lists lift it */
-    c.rate_hz = 20;
+    c.rate_hz = 30;                  /* 20 -> 30: a driven car's pose every 33 ms */
     c.snap_states = 1;               /* the WebSocket loses nothing (nfsu2-web: one state per SNAP) */
     /* A server address implies wanting the server.
      *

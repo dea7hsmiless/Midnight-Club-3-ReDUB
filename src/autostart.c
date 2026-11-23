@@ -42,6 +42,7 @@ extern void usb_gamepad_set_held(int dev, uint8_t digital, uint8_t analog);
 extern int  usb_gamepad_host_input(int dev);
 
 #define PAD_DOWN  0x02u     /* digital: d-pad down */
+#define PAD_RIGHT 0x08u     /* digital: d-pad right */
 #define PAD_START 0x10u     /* digital */
 #define PAD_A     0x01u     /* analog: A */
 
@@ -80,6 +81,21 @@ static int online_wanted(void)
     static int want = -1;
     if (want < 0) {
         const char *e = getenv("MC3_ONLINE_SESSION");
+        want = e && e[0] == '1';
+    }
+    return want;
+}
+
+/* MC3_AUTOSTART_HOST=1: on the Networking screen, go to its second item
+ * (System Link, the first being Xbox Live/Free Roam) and press A through the
+ * host screens, so a test client can put a match up for another device to
+ * join. The walk then stops pressing: a lobby is not "in game", and pressing
+ * A in it would start or cancel the match. */
+static int host_wanted(void)
+{
+    static int want = -1;
+    if (want < 0) {
+        const char *e = getenv("MC3_AUTOSTART_HOST");
         want = e && e[0] == '1';
     }
     return want;
@@ -136,10 +152,19 @@ int mc3_autostart_on(void)
     return on;
 }
 
+/* The walker's current screen, for the front-end experiments: true while the
+ * Networking screen is the one on display. */
+int mc3_autostart_at_network(void);
+
 static int s_stage = ST_BOOT;
 static uint32_t s_stage_ms, s_press_ms, s_release_ms;
 static unsigned s_stage_frames, s_press_frames, s_release_frames;
 static int s_holding, s_presses, s_downs;
+
+int mc3_autostart_at_network(void)
+{
+    return mc3_autostart_on() && s_stage == ST_NETWORK;
+}
 
 /* Seconds since the walker started, as "123.4s ". Boot time is the thing
  * people report and the thing this session kept misjudging, and a log that
@@ -261,7 +286,34 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
         fprintf(stderr, "[AUTOSTART] %s %s\n", stamp(), k_stage[to]);
     }
 
+    {   /* MC3_AUTOSTART_STOP=main|network: park on that screen instead of
+         * pressing through it, so it can be inspected. */
+        static int stop = -1;
+        if (stop < 0) {
+            const char *e = getenv("MC3_AUTOSTART_STOP");
+            stop = e && !strcasecmp(e, "main") ? ST_MAIN
+                 : e && !strcasecmp(e, "network") ? ST_NETWORK : -2;
+        }
+        if (stop == s_stage) {
+            finish(stop == ST_MAIN ? "stopped: MC3_AUTOSTART_STOP=main"
+                                   : "stopped: MC3_AUTOSTART_STOP=network");
+            return;
+        }
+    }
+
     switch (s_stage) {
+    case ST_BOOT:                   /* boot/legal logos: Start gets past them */
+        /* These screens are not bg_* so the title detection stays at boot; on
+         * a console they advance on their own or on a press. Without this the
+         * walk sat on the legal screen for ever. */
+        if (ready_busy(now, 8000, 6000)) {
+            if (s_presses >= 5) {
+                finish("stopped: no title screen");
+                return;
+            }
+            press(PAD_START, 0, now);
+        }
+        break;
     case ST_TITLE:                  /* Start; the profile list follows */
         if (ready(now, 3000, 5000)) {
             if (s_presses >= 3) {
@@ -315,6 +367,26 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
          * next screen, and the last of them loads the cruise (which the game
          * reports as in_game, ending this walk). A screen that never answers
          * still stops the walk, so this cannot spin for ever. */
+        if (host_wanted()) {
+            /* Right once: the Networking screen lays its two items out
+             * side by side (Xbox Live, System Link), so Down did not move and
+             * the walk entered free roam instead. Then A through create. */
+            if (s_downs < 1) {
+                if (ready_busy(now, 2500, 1500)) {
+                    press(PAD_RIGHT, 0, now);
+                    s_downs++;
+                }
+            } else if (s_downs < 5) {
+                if (ready_busy(now, 2500, 2000)) {
+                    press(0, PAD_A, now);
+                    s_downs++;
+                }
+            } else {
+                finish("hosting: match created, waiting for a player");
+                return;
+            }
+            break;
+        }
         if (ready_busy(now, 2500, 2500)) {
             if (s_presses >= 8) {
                 finish("stopped: Networking did not start the cruise");

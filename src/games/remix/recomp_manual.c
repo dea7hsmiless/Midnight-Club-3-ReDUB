@@ -3009,6 +3009,24 @@ void sub_00222F00(void)
 }
 
 extern void sub_0020B6F0_gen(void);
+/* How many Downs from the main menu's first slot the autostart should make.
+ * MC3_MAIN_DOWNS overrides it: the menu order can move (Online is reordered to
+ * slot 0 when an online session is wanted), and a wrong count silently opens
+ * the item the cursor happens to be on. */
+static int autostart_main_downs(void)
+{
+    static int n = -1;
+    if (n < 0) {
+        const char *e = getenv("MC3_MAIN_DOWNS");
+        /* Arcade is the third item; Networking (now Online) is the fourth, and
+         * that is still the one this walker skips to. */
+        if (e && *e)
+            n = atoi(e);
+        else
+            n = 2;
+    }
+    return n;
+}
 /* The Online session (online_session.c is included near the end of this file,
  * with the other free-roam sources): MC3_ONLINE_SESSION=1. */
 static void online_session_pass(void);
@@ -3074,119 +3092,216 @@ void sub_0018C5A0(void)
  * Outside a session this is the untouched callback. */
 extern void sub_00180160_gen(void);
 extern void sub_0018C530_gen(void);
+/* Online play is on unless MC3_ONLINE=0 says otherwise (ios_host.c applies
+ * that default at boot; the file can carry the address on any platform). */
+static int online_play_enabled(void)
+{
+    const char *off = getenv("MC3_ONLINE");
+    const char *join, *roam;
+    if (off && off[0] == '0')
+        return 0;
+    join = getenv("MC3_ROAM_JOIN");
+    roam = getenv("MC3_ROAM");
+    return (join && *join) || (roam && *roam && strcmp(roam, "0") != 0);
+}
 void sub_00180160(void)
 {
     extern int online_session_wanted(void);
     extern void online_enter(const char *why);
-    if (!online_session_wanted()) {
+    /* Without online play this stays the game's own callback (the live
+     * service screen, dead here). With it, the item means Free Roam whenever
+     * the player can actually play online -- a session is not required, the
+     * session only adds the money/unlocks sandbox on top. */
+    if (!online_session_wanted() && !online_play_enabled()) {
         sub_00180160_gen();
         return;
     }
-    online_enter("networking screen, Free Roam");
+    if (online_session_wanted())
+        online_enter("networking screen, Free Roam");
     sub_0018C530_gen();
     fprintf(stderr, "[ONLINE] Free Roam: networking item -> Arcade's own cruise path"
-            " (sub_0018C530) inside the session\n");
+            " (sub_0018C530)\n");
 }
-/* ── "Online" first in the main menu ──
+/** "Online" keeps the Networking item's place
  *
- * Networking is the main menu's fourth item, so a player has to press Down
- * three times to find it and nothing tells them it is there. While a session
- * is wanted, move it to slot 0 so it reads as the first choice, the way an
- * online mode should.
+ * The main menu builds its own order and Networking is the fourth item; that is
+ * where players already look for it, so the item stays there and only its name
+ * changes. online_menu_patch() below rewrites the visible label to "ONLINE".
  *
- * The list is the front end's shared one: [0x50F148] -> +0xC = fe, fe+0xFC =
- * list. Per slot it holds a 4-dword functor at list+0xEC+16*slot (the callback
- * is at +4), a 16-byte record at [list+0x248]+16*(rows*col+slot), and a label
- * block of [list+0x234] {text, flag} pairs that record+8 points to.
- *
- * The guard is the important part: if the functor at slot 3 is not
- * sub_0018C5A0, this is not the menu we think it is, and we touch nothing.
- * Moving the wrong entry would rewire the front end.
- *
- * Runs after the builder (sub_0018C770_gen) has filled the list, and only once
- * per build. */
+ * The wrapper remains because the dispatch table calls sub_0018C770 for the
+ * builder; it is a plain pass-through and touches nothing. */
 extern void sub_0018C770_gen(void);
-extern void sub_00348AF0(void);          /* SetSelection(slot, col), ret 8 */
 void sub_0018C770(void)
 {
-    extern int online_session_wanted(void);
-    extern int online_session_ram(uint32_t va);
-    static int once;
-    uint32_t r[8];
-    uint32_t fe, lst, col, base, nl, i, k, w;
-    uint32_t fn[4], rec[3], lab[2 * 8];
-
     sub_0018C770_gen();
-    if (once || !online_session_wanted())
-        return;
-    once = 1;
-
-    if (!online_session_ram(MEM32(0x0050F148u)))
-        return;
-    fe = MEM32(0x0050F148u);
-    if (!online_session_ram(fe = MEM32(fe + 0xCu)) ||
-        !online_session_ram(lst = MEM32(fe + 0xFCu)))
-        return;
-    col = MEM32(lst + 0x258u);
-    nl = MEM32(lst + 0x234u);
-    if (col > 7u || nl > 8u || (int32_t)MEM32(lst + 0x238u + 4u * col) < 4)
-        return;
-    /* The guard: slot 3's callback must be the Networking item. */
-    if (MEM32(lst + 0xECu + 3u * 16u + 4u) != 0x0018C5A0u) {
-        fprintf(stderr, "[ONLINE] main menu: slot 3 is not Networking (%08X), left alone\n",
-                (unsigned)MEM32(lst + 0xECu + 3u * 16u + 4u));
-        return;
-    }
-
-    r[0] = g_eax; r[1] = g_ecx; r[2] = g_edx; r[3] = g_ebx;
-    r[4] = g_esp; r[5] = g_ebp; r[6] = g_esi; r[7] = g_edi;
-
-    base = MEM32(lst + 0x230u) * col;
-#define MM_REC(s) (MEM32(lst + 0x248u) + 16u * (base + (s)))
-    /* Take slot 3 out */
-    for (w = 0; w < 4; w++) fn[w] = MEM32(lst + 0xECu + 3u * 16u + 4u * w);
-    rec[0] = MEM32(MM_REC(3));
-    rec[1] = MEM32(MM_REC(3) + 4u);
-    rec[2] = MEM32(MM_REC(3) + 0xCu);
-    for (k = 0; k < 2 * nl; k++)
-        lab[k] = MEM32(MEM32(MM_REC(3) + 8u) + 4u * k);
-    /* Slots 0-2 one down */
-    for (i = 3; i > 0; i--) {
-        for (w = 0; w < 4; w++)
-            MEM32(lst + 0xECu + i * 16u + 4u * w) = MEM32(lst + 0xECu + (i - 1u) * 16u + 4u * w);
-        MEM32(MM_REC(i)) = MEM32(MM_REC(i - 1u));
-        MEM32(MM_REC(i) + 4u) = MEM32(MM_REC(i - 1u) + 4u);
-        MEM32(MM_REC(i) + 0xCu) = MEM32(MM_REC(i - 1u) + 0xCu);
-        for (k = 0; k < 2 * nl; k++)
-            MEM32(MEM32(MM_REC(i) + 8u) + 4u * k) = MEM32(MEM32(MM_REC(i - 1u) + 8u) + 4u * k);
-    }
-    /* Networking into slot 0 */
-    for (w = 0; w < 4; w++) MEM32(lst + 0xECu + 4u * w) = fn[w];
-    MEM32(MM_REC(0)) = rec[0];
-    MEM32(MM_REC(0) + 4u) = rec[1];
-    MEM32(MM_REC(0) + 0xCu) = rec[2];
-    for (k = 0; k < 2 * nl; k++)
-        MEM32(MEM32(MM_REC(0) + 8u) + 4u * k) = lab[k];
-#undef MM_REC
-
-    /* Put the cursor on slot 0 so the selected id is Online's, as the builder
-     * ended by selecting its own slot 0. */
-    g_esp -= 4; MEM32(g_esp) = 0;            /* return address */
-    g_esp -= 4; MEM32(g_esp) = 0xFFFFFFFFu;  /* col: -1 */
-    g_esp -= 4; MEM32(g_esp) = 0;            /* slot 0 */
-    g_ecx = lst;
-    sub_00348AF0();
-    g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3];
-    g_esp = r[4]; g_ebp = r[5]; g_esi = r[6]; g_edi = r[7];
-
-    fprintf(stderr, "[ONLINE] main menu: Online moved to the first slot (was 3 of %u)\n",
-            (unsigned)MEM32(lst + 0x238u + 4u * col));
 }
 
 static void roam_net_boot(void);        /* roam_net.c, included at the end */
 static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
+
+/** The online menu's names
+ *
+ * The main menu's fourth item ships as "Networking" and the screen behind it
+ * lists "Xbox Live" (free roam, which sub_00180160 turns into our cruise) and
+ * "System Link" (the race lobby). None of those names belong in ReDUB, and the
+ * strings are not in the item list: the records only hold display objects, and
+ * the visible text is interned by the front end as UTF-16 buffers in the guest
+ * heap.
+ *
+ * So the buffers themselves are the patch point. They are found once the menu
+ * is built (the heap window is 0x80000000-0x84000000; Windows asks the OS
+ * which pages are readable, the other platforms ask the view registry), and
+ * the text is overwritten in place. A shorter text is space-padded because
+ * the buffer carries no terminator -- it is filled with 0xCDCD -- and a longer
+ * one is only used when the filler after the string proves there is room.
+ *
+ * The swaps run every frame: they are no-ops once applied, and they put the
+ * names back if the front end re-interns a string. */
+static const char *const online_label_from[3] = { "Networking",  "Xbox Live", "System Link" };
+static const char *const online_label_to[3]   = { "Online",      "Online Free Roam", "Online Races" };
+static const char *const online_label_short[3] = { "Online",     "Free Roam", "Races" };
+static struct { uint32_t va; } online_label[3][8];
+static int online_label_n[3];
+
+static int online_guest_ok(uint32_t va, uint32_t n)
+{
+    return n <= 0x04000000u &&
+           ((va >= 0x10000u && va <= 0x04000000u - n) ||
+            (va >= 0x80000000u && va <= 0x84000000u - n));
+}
+
+#if defined(_WIN32)
+static int online_scan_readable(uint32_t va, uint32_t *size);  /* after <windows.h> */
+#else
+/* The guest arena is fully reserved but handed out piecemeal, so a read has to
+ * stay inside a live view. The platform keeps a registry of every view it
+ * mapped (win32_compat.c: view_lookup), which is what VirtualQuery reports on
+ * Windows. */
+extern int view_lookup(const void *addr, void **base_out, size_t *len_out);
+static int online_scan_readable(uint32_t va, uint32_t *size)
+{
+    void *base = NULL;
+    size_t len = 0, left;
+    uintptr_t host = (uintptr_t)XBOX_PTR(va);
+    if (!view_lookup((const void *)host, &base, &len))
+        return 0;
+    left = (size_t)((uintptr_t)base + len - host);
+    if (left < 2u)
+        return 0;
+    *size = left > 0x04000000u ? 0x04000000u : (uint32_t)left;
+    return 1;
+}
+#endif
+
+static void online_labels_discover(void)
+{
+    const uint32_t hi = 0x84000000u;
+    unsigned k, n;
+    for (k = 0; k < 3; k++) {
+        const char *s = online_label_from[k];
+        uint32_t len = (uint32_t)strlen(s), va = 0x80000000u;
+        online_label_n[k] = 0;
+        while (va < hi && online_label_n[k] < 8) {
+            uint32_t size;
+            if (!online_scan_readable(va, &size)) {
+                va += 0x1000u;
+                continue;
+            }
+            if (va + size > hi)
+                size = hi - va;
+            {
+                const uint16_t *w = (const uint16_t *)(uintptr_t)XBOX_PTR(va);
+                uint32_t words = size / 2u, i;
+                for (i = 0; i + len <= words && online_label_n[k] < 8; i++) {
+                    uint32_t j;
+                    if (w[i] != (uint16_t)(uint8_t)s[0])
+                        continue;
+                    for (j = 1; j < len; j++)
+                        if (w[i + j] != (uint16_t)(uint8_t)s[j])
+                            break;
+                    if (j == len)
+                        online_label[k][online_label_n[k]++].va = va + 2u * i;
+                }
+            }
+            va += size;
+        }
+    }
+}
+
+static void online_labels_apply(void)
+{
+    unsigned k, n;
+    for (k = 0; k < 3; k++) {
+        uint32_t len = (uint32_t)strlen(online_label_from[k]);
+        for (n = 0; n < (unsigned)online_label_n[k]; n++) {
+            uint32_t va = online_label[k][n].va, i, slack = 0, to_len;
+            const char *to;
+            uint16_t next;
+            if (!online_guest_ok(va, 2u * len + 2u))
+                continue;
+            for (i = 0; i < len; i++) {
+                uint16_t w = MEM16(va + 2u * i);
+                uint16_t c = (uint16_t)(uint8_t)online_label_from[k][i];
+                if (w >= 'a' && w <= 'z')
+                    w = (uint16_t)(w - 32);
+                if (c >= 'a' && c <= 'z')
+                    c = (uint16_t)(c - 32);
+                if (w != c)
+                    break;
+            }
+            if (i != len)
+                continue;              /* already renamed, or the space was reused */
+            next = MEM16(va + 2u * len);
+            if (next != 0 && next < 0xCD00u)
+                continue;              /* part of a longer string: not ours */
+            while (slack < 64u && MEM16(va + 2u * (len + slack)) == 0xCDCDu)
+                slack++;
+            to = online_label_to[k];
+            if (strlen(to) > len + slack)
+                to = online_label_short[k];
+            to_len = (uint32_t)strlen(to);
+            if (to_len > len + slack)
+                continue;
+            for (i = 0; i < len; i++)
+                MEM16(va + 2u * i) = (uint16_t)(uint8_t)(i < to_len ? to[i] : ' ');
+            fprintf(stderr, "[ONLINE] label %08X \"%s\" -> \"%s\"\n",
+                    va, online_label_from[k], to);
+        }
+    }
+}
+
+void online_menu_patch(void)
+{
+    uint32_t fe, lst, col, rows, count;
+
+    if (!online_guest_ok(MEM32(0x0050F148u), 16))
+        return;
+    fe = MEM32(MEM32(0x0050F148u) + 0xCu);
+    if (!online_guest_ok(fe, 0x100))
+        return;
+    lst = MEM32(fe + 0xFCu);
+    if (!online_guest_ok(lst, 0x300))
+        return;
+    col = MEM32(lst + 0x258u);
+    rows = MEM32(lst + 0x230u);
+    if (col > 15u || rows < 1u || rows > 16u)
+        return;
+    count = MEM32(lst + 0x238u + 4u * col);
+    if (count < 1u || count > 16u)
+        return;
+    {   /* Search once the list is built; retry while it comes up empty. */
+        static int discovered;
+        if (!discovered) {
+            online_labels_discover();
+            discovered = online_label_n[0] > 0;
+        }
+        online_labels_apply();
+    }
+}
+
 void sub_0020B6F0(void)
 {
+    extern void online_menu_patch(void);
     static int on = -1;
     static unsigned n;
     static float lo = 1e9f, hi = 0.0f, sum = 0.0f;
@@ -3198,6 +3313,7 @@ void sub_0020B6F0(void)
     static unsigned ped_steps;
     float dt, real;
     int frame_rate_mode = mc3_frame_rate_mode();
+    online_menu_patch();
     if (on < 0) {
         const char *e = getenv("MC3_TIME_TRACE");
         on = e && e[0] == '1';
@@ -3246,7 +3362,7 @@ void sub_0020B6F0(void)
          * that instead - so the two must agree, and they do because both read
          * online_session_wanted(). */
         mc3_autostart_frame(MEM32(s_state_obj + 4) == 2 || MEM32(s_state_obj + 4) == 3,
-                            online_session_wanted() ? 0 : 2);
+                            autostart_main_downs());
     }
     {
         static int time_trace = -1;
@@ -3401,6 +3517,25 @@ extern void sub_00348BE0(void),sub_00348950(void),sub_001395E0(void);
 #if defined(_WIN32)
 #include <windows.h>
 #endif
+
+/* Windows: a heap page may be reserved without being committed, so the text
+ * searches ask the OS which pages can be read. */
+static int online_scan_readable(uint32_t va, uint32_t *size)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery((LPCVOID)XBOX_PTR(va), &mbi, sizeof mbi) || !mbi.RegionSize)
+        return 0;
+    *size = (uint32_t)mbi.RegionSize;
+    if (mbi.State != MEM_COMMIT ||
+        !(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
+                         PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                         PAGE_EXECUTE_WRITECOPY)) ||
+        (mbi.Protect & PAGE_GUARD))
+        return 0;
+    return 1;
+}
+
+
 static uint32_t port_self,port_list,port_rows[32];
 static uint32_t port_list_vtable;
 static int port_open,port_back_down,port_back_release;
