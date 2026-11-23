@@ -363,7 +363,7 @@ void windows_port_setting_label(int id, char *out, size_t size)
                  env_on("RECOMP_TOUCH_TILT_INVERT", 0) ? "ON" : "OFF");
     if (id == 22) {
         const char *j = getenv("MC3_ROAM_JOIN");
-        snprintf(out, size, "ONLINE: %s (RESTART)", (j && *j) ? "ON (RELAY)" : "OFF");
+        snprintf(out, size, "ONLINE: %s (RESTART)", (j && *j) ? "ON" : "OFF");
     }
 }
 
