@@ -249,6 +249,13 @@ int rc_encode(const rc_msg *m, uint8_t *out, int cap){
         if (m->u.game.len < 1 || m->u.game.len > RC_GAME_MAX) return -1;
         rc_put8(&w, m->u.game.len); rc_putb(&w, m->u.game.data, m->u.game.len);
         break;
+    case RC_MSG_TUNNEL:
+        if (m->u.tunnel.n < 1 || m->u.tunnel.n > RC_TUNNEL_MAX) return -1;
+        rc_put32(&w, m->u.tunnel.src); rc_put32(&w, m->u.tunnel.dst);
+        rc_put16(&w, m->u.tunnel.sport); rc_put16(&w, m->u.tunnel.dport);
+        rc_put16(&w, m->u.tunnel.n);
+        rc_putb(&w, m->u.tunnel.d, m->u.tunnel.n);
+        break;
     default: return -1;
     }
     if (w.err || w.n + RC_CRC > w.cap) return -1;
@@ -358,6 +365,14 @@ int rc_decode(const uint8_t *buf, int len, rc_msg *m){
         if (m->u.game.len < 1 || m->u.game.len > RC_GAME_MAX) return RC_E_FIELD;
         rc_getb(&r, m->u.game.data, m->u.game.len);
         break;
+    case RC_MSG_TUNNEL: {
+        m->u.tunnel.src = rc_get32(&r); m->u.tunnel.dst = rc_get32(&r);
+        m->u.tunnel.sport = rc_get16(&r); m->u.tunnel.dport = rc_get16(&r);
+        m->u.tunnel.n = rc_get16(&r);
+        if (r.err) return RC_E_SHORT;
+        if (m->u.tunnel.n < 1 || m->u.tunnel.n > RC_TUNNEL_MAX) return RC_E_FIELD;
+        rc_getb(&r, m->u.tunnel.d, m->u.tunnel.n);
+        break; }
     default: return RC_E_TYPE;
     }
     if (r.err) return RC_E_SHORT;
@@ -890,6 +905,20 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
         s->inbox[s->ninbox].from = m.h.sender; s->inbox[s->ninbox].len = m.u.game.len;
         memcpy(s->inbox[s->ninbox].d, m.u.game.data, m.u.game.len); s->ninbox++;
         break;
+    case RC_MSG_TUNNEL:
+        /* System Link's own packets. Not gated on the peer table being EST:
+         * the relay already refused anyone outside the room, and a race can be
+         * open while free roam's HELLO is still arriving. Without a handler the
+         * frames are counted and dropped rather than mistaken for peer state. */
+        if (s->tunnel_cb){
+            rc_tunnel t;
+            t.src = m.u.tunnel.src; t.dst = m.u.tunnel.dst;
+            t.sport = m.u.tunnel.sport; t.dport = m.u.tunnel.dport;
+            t.len = m.u.tunnel.n; t.data = m.u.tunnel.d;
+            s->rx_tunnel++;
+            s->tunnel_cb(s->tunnel_user, &t);
+        } else s->rx_tunnel_drop++;
+        break;
     }
 }
 int rc_send_game(rc_session *s, uint32_t id, const uint8_t *data, int len){
@@ -912,6 +941,29 @@ int rc_recv_game(rc_session *s, uint32_t *from, uint8_t *out, int cap){
     memmove(&s->inbox[0], &s->inbox[1], sizeof s->inbox[0] * (RC_INBOX - 1)); s->ninbox--;
     return n > 0 ? n : 0;
 }
+void rc_set_tunnel(rc_session *s, rc_tunnel_fn cb, void *user){
+    s->tunnel_cb = cb; s->tunnel_user = user;
+}
+
+int rc_send_tunnel(rc_session *s, uint32_t src, uint32_t dst, uint16_t sport,
+                   uint16_t dport, const void *data, int len){
+    if (!s->closed && s->conf.relay && s->conf.relay_ip && data && len >= 1 &&
+        len <= RC_TUNNEL_MAX){
+        rc_msg m;
+        hdr(s, &m, RC_MSG_TUNNEL);
+        m.u.tunnel.src = src; m.u.tunnel.dst = dst;
+        m.u.tunnel.sport = sport; m.u.tunnel.dport = dport;
+        m.u.tunnel.n = (uint16_t)len;
+        memcpy(m.u.tunnel.d, data, (size_t)len);
+        tx_to(s, s->conf.relay_ip, s->conf.relay_port, &m);
+        s->tx_tunnel++;
+        return 0;
+    }
+    /* Too large for one datagram, or no relay: counted, not silently lost. */
+    s->rx_tunnel_drop++;
+    return -1;
+}
+
 void rc_tick(rc_session *s, int64_t now){
     if (s->closed) return;
     int hub = hub_mode(s, now);

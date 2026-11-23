@@ -127,6 +127,32 @@ int  roam_send_msg(uint32_t to, const void *data, int len);
  * length (copied up to cap), *from its sender's id; 0 none */
 int  roam_recv_msg(uint32_t *from, void *out, int cap);
 
+/* ── tunnelling another protocol through the relay ──────────────────────────
+ *
+ * Free roam's own messages reach players through the relay; System Link's
+ * packets have to reach the same players the same way, because behind a relay
+ * that is the only address anyone has. TUNNEL frames carry an opaque datagram
+ * with a virtual sender and destination so the receiving side can present a
+ * LAN of its own. The relay forwards them without understanding them, and no
+ * relay setting has to change.
+ *
+ * One datagram at most: a payload over ~1150 bytes is refused, not
+ * fragmented. The counter says so (roam_tunnel_stats). */
+typedef void (*roam_tunnel_fn)(void *user, uint32_t src, uint32_t dst,
+                               uint16_t sport, uint16_t dport,
+                               const void *data, int len);
+
+/* 1 when a relay session is up (there is somewhere to tunnel), with our id. */
+int  roam_tunnel_ready(uint32_t *self_id);
+/* 0 sent, -1 not running / no relay / too large. */
+int  roam_tunnel_send(uint32_t src, uint32_t dst, uint16_t sport, uint16_t dport,
+                      const void *data, int len);
+/* Where received frames go. Called on the receive thread, holding the session
+ * lock: the handler must not call back into roam. */
+void roam_tunnel_from(roam_tunnel_fn cb, void *user);
+/* tx sent, rx delivered, dropped (too large, or arrived with no handler). */
+void roam_tunnel_stats(uint32_t *tx, uint32_t *rx, uint32_t *dropped);
+
 /* Our own session id: nonzero while free roam runs, 0 otherwise.  Game layers
  * use it to elect one owner deterministically (lowest id wins), so "who
  * simulates the ambient population" needs no extra handshake. */

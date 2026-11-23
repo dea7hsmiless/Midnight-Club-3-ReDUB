@@ -62,6 +62,9 @@ def build(cc, root, work: Path) -> Path:
            str(root / "xboxrecomp" / "src" / "net" / "roam" / "roam_core.c"),
            str(root / "xboxrecomp" / "src" / "net" / "roam" / "roam_plat.c"),
            str(root / "xboxrecomp" / "src" / "net" / "roam" / "roam_api.c"),
+           # roam_net_start_now() now selects the relayed System Link transport
+           str(root / "xboxrecomp" / "src" / "net" / "xnet_hle.c"),
+           str(root / "xboxrecomp" / "src" / "net" / "xnet_relay.c"),
            "-I", str(root / "xboxrecomp" / "src"),
            "-I", str(root / "xboxrecomp" / "src" / "net" / "roam"),
            "-o", str(exe), "-lws2_32", "-lpthread"]

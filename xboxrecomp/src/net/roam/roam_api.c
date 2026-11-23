@@ -45,6 +45,13 @@ static uint32_t   g_room;
  * the cruise ("Big left: other room"). */
 static uint32_t   g_room_base;
 
+/* ── tunnelling another protocol (System Link) through the relay ─────────────
+ * The handler and its user are declared here because roam_start registers them
+ * when a session is made; the rest is with the API below. */
+static roam_tunnel_fn g_tun_cb;
+static void          *g_tun_user;
+static void tunnel_adapter(void *user, const rc_tunnel *t);
+
 static int env_int(const char *k, int def, int lo, int hi){
     const char *v = getenv(k);
     if (!v || !*v) return def;
@@ -240,6 +247,9 @@ int roam_start(const char *name, uint32_t vip){
     }
     rc_io io = { 0, 0, 0, on_event };
     rc_session_init(&g_s, &c, &io);
+    /* a tunnelling handler set before the session existed (the XNet transport
+     * installs its queue at start) is registered now */
+    if (g_tun_cb) rc_set_tunnel(&g_s, tunnel_adapter, 0);
     if (roam_plat_start(&g_s, ROAM_PORT) != 0) return -1;
     g_on = 1; g_last_eval = 0;
     fprintf(stderr, "[roam] started as \"%s\" (id %08x, %d links wanted)\n", g_s.conf.name, (unsigned)c.self_id, g_k);
@@ -367,6 +377,47 @@ int roam_recv_msg(uint32_t *from, void *out, int cap){
     if (!g_on || !out || cap <= 0) return 0;
     roam_plat_lock(); int r = rc_recv_game(&g_s, from, (uint8_t *)out, cap); roam_plat_unlock();
     return r;
+}
+
+/* ── tunnelling another protocol (System Link) through the relay ───────────── */
+
+static void tunnel_adapter(void *user, const rc_tunnel *t){
+    (void)user;
+    if (g_tun_cb) g_tun_cb(g_tun_user, t->src, t->dst, t->sport, t->dport, t->data, t->len);
+}
+
+int roam_tunnel_ready(uint32_t *self_id){
+    if (!g_on) return 0;
+    roam_plat_lock();
+    int ok = g_s.conf.relay && g_s.conf.relay_ip && g_s.conf.relay_port;
+    if (ok && self_id) *self_id = g_s.conf.self_id;
+    roam_plat_unlock();
+    return ok;
+}
+
+int roam_tunnel_send(uint32_t src, uint32_t dst, uint16_t sport, uint16_t dport,
+                     const void *data, int len){
+    if (!g_on || !data || len <= 0) return -1;
+    roam_plat_lock();
+    int r = rc_send_tunnel(&g_s, src, dst, sport, dport, data, len);
+    roam_plat_unlock();
+    return r;
+}
+
+void roam_tunnel_from(roam_tunnel_fn cb, void *user){
+    g_tun_cb = cb;
+    g_tun_user = user;
+    if (g_on){
+        roam_plat_lock();
+        rc_set_tunnel(&g_s, cb ? tunnel_adapter : 0, 0);
+        roam_plat_unlock();
+    }
+}
+
+void roam_tunnel_stats(uint32_t *tx, uint32_t *rx, uint32_t *dropped){
+    if (tx) *tx = g_s.tx_tunnel;
+    if (rx) *rx = g_s.rx_tunnel;
+    if (dropped) *dropped = g_s.rx_tunnel_drop;
 }
 /* Our own session id (nonzero while running, 0 when not).  The game layers
  * need it to elect one owner deterministically - e.g. "the lowest id in the

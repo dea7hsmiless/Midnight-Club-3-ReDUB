@@ -79,7 +79,28 @@
 #define RC_FAR_PARTS     ((ROAM_FAR_MAX + RC_FAR_PART - 1) / RC_FAR_PART)
 
 enum { RC_MSG_HELLO = 1, RC_MSG_PEERS = 2, RC_MSG_SNAP = 3, RC_MSG_CFG = 4, RC_MSG_CFG_REQ = 5,
-       RC_MSG_PING = 6, RC_MSG_PONG = 7, RC_MSG_BYE = 8, RC_MSG_FAR = 9, RC_MSG_GAME = 10 };
+       RC_MSG_PING = 6, RC_MSG_PONG = 7, RC_MSG_BYE = 8, RC_MSG_FAR = 9, RC_MSG_GAME = 10,
+       RC_MSG_TUNNEL = 11 };
+
+/* An opaque datagram carried between players through the relay: System Link's
+ * own packets, which the relay forwards without understanding them. The frame
+ * names a virtual sender and destination so a guest sees a LAN of its own
+ * (10.77.x.y) instead of the relay's one address.
+ *
+ * RC_TUNNEL_MAX is what is left of RC_MAX_DGRAM after the message header and
+ * this frame's own 14 bytes, with 2 bytes to spare. An XNet packet larger than
+ * that is dropped and counted (rx_tunnel_drop) rather than fragmented: MC3's
+ * lobby and race packets are far below it, and a silent fragmenter is a worse
+ * failure than a counter that says so. */
+#define RC_TUNNEL_MAX   (RC_MAX_DGRAM - RC_HDR - RC_CRC - 14)
+typedef struct {
+    uint32_t src, dst;              /* virtual IPv4, host order */
+    uint16_t sport, dport;
+    uint16_t len;
+    const uint8_t *data;
+} rc_tunnel;
+typedef void (*rc_tunnel_fn)(void *user, const rc_tunnel *t);
+
 enum { RC_PLAT_WEB = 4 };
 /* header flags: SNAP every n-th (far peers), HELLO to everyone, state extensions, crews (here: the links byte) */
 #define RC_HF_EVERY      0x000F
@@ -133,6 +154,7 @@ typedef struct {
         struct { uint8_t reason; } bye;
         struct { uint8_t n; roam_far_peer e[RC_FAR_PART]; } far;   /* dist unused on the wire */
         struct { uint8_t len; uint8_t data[RC_GAME_MAX]; } game;
+        struct { uint32_t src, dst; uint16_t sport, dport, n; uint8_t d[RC_TUNNEL_MAX]; } tunnel;
     } u;
 } rc_msg;
 /* one datagram into out (RC_MAX_DGRAM at least): its length, or -1 */
@@ -256,6 +278,8 @@ typedef struct {
     uint32_t  far_got;  uint16_t far_seq;                               /* which parts came, of which seq */
     struct { uint32_t from; uint8_t len; uint8_t d[RC_GAME_MAX]; } inbox[RC_INBOX];   /* GAME messages, oldest first */
     int       ninbox;  uint32_t rx_game_drop;
+    rc_tunnel_fn tunnel_cb;  void *tunnel_user;          /* TUNNEL datagrams, to the XNet transport */
+    uint32_t  tx_tunnel, rx_tunnel, rx_tunnel_drop;
 } rc_session;
 
 void rc_session_init(rc_session *s, const rc_config *cfg, const rc_io *io);
@@ -276,6 +300,12 @@ int  rc_established(const rc_session *s);
 int  rc_send_game(rc_session *s, uint32_t id, const uint8_t *data, int len);
 /* the oldest GAME message waiting: its length (copied up to cap), *from its sender; 0 none */
 int  rc_recv_game(rc_session *s, uint32_t *from, uint8_t *out, int cap);
+/* TUNNEL: System Link's datagrams through the relay, one callback per frame.
+ * Sent only when a relay is configured -- there is no other way to reach a
+ * player whose address the relay owns. */
+void rc_set_tunnel(rc_session *s, rc_tunnel_fn cb, void *user);
+int  rc_send_tunnel(rc_session *s, uint32_t src, uint32_t dst, uint16_t sport,
+                    uint16_t dport, const void *data, int len);
 const char *rc_status_name(int st);
 
 #endif

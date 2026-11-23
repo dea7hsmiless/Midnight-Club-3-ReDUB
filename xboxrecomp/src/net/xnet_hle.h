@@ -85,6 +85,7 @@ typedef struct xnet_transport {
 
 extern const xnet_transport xnet_transport_udp;    /* not in the Emscripten build */
 extern const xnet_transport xnet_transport_web;    /* the Emscripten build only */
+extern const xnet_transport xnet_transport_relay;  /* System Link through the free-roam relay */
 
 /* Pick the medium; before xnet_startup(). Default: xnet_transport_udp on
  * desktop/console, xnet_transport_web in the web build. */

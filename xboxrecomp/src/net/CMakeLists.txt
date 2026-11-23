@@ -9,6 +9,7 @@
 
 add_library(xbox_net STATIC
     xnet_hle.c
+    xnet_relay.c
     roam/roam_core.c
     roam/roam_api.c
     roam/roam_plat.c

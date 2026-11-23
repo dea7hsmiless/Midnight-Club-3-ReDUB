@@ -24,6 +24,7 @@
  */
 
 #include "net/roam/roam_api.h"
+#include "net/xnet_hle.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -88,6 +89,19 @@ void roam_net_start_now(void)
         return;
     }
     atexit(roam_stop);
+    /* System Link goes through the relay too, when there is one: the players a
+     * race can reach are the players the room has, and their real addresses are
+     * the relay's. Selected here rather than at xnet_startup because the
+     * session's id and relay are only known once roam_start has run -- and the
+     * guest's WSAStartup (System Link) is always much later than this. */
+    {
+        uint32_t id = 0;
+        if (roam_tunnel_ready(&id)) {
+            xnet_set_transport(&xnet_transport_relay);
+            fprintf(stderr, "[ROAM] System Link will go through the relay"
+                            " (virtual LAN, MC3_NETPLAY=1 to use it)\n");
+        }
+    }
     fprintf(stderr, "[ROAM] transport up as \"%s\"; peers' cars are built at the cruise"
             " (MC3_ROAM=1)\n", e && *e ? e : "Player");
 }
