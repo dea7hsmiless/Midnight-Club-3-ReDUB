@@ -3158,8 +3158,8 @@ static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
  * The swaps run every frame: they are no-ops once applied, and they put the
  * names back if the front end re-interns a string. */
 static const char *const online_label_from[3] = { "Networking",  "Xbox Live", "System Link" };
-static const char *const online_label_to[3]   = { "Online",      "Online Free Roam", "Online Races" };
-static const char *const online_label_short[3] = { "Online",     "Free Roam", "Races" };
+static const char *const online_label_to[3]   = { "Online",      "Online Cruise Mode", "Online Race Mode" };
+static const char *const online_label_short[3] = { "Online",     "Online Cruise", "Online Races" };
 static struct { uint32_t va; } online_label[3][8];
 static int online_label_n[3];
 
