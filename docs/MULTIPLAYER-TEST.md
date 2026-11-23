@@ -98,9 +98,61 @@ name over it. Nothing else needs to be set up, and there is no lobby to join.
 | Works on one machine, not across two | the client has `RECOMP_NET_ADDR=127.0.0.x` set. A loopback source cannot reach a public address; unset it. |
 | Relay logs `refused … room is full` | 8 players already in that room. |
 
+## 5. Races (System Link through the relay)
+
+Free roam and races are two different menus and two different paths; both end up
+on the relay.
+
+Each player's env file needs `MC3_NETPLAY=1` as well as the roam line:
+
+```
+MC3_ROAM_JOIN=<the server>
+MC3_NETPLAY=1
+```
+
+Then, in game: **Online → System Link**. One player creates a match, the other
+finds it and joins. (Free roam is Online → Free Roam; the two work at once.)
+
+### What proves it worked
+
+Client, at startup:
+
+```
+[ROAM] System Link will go through the relay (virtual LAN, MC3_NETPLAY=1 to use it)
+[XNET] relay: virtual LAN 10.77.103.22 (System Link through the free-roam relay)
+[XNET] HLE up: transport relay, address 10.77.103.22
+```
+
+Both lines must show the **same 10.77 address**; that is the identity the other
+player's guest will see. A public-looking address here is the byte-order bug
+fixed on 2026-11-22, and means the build is older than that.
+
+Server, with `--verbose`, once a System Link packet moves:
+
+```
+[relay] 1e672f69 -> 1 in room 0 (11)
+```
+
+`(11)` is the TUNNEL message: that is a System Link packet being carried. No
+`(11)` lines while both players sit in the System Link menu means the guests are
+not talking (wrong build, or `MC3_NETPLAY` not set).
+
+### Failure modes
+
+| What you see | What it is |
+|---|---|
+| `[XNET] HLE up: transport udp` | the build predates the relayed System Link, or `MC3_ROAM_JOIN`/`MC3_ROAM_RELAY` is not set, so there is no relay session to tunnel through. |
+| address is `14.42.77.10`-shaped | byte-order bug, fixed 2026-11-22; install the newer build. |
+| `[XNET] udp: host port = 20000 …` | the host-UDP transport was selected: it only reaches a LAN, and uses `RECOMP_NET_ADDR`/`RECOMP_NET_PEERS`. |
+| System Link menu says no cable | `MC3_NETPLAY=1` missing; `XNetGetEthernetLinkStatus` is the gate. |
+| both in the lobby, one list empty | the two are in different rooms (`MC3_ROAM_ROOM`), or the relay never saw a HELLO from one. |
+| `(11)` on the server, no lobby | the guests are exchanging packets but the session ids do not match — check the room number first. |
+
 ## What this does not test
 
 - Two players on the same room number but different cities: the room is a group with the
   city packed under it, so this is by design.
-- Races. Free roam only; System Link races are separate.
 - Anything past 8 cars in one room — that is the cap, and the game's own slot count.
+- A full race from start to finish. The transport is tested (tools/test_roam_tunnel.py)
+  and the frames are visible on the relay, but the lobby and the race itself are the
+  players' part of the test — see section 5.
