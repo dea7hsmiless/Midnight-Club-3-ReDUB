@@ -59,6 +59,11 @@
   button.primary { background: #F55060; color: #fff; }
   button:disabled { opacity: .5; cursor: default; }
   .hint { color: #99A5BC; font-size: 12px; line-height: 1.55; margin-top: 16px; }
+  .notice {
+    background: #16233B; border-left: 3px solid #F55060; border-radius: 6px;
+    padding: 10px 12px; margin-top: 14px; font-size: 13px; color: #EBEFF7;
+    white-space: pre-wrap; line-height: 1.5;
+  }
   .names { margin-top: 4px; }
   .names div { padding: 5px 0; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 4px;
@@ -114,6 +119,8 @@
     Invite works with a room number (1-255). The game reads it when it starts, so close the game before
     joining a new room. Room 0 means "anyone online" (auto-matched).
   </p>
+
+  <div id="notice" class="notice" style="display:none"></div>
 </div>
 
 <script>
@@ -160,6 +167,15 @@
     haveState = true;
     lastPush = +new Date();
     try { render(state || {}); } catch (e) { /* keep the page alive */ }
+  };
+
+  /* One line of feedback from the shell: the invite code, a refusal, anything
+   * that would otherwise be invisible. */
+  window.redubNotice = function (message) {
+    var n = el("notice");
+    if (!n) return;
+    n.innerHTML = esc(message);
+    n.style.display = "block";
   };
 
   /* ---- helpers --------------------------------------------------------- */
@@ -230,7 +246,8 @@
       text("names", names);
     } else {
       text("names", st.error ? "Player list unavailable: the server did not answer."
-                             : (rooms.length ? "Player names need the newest relay." : "Nobody else is online right now."));
+                             : (rooms.length && st.rosterOk === false ? "Player names need the newest relay."
+                                                                      : "Nobody else is online right now."));
     }
   }
 

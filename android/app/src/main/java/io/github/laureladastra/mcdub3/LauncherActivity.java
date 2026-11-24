@@ -1084,6 +1084,7 @@ public class LauncherActivity extends Activity {
         s.append(",\"playerName\":").append(json(name == null ? "" : name));
         s.append(",\"rooms\":").append(rj);
         s.append(",\"roster\":").append(pj);
+        s.append(",\"rosterOk\":").append(roster != null && roster.startsWith("MC3PLAYERS"));
         if (error != null)
             s.append(",\"error\":").append(json(error));
         s.append('}');

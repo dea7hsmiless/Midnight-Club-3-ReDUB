@@ -71,7 +71,7 @@ public sealed class Launcher : Form {
         content.Dock=DockStyle.Fill;content.Margin=Padding.Empty;shell.Controls.Add(content,1,0);
         var footer=new Panel {Dock=DockStyle.Fill,BackColor=Color.FromArgb(14,22,39),Margin=Padding.Empty};shell.Controls.Add(footer,0,1);shell.SetColumnSpan(footer,2);status.SetBounds(20,9,930,22);status.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;status.ForeColor=Muted;status.Font=new Font("Segoe UI",9);footer.Controls.Add(status);progress.SetBounds(980,12,165,14);progress.Anchor=AnchorStyles.Right|AnchorStyles.Top;progress.Style=ProgressBarStyle.Marquee;progress.Visible=false;footer.Controls.Add(progress);
         source.BackColor=Card;source.ForeColor=ForeColor;source.BorderStyle=BorderStyle.FixedSingle;source.Font=Font;log.ReadOnly=true;log.BackColor=Rail;log.ForeColor=ForeColor;log.BorderStyle=BorderStyle.None;log.Font=new Font("Consolas",9);
-        play.Click+=(s,e)=>{if(Ready())PlayGame();else ShowInstall();};Append("ReDUB launcher ready. Setup, checks and build output appear here.");Append("Installation folder: "+root);ShowHome();refresh.Interval=1500;refresh.Tick+=(s,e)=>{UpdateStatus();RefreshOnline(false);};refresh.Start();UpdateStatus();if(ShowOnlinePage)ShowOnline();if(InviteRoom>=0){try{SavePreference("MC3_ROAM_ROOM",InviteRoom.ToString());Append("Invite: room "+InviteRoom+" saved.");}catch{}ShowOnline();if(Ready())PlayGame();}FormClosing+=(s,e)=>{
+        play.Click+=(s,e)=>{if(Ready())PlayGame();else ShowInstall();};Append("ReDUB launcher ready. Setup, checks and build output appear here.");Append("Installation folder: "+root);ShowHome();refresh.Interval=1500;refresh.Tick+=(s,e)=>{UpdateStatus();RefreshOnline(false);};refresh.Start();UpdateStatus();if(ShowOnlinePage)ShowOnline();if(InviteOnStart)InviteFriends();if(JoinOnStart>=0)OnlineAction("join","{\"room\":"+JoinOnStart.ToString()+"}");if(InviteRoom>=0){try{SavePreference("MC3_ROAM_ROOM",InviteRoom.ToString());Append("Invite: room "+InviteRoom+" saved.");}catch{}ShowOnline();if(Ready())PlayGame();}FormClosing+=(s,e)=>{
             if(job!=null&&!job.HasExited){MessageBox.Show(this,"Setup is still running. Leave ReDUB open until it finishes.","Setup in progress");e.Cancel=true;return;}
             if(!working)return;
             if(closeAfterImport){e.Cancel=true;return;}
@@ -191,10 +191,13 @@ public sealed class Launcher : Form {
     /* ---- Online: the shared page, hosted in this window ----------------- */
     WebBrowser onlineView;
     OnlineShell onlineShell;
+    string pendingNotice;
     int onlinePolling,onlineBestRoom=-1,onlineBestPlayers;
     DateTime onlineNextPoll=DateTime.MinValue;
     static int InviteRoom=-1;
     static bool ShowOnlinePage;
+    static bool InviteOnStart;
+    static int JoinOnStart=-1;
 
     string OnlineHost(){string h=ReadSetting("MC3_ROAM_JOIN","");return h.Length>0?h:"162.35.56.66";}
     int OnlinePort(){int p;if(int.TryParse(ReadSetting("MC3_ROAM_HUB_PORT","47210"),out p)&&p>0&&p<65536)return p;return 47210;}
@@ -229,6 +232,9 @@ public sealed class Launcher : Form {
         onlineView.Dock=DockStyle.Fill;
         onlineShell=new OnlineShell(this);
         onlineView.ObjectForScripting=onlineShell;
+        /* A notice raised before the page finishes loading would be lost:
+         * keep it and show it as soon as the document completes. */
+        onlineView.DocumentCompleted+=(s,e)=>{ if(pendingNotice!=null){string t=pendingNotice;pendingNotice=null;PushNotice(t);} };
         string pagePath=Path.Combine(root,@"ui\online.html");
         if(File.Exists(pagePath))onlineView.Url=new Uri(pagePath);
         else onlineView.DocumentText="<html><body style='background:#080D1A;color:#EBEFF7;font-family:Segoe UI'><p>ui\\online.html is missing from this install.</p></body></html>";
@@ -296,6 +302,7 @@ public sealed class Launcher : Form {
         s.Append(",\"playerName\":").Append(Json(ReadSetting("MC3_ROAM_NAME","")));
         s.Append(",\"rooms\":").Append(rj);
         s.Append(",\"roster\":").Append(pj);
+        s.Append(",\"rosterOk\":").Append(roster!=null&&roster.StartsWith("MC3PLAYERS")?"true":"false");
         if(error!=null)s.Append(",\"error\":").Append(Json(error));
         s.Append('}');
         PushOnline(s.ToString());
@@ -308,6 +315,15 @@ public sealed class Launcher : Form {
         try{
             if(onlineView.Document==null||onlineView.ReadyState!=WebBrowserReadyState.Complete)return;
             onlineView.Document.InvokeScript("redubApply",new object[]{json});
+        }catch{}
+    }
+    void PushNotice(string text){
+        pendingNotice=text;
+        if(page!="Online"||onlineView==null)return;
+        try{
+            if(onlineView.Document==null||onlineView.ReadyState!=WebBrowserReadyState.Complete)return;
+            onlineView.Document.InvokeScript("redubNotice",new object[]{text});
+            pendingNotice=null;
         }catch{}
     }
     internal void OnlineAction(string action,string json){
@@ -366,7 +382,10 @@ public sealed class Launcher : Form {
         }
         string link="redub://room/"+room.ToString();
         string text="ReDUB - join my race in room "+room.ToString()+"\r\n"+link+"\r\n(In ReDUB: Online > Join a friend > "+room.ToString()+")";
-        try{Clipboard.SetText(text);Append("Invite copied for room "+room.ToString()+".");}catch(Exception x){MessageBox.Show(this,x.Message,"Clipboard");}
+        bool copied=false;
+        try{Clipboard.SetText(text);copied=true;Append("Invite copied for room "+room.ToString()+".");}
+        catch(Exception x){Append("Clipboard failed: "+x.Message);}
+        PushNotice((copied?"Invite copied":"Could not copy the invite - here it is")+" for room "+room.ToString()+"\r\n\r\n"+text);
         if(GameRunning())MessageBox.Show(this,"Room "+room.ToString()+" is saved. Close and reopen the game so it joins that room, then send the invite.","Invite friends");
         RefreshOnline(true);
     }
@@ -676,6 +695,8 @@ public sealed class Launcher : Form {
         RegisterInviteScheme();
         if(args.Length>0)InviteRoom=ParseInvite(args[0]);
         if(args.Length>0&&args[0].ToLowerInvariant()=="--online")ShowOnlinePage=true;
+        if(args.Length>0&&args[0].ToLowerInvariant()=="--invite"){ShowOnlinePage=true;InviteOnStart=true;}
+        if(args.Length>1&&args[0].ToLowerInvariant()=="--join"){int r;if(int.TryParse(args[1],out r)&&r>=0&&r<=255){ShowOnlinePage=true;JoinOnStart=r;}}
         string startupError=null;
         if(ShouldBypass(BypassEnabled(root),args,(Control.ModifierKeys&Keys.Shift)!=0,InstallationReady(root))){try{StartDirect(root);return;}catch(Exception ex){startupError="Direct launch failed: "+ex.Message;}}
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);var app=new Launcher(root);if(startupError!=null)app.Append(startupError);Application.Run(app);
