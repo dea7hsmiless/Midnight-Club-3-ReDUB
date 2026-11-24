@@ -121,6 +121,7 @@
   </p>
 
   <div id="notice" class="notice" style="display:none"></div>
+  <div id="bridge" class="hint" style="opacity:.55">bridge: ?</div>
 </div>
 
 <script>
@@ -134,21 +135,30 @@
   /* ---- shell adapters -------------------------------------------------- */
 
   function detect() {
-    if (window.external && window.external.redubCall) {
-      return function (action, data) {
-        window.external.redubCall(action, JSON.stringify(data || {}));
-      };
-    }
-    if (window.ReDUBAndroid && window.ReDUBAndroid.call) {
-      return function (action, data) {
-        window.ReDUBAndroid.call(action, JSON.stringify(data || {}));
-      };
-    }
-    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.redub) {
-      return function (action, data) {
-        window.webkit.messageHandlers.redub.postMessage({ action: action, data: data || {} });
-      };
-    }
+    /* IE throws when an unknown property is read on the window.external host
+     * object, so every probe is inside try/catch; otherwise detection kills
+     * the rest of the script and every button dies with it. */
+    try {
+      if (window.external) {
+        return function (action, data) {
+          try { window.external.redubCall(action, JSON.stringify(data || {})); } catch (e) { }
+        };
+      }
+    } catch (e) { }
+    try {
+      if (window.ReDUBAndroid && window.ReDUBAndroid.call) {
+        return function (action, data) {
+          window.ReDUBAndroid.call(action, JSON.stringify(data || {}));
+        };
+      }
+    } catch (e) { }
+    try {
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.redub) {
+        return function (action, data) {
+          window.webkit.messageHandlers.redub.postMessage({ action: action, data: data || {} });
+        };
+      }
+    } catch (e) { }
     return null;
   }
 
@@ -273,6 +283,11 @@
   /* ---- start ----------------------------------------------------------- */
 
   shell = detect();
+  var bridgeProbe = el("bridge");
+  if (bridgeProbe) {
+    bridgeProbe.innerHTML = "bridge: " + (shell ? "connected" : "missing") +
+      (window.external ? " | external present" : " | external absent");
+  }
   if (!shell) {
     text("server", '<span class="muted">Open this page from the ReDUB launcher.</span>');
     text("names", "No launcher connected.");

@@ -327,16 +327,28 @@ public sealed class Launcher : Form {
         }catch{}
     }
     internal void OnlineAction(string action,string json){
+        OnlineLog("action "+action+" "+json);
         try{
             if(action=="refresh"){RefreshOnline(true);return;}
             if(action=="join"){
                 int room=JsonRoom(json);
+                OnlineLog("join parsed room="+room);
                 if(room<0)MessageBox.Show(this,"Paste the invite link or type the room number (0-255).","Join a friend");
                 else JoinRoom(room);
                 return;
             }
             if(action=="invite"){InviteFriends();return;}
-        }catch(Exception x){Append("Online: "+x.Message);}
+        }catch(Exception x){OnlineLog("action failed: "+x);Append("Online: "+x.Message);}
+    }
+    /* A file, because the footer is behind the page: when a button "does
+     * nothing", this says whether the page called the shell at all. */
+    void OnlineLog(string text){
+        try{
+            string dir=Path.Combine(root,@"work-remix\logs");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir,"launcher-online.log"),
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ")+text+Environment.NewLine);
+        }catch{}
     }
     static int JsonRoom(string json){
         if(json==null)return -1;
@@ -366,6 +378,7 @@ public sealed class Launcher : Form {
 
     void JoinRoom(int room){
         if(room<0||room>255)return;
+        OnlineLog("JoinRoom "+room+" running="+GameRunning()+" ready="+Ready());
         if(GameRunning()){
             PushNotice("Room "+room+" is saved.\r\nThe game is running and reads the room only at startup: close it and press Play to join room "+room+".");
             MessageBox.Show(this,"Close the game first: it reads the room number when it starts.","Game is running");
@@ -373,11 +386,14 @@ public sealed class Launcher : Form {
         }
         try{
             SavePreference("MC3_ROAM_ROOM",room.ToString());
+            OnlineLog("room saved, starting the game");
             Append("Room "+room+" saved. Starting the game.");
             PushNotice("Room "+room+" saved. Starting the game...\r\nFriends who join room "+room+" meet you there.");
             PlayGame();
+            OnlineLog("PlayGame returned, running="+GameRunning());
             RefreshOnline(true);
         }catch(Exception x){
+            OnlineLog("join failed: "+x);
             PushNotice("Could not join room "+room+": "+x.Message);
             MessageBox.Show(this,x.Message,"Join a friend");
         }
