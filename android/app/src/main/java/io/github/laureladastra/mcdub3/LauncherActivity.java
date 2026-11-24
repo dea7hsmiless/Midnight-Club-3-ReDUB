@@ -965,6 +965,17 @@ public class LauncherActivity extends Activity {
         onlineView = w;
         pane.addView(w, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        /* The page is a full screen, not a document inside the scrolling
+         * pane: match the viewport so its buttons are not cut off. */
+        w.post(new Runnable() {
+            public void run() {
+                View scroll = (View) pane.getParent();
+                int h = scroll == null ? 0 : scroll.getHeight();
+                if (h > 0)
+                    onlineView.setLayoutParams(new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, h));
+            }
+        });
         w.loadUrl("file:///android_asset/ui/online.html");
         refreshOnline();
         onlineTicker.removeCallbacksAndMessages(null);

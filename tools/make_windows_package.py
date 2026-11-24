@@ -93,12 +93,19 @@ def main(argv: list[str]) -> int:
         out.unlink()
 
     arcroot = "work-remix/build-windows-x86_64/dist"
+    # The launcher's Online page is shared with the other platforms and read
+    # from ui/ beside the executable, so it ships with the launcher files.
+    shared = [p for p in sorted((ROOT / "ui").glob("*")) if p.is_file()]
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for name in LAUNCHER:
             src = ROOT / name
             info = zipfile.ZipInfo.from_file(src, name)
             info.compress_type = zipfile.ZIP_DEFLATED
             z.writestr(info, src.read_bytes())
+        for p in shared:
+            info = zipfile.ZipInfo.from_file(p, f"ui/{p.name}")
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, p.read_bytes())
         for p in files:
             info = zipfile.ZipInfo.from_file(p, f"{arcroot}/{p.name}")
             info.compress_type = zipfile.ZIP_DEFLATED

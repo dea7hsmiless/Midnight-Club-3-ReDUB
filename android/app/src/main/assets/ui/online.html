@@ -64,6 +64,21 @@
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 4px;
          background: #54D2A5; margin-right: 8px; vertical-align: middle; }
   .dot.idle { background: #5A6B8A; }
+
+  /* Short screens (phones held sideways, small windows): the same content,
+   * packed so the controls stay above the fold. */
+  @media (max-height: 560px) {
+    #wrap { padding: 12px 14px 18px 14px; }
+    h1 { font-size: 18px; margin-bottom: 2px; }
+    .sub { display: none; }
+    .card { padding: 8px 11px; margin-bottom: 8px; border-radius: 8px; }
+    .label { font-size: 10px; }
+    .big { font-size: 14px; }
+    .names div { padding: 2px 0; }
+    .controls { margin-top: 8px; }
+    input[type=text], button { padding: 8px 12px; font-size: 13px; }
+    .hint { display: none; }
+  }
 </style>
 </head>
 <body>
