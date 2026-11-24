@@ -5,6 +5,8 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -64,12 +66,12 @@ public sealed class Launcher : Form {
         var rail=new Panel {Dock=DockStyle.Fill,BackColor=Rail,Margin=Padding.Empty,Padding=new Padding(16)};shell.Controls.Add(rail,0,0);var mark=BrandPanel.LoadArt("logo.png");
         if(mark!=null){var brand=new PictureBox {Image=mark,SizeMode=PictureBoxSizeMode.Zoom,BackColor=Rail,AccessibleName="Midnight Club 3 ReDUB logo",TabStop=false};brand.SetBounds(16,24,188,84);brand.Disposed+=(sender,e)=>mark.Dispose();rail.Controls.Add(brand);}
         else{var brand=LabelAt("ReDUB",25,true);brand.SetBounds(16,30,188,50);brand.ForeColor=Color.FromArgb(245,80,96);rail.Controls.Add(brand);}
-        Nav(rail,"Game",16,118,()=>ShowHome());Nav(rail,"Install",16,180,()=>ShowInstall());Nav(rail,"Settings",16,242,()=>ShowSettings(category));
+        Nav(rail,"Game",16,118,()=>ShowHome());Nav(rail,"Online",16,180,()=>ShowOnline());Nav(rail,"Install",16,242,()=>ShowInstall());Nav(rail,"Settings",16,304,()=>ShowSettings(category));
         var bottom=new Panel {Dock=DockStyle.Bottom,Height=120};rail.Controls.Add(bottom);Nav(bottom,"Support",0,4,()=>ShowSupport());Nav(bottom,"About",0,62,()=>ShowAbout());
         content.Dock=DockStyle.Fill;content.Margin=Padding.Empty;shell.Controls.Add(content,1,0);
         var footer=new Panel {Dock=DockStyle.Fill,BackColor=Color.FromArgb(14,22,39),Margin=Padding.Empty};shell.Controls.Add(footer,0,1);shell.SetColumnSpan(footer,2);status.SetBounds(20,9,930,22);status.Anchor=AnchorStyles.Left|AnchorStyles.Top|AnchorStyles.Right;status.ForeColor=Muted;status.Font=new Font("Segoe UI",9);footer.Controls.Add(status);progress.SetBounds(980,12,165,14);progress.Anchor=AnchorStyles.Right|AnchorStyles.Top;progress.Style=ProgressBarStyle.Marquee;progress.Visible=false;footer.Controls.Add(progress);
         source.BackColor=Card;source.ForeColor=ForeColor;source.BorderStyle=BorderStyle.FixedSingle;source.Font=Font;log.ReadOnly=true;log.BackColor=Rail;log.ForeColor=ForeColor;log.BorderStyle=BorderStyle.None;log.Font=new Font("Consolas",9);
-        play.Click+=(s,e)=>{if(Ready())PlayGame();else ShowInstall();};Append("ReDUB launcher ready. Setup, checks and build output appear here.");Append("Installation folder: "+root);ShowHome();refresh.Interval=1500;refresh.Tick+=(s,e)=>UpdateStatus();refresh.Start();UpdateStatus();FormClosing+=(s,e)=>{
+        play.Click+=(s,e)=>{if(Ready())PlayGame();else ShowInstall();};Append("ReDUB launcher ready. Setup, checks and build output appear here.");Append("Installation folder: "+root);ShowHome();refresh.Interval=1500;refresh.Tick+=(s,e)=>{UpdateStatus();RefreshOnline(false);};refresh.Start();UpdateStatus();if(ShowOnlinePage)ShowOnline();if(InviteRoom>=0){try{SavePreference("MC3_ROAM_ROOM",InviteRoom.ToString());Append("Invite: room "+InviteRoom+" saved.");}catch{}ShowOnline();if(Ready())PlayGame();}FormClosing+=(s,e)=>{
             if(job!=null&&!job.HasExited){MessageBox.Show(this,"Setup is still running. Leave ReDUB open until it finishes.","Setup in progress");e.Cancel=true;return;}
             if(!working)return;
             if(closeAfterImport){e.Cancel=true;return;}
@@ -186,6 +188,173 @@ public sealed class Launcher : Form {
     string SettingsPath(){string dir=RendererDist(root),selected=Path.Combine(dir,"mcdub3remix_env.txt");if(!File.Exists(selected)){string example=Path.Combine(dir,"mcdub3remix_env.example.txt");if(File.Exists(example)){try{File.Copy(example,selected);}catch{}}}if(File.Exists(selected))return selected;return PathAt("work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt");}
     public string ReadSetting(string key,string fallback){if(!File.Exists(SettingsPath()))return fallback;foreach(var raw in File.ReadAllLines(SettingsPath())){string line=raw.Trim();if(line.StartsWith(key+"=",StringComparison.Ordinal))return line.Substring(key.Length+1).Trim();}return fallback;}
     public void SavePreference(string key,string value){string path=SettingsPath();if(!File.Exists(path))throw new IOException("Install the game before saving settings.");var edits=new Dictionary<string,string>();edits[key]=value;if(key=="MC3_GRAPHICS_PRESET"&&value!="0"){int n=int.Parse(value);edits["RECOMP_GL_SCALE"]=n==1?"1.5":n==3?"3":"2";edits["RECOMP_GL_FXAA"]="1";edits["RECOMP_GL_ANISO"]=n==1?"4":"16";edits["RECOMP_GL_SHARPEN"]=n==1?"0.25":"0.5";edits["RECOMP_GL_VSYNC"]=n==3?"1":"0";}else if(new[]{"RECOMP_GL_SCALE","RECOMP_GL_FXAA","RECOMP_GL_ANISO","RECOMP_GL_SHARPEN","RECOMP_GL_VSYNC"}.Contains(key))edits["MC3_GRAPHICS_PRESET"]="0";var lines=File.ReadAllLines(path).Where(line=>!edits.Keys.Any(k=>line.TrimStart().StartsWith(k+"=",StringComparison.Ordinal))).ToList();foreach(var e in edits)lines.Add(e.Key+"="+e.Value);string backup=path+".launcher-backup";if(!File.Exists(backup))File.Copy(path,backup);string tmp=path+".launcher-tmp";File.WriteAllLines(tmp,lines,new UTF8Encoding(false));File.Replace(tmp,path,null);Append("Saved "+key+". Applies next launch.");}
+    /* ---- Online: live relay status, rooms, invites ---------------------- */
+    Label onlineServer,onlineYourRoom,onlinePlayerList,onlineRoomList,onlineHint;
+    TextBox onlineJoinBox;
+    int onlinePolling,onlineBestRoom=-1,onlineBestPlayers;
+    DateTime onlineNextPoll=DateTime.MinValue;
+    static int InviteRoom=-1;
+    static bool ShowOnlinePage;
+
+    string OnlineHost(){string h=ReadSetting("MC3_ROAM_JOIN","");return h.Length>0?h:"162.35.56.66";}
+    int OnlinePort(){int p;if(int.TryParse(ReadSetting("MC3_ROAM_HUB_PORT","47210"),out p)&&p>0&&p<65536)return p;return 47210;}
+    int OnlineRoom(){int r;if(int.TryParse(ReadSetting("MC3_ROAM_ROOM","0"),out r)&&r>=0&&r<=255)return r;return 0;}
+
+    static string OnlineQuery(string host,int port,string query,int timeoutMs){
+        using(var u=new UdpClient()){
+            u.Client.ReceiveTimeout=timeoutMs;
+            byte[] send=Encoding.ASCII.GetBytes(query);
+            u.Send(send,send.Length,host,port);
+            IPEndPoint from=new IPEndPoint(IPAddress.Any,0);
+            byte[] data=u.Receive(ref from);
+            return Encoding.ASCII.GetString(data);
+        }
+    }
+    static string OnlineStatusName(int st){
+        switch(st){case 0:return "in menus";case 1:return "loading";case 2:return "on the road";
+                   case 3:return "in an event";case 4:return "in a shop";case 5:return "paused";default:return "online";}
+    }
+
+    void ShowOnline(){
+        Panel p=Standard("Online","Play together","Rooms keep separate matches apart; eight players per room. The game reads the room number when it starts.");
+        onlineServer=LabelAt("Server: checking...",10,true);onlineServer.SetBounds(36,142,Math.Max(520,content.Width-100),24);p.Controls.Add(onlineServer);
+        onlineYourRoom=LabelAt("",10,false);onlineYourRoom.SetBounds(36,172,Math.Max(520,content.Width-100),24);p.Controls.Add(onlineYourRoom);
+        onlinePlayerList=LabelAt("",9,false);onlinePlayerList.ForeColor=Muted;onlinePlayerList.SetBounds(36,208,Math.Max(520,content.Width-100),96);p.Controls.Add(onlinePlayerList);
+        onlineRoomList=LabelAt("",10,false);onlineRoomList.SetBounds(36,308,Math.Max(520,content.Width-100),170);p.Controls.Add(onlineRoomList);
+        onlineJoinBox=new TextBox {BackColor=Card,ForeColor=ForeColor,BorderStyle=BorderStyle.FixedSingle,Font=Font};
+        onlineJoinBox.SetBounds(36,505,250,28);onlineJoinBox.AccessibleName="Invite code or link";p.Controls.Add(onlineJoinBox);
+        ButtonAt(p,"Join a friend",298,499,140,()=>JoinFromBox(),true);
+        ButtonAt(p,"Invite friends",450,499,150,()=>InviteFriends());
+        ButtonAt(p,"Refresh",612,499,100,()=>RefreshOnline(true));
+        onlineHint=LabelAt("",9,false);onlineHint.ForeColor=Muted;onlineHint.SetBounds(36,548,Math.Max(520,content.Width-100),80);p.Controls.Add(onlineHint);
+        RefreshOnline(true);
+    }
+
+    void RefreshOnline(bool force){
+        if(page!="Online"||onlineServer==null)return;
+        if(!force&&DateTime.UtcNow<onlineNextPoll)return;
+        onlineNextPoll=DateTime.UtcNow.AddSeconds(3);
+        if(Interlocked.Exchange(ref onlinePolling,1)==1)return;
+        string host=OnlineHost();int port=OnlinePort();
+        Thread t=new Thread(()=>{
+            string rooms=null,roster=null,error=null;int ms=-1;
+            try{Stopwatch sw=Stopwatch.StartNew();rooms=OnlineQuery(host,port,"MC3Q",600);sw.Stop();ms=(int)sw.ElapsedMilliseconds;}
+            catch(Exception x){error=x.Message;}
+            if(error==null){try{roster=OnlineQuery(host,port,"MC3P",600);}catch{}}
+            try{BeginInvoke(new Action(()=>ApplyOnline(rooms,roster,error,ms,host,port)));}catch{}
+            Interlocked.Exchange(ref onlinePolling,0);
+        });
+        t.IsBackground=true;t.Start();
+    }
+
+    void ApplyOnline(string rooms,string roster,string error,int ms,string host,int port){
+        if(page!="Online"||onlineServer==null)return;
+        if(error!=null){
+            onlineServer.Text="Server "+host+":"+port+" - no answer";
+            onlineServer.ForeColor=Color.FromArgb(245,120,120);
+        } else {
+            onlineServer.Text="Server "+host+":"+port+" - online, "+ms+" ms";
+            onlineServer.ForeColor=Color.FromArgb(84,210,165);
+        }
+        int mine=OnlineRoom();
+        string name=ReadSetting("MC3_ROAM_NAME","");
+        onlineYourRoom.Text=(mine==0?"Your room: shared (anyone online)":"Your room: "+mine)+
+                            (name.Length>0?"    Player: "+name:"");
+        onlineBestRoom=-1;onlineBestPlayers=0;
+        StringBuilder sb=new StringBuilder();
+        if(rooms!=null&&rooms.StartsWith("MC3ROOMS")){
+            string[] parts=rooms.Split(' ');
+            for(int i=3;i<parts.Length;i++){
+                string[] kv=parts[i].Split(':');
+                int g,n;
+                if(kv.Length==2&&int.TryParse(kv[0],out g)&&int.TryParse(kv[1],out n)){
+                    if(n>onlineBestPlayers&&n<8){onlineBestPlayers=n;onlineBestRoom=g;}
+                    sb.AppendLine("Room "+g+"    "+n+"/8"+(g==mine?"    (you)":""));
+                }
+            }
+        }
+        if(sb.Length==0)sb.AppendLine(error!=null?"No rooms: the server did not answer.":"No rooms have players right now.");
+        onlineRoomList.Text=sb.ToString().TrimEnd();
+        StringBuilder rb=new StringBuilder();
+        if(roster!=null&&roster.StartsWith("MC3PLAYERS")){
+            string[] lines=roster.Replace("\r","").Split('\n');
+            for(int i=1;i<lines.Length;i++){
+                string[] f=lines[i].Split('|');
+                int st;
+                if(f.Length>=3&&int.TryParse(f[1],out st))rb.AppendLine("Room "+f[0]+"    "+OnlineStatusName(st)+"    "+f[2]);
+            }
+        }
+        onlinePlayerList.Text=rb.Length==0?"Nobody else is online right now.":rb.ToString().TrimEnd();
+        onlineHint.Text="Invite works with a room number (1-255). The game reads it when it starts, so close the game before joining a new room. Room 0 means \"anyone online\" (auto-matched).";
+    }
+
+    void JoinRoom(int room){
+        if(room<0||room>255)return;
+        if(GameRunning()){MessageBox.Show(this,"Close the game first: it reads the room number when it starts.","Game is running");return;}
+        try{SavePreference("MC3_ROAM_ROOM",room.ToString());Append("Room "+room+" saved. Starting the game.");PlayGame();ShowOnline();}
+        catch(Exception x){MessageBox.Show(this,x.Message,"Join a friend");}
+    }
+    void JoinFromBox(){
+        int room=ParseInvite(onlineJoinBox==null?"":onlineJoinBox.Text);
+        if(room<0){MessageBox.Show(this,"Paste the invite link or type the room number (0-255).","Join a friend");return;}
+        JoinRoom(room);
+    }
+    void InviteFriends(){
+        int room=OnlineRoom();
+        if(room==0){
+            /* The shared room is fine for "just play", but an invite needs a
+             * number both sides keep; pick a free one and say so. */
+            room=PickPrivateRoom();
+            if(!GameRunning()){
+                try{SavePreference("MC3_ROAM_ROOM",room.ToString());}catch(Exception x){MessageBox.Show(this,x.Message,"Invite friends");return;}
+            }
+        }
+        string link="redub://room/"+room.ToString();
+        string text="ReDUB - join my race in room "+room.ToString()+"\r\n"+link+"\r\n(In ReDUB: Online > Join a friend > "+room.ToString()+")";
+        try{Clipboard.SetText(text);Append("Invite copied for room "+room.ToString()+".");}catch(Exception x){MessageBox.Show(this,x.Message,"Clipboard");}
+        if(GameRunning())MessageBox.Show(this,"Room "+room.ToString()+" is saved. Close and reopen the game so it joins that room, then send the invite.","Invite friends");
+        if(page=="Online")ShowOnline();
+    }
+    int PickPrivateRoom(){
+        HashSet<int> full=new HashSet<int>();
+        string rooms=null;
+        try{rooms=OnlineQuery(OnlineHost(),OnlinePort(),"MC3Q",400);}catch{}
+        if(rooms!=null&&rooms.StartsWith("MC3ROOMS")){
+            string[] parts=rooms.Split(' ');
+            for(int i=3;i<parts.Length;i++){
+                string[] kv=parts[i].Split(':');
+                int g,n;
+                if(kv.Length==2&&int.TryParse(kv[0],out g)&&int.TryParse(kv[1],out n)&&n>=8)full.Add(g);
+            }
+        }
+        int start=new Random().Next(1,250);
+        for(int k=0;k<255;k++){
+            int r=((start+k)%255)+1;
+            if(!full.Contains(r))return r;
+        }
+        return 1;
+    }
+    static int ParseInvite(string text){
+        if(text==null)return -1;
+        string s=text.Trim();
+        int i=s.IndexOf("room/",StringComparison.OrdinalIgnoreCase);
+        if(i>=0)s=s.Substring(i+5);
+        int room;
+        if(int.TryParse(s,out room)&&room>=0&&room<=255)return room;
+        return -1;
+    }
+    static void RegisterInviteScheme(){
+        try{
+            string exe=Application.ExecutablePath;
+            using(var k=Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Classes\redub")){
+                if(k==null)return;
+                k.SetValue("","URL:ReDUB invite");
+                k.SetValue("URL Protocol","");
+                using(var c=k.CreateSubKey(@"shell\open\command"))if(c!=null)c.SetValue("","\""+exe+"\" \"%1\"");
+            }
+        }catch{}
+    }
+
     void ShowSupport(){var p=Standard("Support","Support & activity","Local setup output. Your game and saves are never uploaded.");ButtonAt(p,"Open log folder",36,140,190,()=>Open("work-remix/logs"));ButtonAt(p,"Check setup",240,140,190,()=>VerifySetup());ButtonAt(p,"Read guide",444,140,190,()=>Open("README.md"));log.SetBounds(36,205,Math.Max(600,content.Width-72),Math.Max(280,content.Height-245));log.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;p.Controls.Add(log);}
     void ShowAbout(){var p=Standard("About","Midnight Club 3: ReDUB","A community edition of the original Xbox DUB Edition Remix.");var copy=LabelAt("Built on mcdub3-nx and xboxrecomp.\n\nNative Port Options, independent HUD quality, PC Music integration,\nand targeted controller, menu and GPU stability fixes.\n\nOriginal 30 FPS simulation\n\nNo game data is included. Use your own supported Xbox Remix disc.\nNot affiliated with Rockstar Games, Take-Two or Microsoft.\n\nLauncher design reference: SafeHouse by FridiNaTor1 and contributors.\nReDUB uses its own implementation and branding.",11,false);copy.SetBounds(38,150,790,330);p.Controls.Add(copy);ButtonAt(p,"Features & credits",36,510,230,()=>Open("README.md"));}
     string PathAt(string p){return Path.Combine(root,p.Replace('/',Path.DirectorySeparatorChar));}
@@ -441,6 +610,9 @@ public sealed class Launcher : Form {
         try{root=ResolveRoot();}catch(Exception ex){MessageBox.Show(ex.Message,"ReDUB setup");return;}
         if(args.Length>0&&args[0]=="--self-test"){if(Quote(@"D:\folder with spaces\")!="\"D:\\folder with spaces\\\\\"")Environment.Exit(2);if(!File.Exists(Path.Combine(root,@".portable\Build.ps1")))Environment.Exit(3);Directory.CreateDirectory(Path.Combine(root,@"work-remix\logs"));File.WriteAllText(Path.Combine(root,@"work-remix\logs\launcher-self-test.log"),"PASS: relative project discovery and Windows argument quoting");return;}
         if(args.Length>0){string command=args[0].ToLowerInvariant();if(command=="--import"||command=="--play"||command=="--check"||command=="--build")Environment.Exit(RunCommand(root,command,args));}
+        RegisterInviteScheme();
+        if(args.Length>0)InviteRoom=ParseInvite(args[0]);
+        if(args.Length>0&&args[0].ToLowerInvariant()=="--online")ShowOnlinePage=true;
         string startupError=null;
         if(ShouldBypass(BypassEnabled(root),args,(Control.ModifierKeys&Keys.Shift)!=0,InstallationReady(root))){try{StartDirect(root);return;}catch(Exception ex){startupError="Direct launch failed: "+ex.Message;}}
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);var app=new Launcher(root);if(startupError!=null)app.Append(startupError);Application.Run(app);
