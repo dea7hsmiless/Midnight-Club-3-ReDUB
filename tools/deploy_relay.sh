@@ -42,17 +42,32 @@ ls -l "$DEST/mc3relay.py"
 systemctl restart "$UNIT"
 sleep 1
 
-python3 - "$PORT" <<'PY'
-import socket, sys
-port = int(sys.argv[1])
+python3 - "$DEST" "$PORT" <<'PY'
+import socket, struct, sys, time
+dest, port = sys.argv[1], int(sys.argv[2])
+sys.path.insert(0, dest)
+import mc3hub as h
+
+def hello(sender, name, room):
+    nb = name.encode("latin-1")
+    payload = (struct.pack("<HBBHHI", 17, 1, 0, port, 1, room)
+               + bytes([len(nb)]) + nb + bytes([0]) + bytes([7]))
+    return h.build(h.T_HELLO, sender, payload, flags=h.FLAG_HELLO_ALL)
+
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.settimeout(3)
+# A player in room 5, so the roster has something to list: testing MC3P on an
+# empty server is what let a crash-on-member bug reach the live one.
+s.sendto(hello(0x5EED0001, "DeployCheck", 5 << 16), ("127.0.0.1", port))
+time.sleep(0.5)
 s.sendto(b"MC3P", ("127.0.0.1", port))
 data, _ = s.recvfrom(2048)
 text = data.decode(errors="replace")
 print("relay answered:", text)
-if not text.startswith("MC3PLAYERS"):
-    raise SystemExit("unexpected answer")
+if not text.startswith("MC3PLAYERS") or "DeployCheck" not in text:
+    raise SystemExit("the roster did not list the test player")
+s.sendto(b"MC3V", ("127.0.0.1", port))
+print("version:", s.recvfrom(256)[0].decode(errors="replace"))
 PY
 
 echo "relay is updated and answering MC3P"
