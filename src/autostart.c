@@ -232,6 +232,9 @@ int mc3_autostart_on(void)
 int mc3_autostart_at_network(void);
 
 static int s_stage = ST_BOOT;
+static int s_seen_main;             /* the main menu was reached (its list
+                                     * reports 0 items, so the hook cannot
+                                     * detect it from the list fields) */
 static uint32_t s_stage_ms, s_press_ms, s_release_ms;
 static unsigned s_stage_frames, s_press_frames, s_release_frames;
 static int s_holding, s_presses, s_downs;
@@ -240,6 +243,11 @@ static int s_nav;                   /* Downs taken on the current sub-page */
 int mc3_autostart_at_network(void)
 {
     return mc3_autostart_on() && s_stage == ST_NETWORK;
+}
+
+int mc3_autostart_seen_main(void)
+{
+    return mc3_autostart_on() && s_seen_main;
 }
 
 /* Seconds since the walker started, as "123.4s ". Boot time is the thing
@@ -306,7 +314,10 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
     if (s_stage == ST_DONE || !mc3_autostart_on())
         return;
     now = now_ms();
-    if (usb_gamepad_host_input(0)) {
+    /* A real pad's drift normally yields the walk to the player. Automated
+     * race tests set MC3_AUTOSTART_IGNORE_INPUT=1 so a plugged-in controller
+     * cannot abort the walk. */
+    if (!getenv("MC3_AUTOSTART_IGNORE_INPUT") && usb_gamepad_host_input(0)) {
         finish("stopped: input from you");
         return;
     }
@@ -367,6 +378,8 @@ void mc3_autostart_frame(int in_game, int downs_to_arcade)
         to = ST_PROFILE;
     if (to != s_stage) {
         s_stage = to;
+        if (to == ST_MAIN)
+            s_seen_main = 1;         /* read by the MC3_OPEN_ONLINE hook */
         s_stage_ms = now;
         s_stage_frames = 0;
         s_presses = 0;

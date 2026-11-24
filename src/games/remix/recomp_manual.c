@@ -3124,18 +3124,22 @@ static void free_roam_setup_enter(void);
 void sub_00180160(void)
 {
     extern int online_session_wanted(void);
-    extern void online_enter(const char *why);
-    /* Without online play this stays the game's own callback (the live
-     * service screen, dead here). With it, the item means Online Cruise
-     * whenever the player can actually play online -- a session is not
-     * required, the session only adds the money/unlocks sandbox on top. */
+    /* Free Roam is deferred to 0.2.6. The Online screen is a fixed two-slot
+     * movie, so the item cannot be removed from it; it stays visible and does
+     * nothing. Its guest return address is still consumed, or the caller's
+     * frame shifts and the front end stalls (the 0.2.5 freeze). */
     if (!online_session_wanted() && !online_play_enabled()) {
         sub_00180160_gen();
         return;
     }
-    if (online_session_wanted())
-        online_enter("networking screen, Online Cruise");
-    free_roam_setup_enter();
+    /* MC3_FREE_ROAM_TEST=1 keeps the deferred page reachable for 0.2.6 work.
+     * It is not offered to players in 0.2.5. */
+    if (getenv("MC3_FREE_ROAM_TEST")) {
+        free_roam_setup_enter();
+        g_esp += 4;
+        return;
+    }
+    fprintf(stderr, "[ONLINE] Free Roam is not in 0.2.5 (deferred to 0.2.6)\n");
     g_esp += 4;  /* guest RET: this callback has no stack arguments */
 }
 /** "Online" keeps the Networking item's place
@@ -3180,6 +3184,8 @@ static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
  * spaces, so the Xbox Live sign-in status under the main menu disappears
  * without the layout noticing. */
 static const char *const online_label_from[4] = { "Networking",  "Xbox Live", "Xbox System Link", "Not Signed In" };
+/* Free Roam is deferred to 0.2.6: sub_00180160 is inert. The label stays so
+ * the fixed two-slot movie keeps its layout (blanking it broke the panel). */
 static const char *const online_label_to[4]   = { "Online",      "Free Roam", "Online Race", "" };
 static const char *const online_label_short[4] = { "Online",     "Free Roam", "Online Race", "" };
 static struct { uint32_t va; } online_label[4][8];
@@ -3410,10 +3416,11 @@ void online_menu_patch(void)
         }
         if (wanted && !opened) {
             /* Wait for the menu to be built and its opening press released: a
-             * held A would activate the Online screen's first item. The label
-             * strings are interned long before the menu is shown, so also wait
-             * for the main menu itself, or the screen opens over the profile. */
-            if (online_labels_ready && online_at_main_menu() && ++idle >= 60) {
+             * held A would activate the Online screen's first item. The main
+             * menu's list reports 0 items, so online_at_main_menu() cannot see
+             * it; ask the autostart walker, which knows the screen it reached. */
+            extern int mc3_autostart_seen_main(void);
+            if (online_labels_ready && mc3_autostart_seen_main() && ++idle >= 60) {
                 opened = 1;
                 usb_gamepad_set_held(0, 0, 0);
                 online_frame_call(sub_0018C5A0);
@@ -4619,31 +4626,31 @@ static void port_build(void)
      * 15 settings + BACK at capacity 16. PHONE MUSIC (id 9) and SONG DISPLAY
      * (id 11) are the media rows. Per-app volume does not exist on Android,
      * so id 10 (PC MUSIC VOLUME) is not offered here. */
-    /* Two slots of every platform's list are kept for the online rows below
-     * (ROOM and FIND A ROOM), so each order here is two shorter than the page
-     * has room for: 16 slots, less BACK, less those two. */
+    /* Free Roam (and its ROOM / FIND A ROOM rows) is deferred to 0.2.6, so the
+     * page has two spare slots; Android keeps its 13 settings, desktop uses
+     * the room for SHARPENING and HUD TEXTURES again. */
 #if defined(__ANDROID__)
-    /* 13 settings + ROOM + FIND A ROOM + BACK = 16. The always-fullscreen
-     * status, the graphics preset and sharpening give up their slots to the
-     * phone music, controller vibration and the two online rows. */
+    /* 13 settings + BACK = 14 of the page's 16 slots. The always-fullscreen
+     * status, the graphics preset and sharpening gave up their slots to the
+     * phone music and controller vibration. */
     const int order[]={1,2,3,4,7,8,9,10,11,12,13,14,15};
     int settings=13;
 #elif defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
     /* iOS: the launcher's touch controls on the main page, the fine-tuning on
      * an Advanced page. 15 opens Advanced, and ids 17..21 get their own event
      * range below. */
-    const int main_order[]={0,1,8,9,10,11,2,12,3,13,15};
+    const int main_order[]={0,1,8,9,10,11,2,12,3,13,15,23};
     const int adv_order[]={5,7,4,6,19,20,21,17,18,22};
     const int *order=port_page?adv_order:main_order;
     /* 15 is "Advanced...", the only row that fires 0x7F0F; without it the
-     * whole advanced page (ids 17..22) was unreachable. */
-    int settings=port_page?10:11;
+     * whole advanced page (ids 17..22) was unreachable. 23 is SHOW FPS. */
+    int settings=port_page?10:12;
 #else
-    /* 13 settings + ROOM + FIND A ROOM + BACK = the page's 16 slots.
-     * SHARPENING and HUD TEXTURES give up their two; both still come from the
-     * settings file (RECOMP_GL_SHARPEN, RECOMP_GL_UI_SCALE). */
-    const int order[]={0,5,2,3,4,13,14,1,16,7,9,11,15};
-    int settings=13;
+    /* 15 settings + BACK = the page's 16 slots. The online room rows are gone
+     * with Free Roam, so SHARPENING (6) and HUD TEXTURES (12) return to the
+     * page. */
+    const int order[]={0,5,2,3,4,6,13,14,1,16,7,9,11,12,15};
+    int settings=15;
 #endif
     port_row_n=0;
     if(free_roam_setup_active && free_roam_nickname_edit) {
@@ -4684,16 +4691,9 @@ static void port_build(void)
         port_rows[i]=port_add(ev,NULL);
         port_row_id[port_row_n++]=i;
     }
-    /* ROOM and FIND A ROOM: their own two rows, paid for by two settings the
-     * orders below leave out. They show the room number, how full it is, and
-     * (Find a Room) which room it would move to. */
-    if (!port_page) {
-        static const int online[2] = { 24, 25 };
-        for (int k = 0; k < 2; k++) {
-            port_rows[online[k]] = port_add(0x7F18u + (uint32_t)k, NULL);
-            port_row_id[port_row_n++] = online[k];
-        }
-    }
+    /* ROOM and FIND A ROOM are Free Roam matchmaking. Free Roam is deferred to
+     * 0.2.6, so they are not offered here; the page keeps two spare slots until
+     * it returns. */
     port_add(0x7F11u,port_page?"BACK TO OPTIONS":"BACK");port_labels();
     /* The page holds 16 rows and the list is a fixed array, so an order that
      * grows past it would silently write over the next page's rows. Say the

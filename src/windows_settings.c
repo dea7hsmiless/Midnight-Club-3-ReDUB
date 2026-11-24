@@ -202,7 +202,7 @@ void windows_port_setting_label(int id,char *out,size_t size)
     if(id==4) snprintf(out,size,"FILTERING: %dX (RESTART)",aniso);
     if(id==5){const char *names[]={"CUSTOM","PERFORMANCE","BALANCED","QUALITY"};snprintf(out,size,"PRESET: %s (RESTART)",names[preset]);}
     if(id==6) snprintf(out,size,"SHARPENING: %d%%",sharp*25);
-    if(id==7) snprintf(out,size,"FPS OVERLAY: %s",overlay?"ON":"OFF");
+    if(id==7) snprintf(out,size,"SHOW FPS: %s",overlay?"ON":"OFF");
     if(id==8) snprintf(out,size,"ASPECT RATIO: %s (RESTART)",shape_names[atomic_load(&display_shape)%3]);
     if(id==9) snprintf(out,size,"PC MUSIC (DRIVING): %s",pc_music?"ON":"OFF");
     if(id==10){int n=windows_media_volume_get();if(n<0)snprintf(out,size,"PC MUSIC VOLUME: AUTO");else snprintf(out,size,"PC MUSIC VOLUME: %d%%",n);}

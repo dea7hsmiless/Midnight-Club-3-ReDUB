@@ -713,7 +713,7 @@ void windows_port_setting_label(int id, char *out, size_t size)
     if (id == 6)
         snprintf(out, size, "SHARPENING: %d%%", s_sharpen * 25);
     if (id == 7)
-        snprintf(out, size, "FPS OVERLAY: %s", s_overlay ? "ON" : "OFF");
+        snprintf(out, size, "SHOW FPS: %s", s_overlay ? "ON" : "OFF");
     if (id == 8)
         snprintf(out, size, "RESTORE GRAPHICS DEFAULTS");
     if (id == 9) {

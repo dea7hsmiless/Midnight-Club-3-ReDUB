@@ -359,6 +359,11 @@ void windows_port_setting_change(int id)
         }
         fprintf(stderr, "[PORT] online %s saved (restart to apply)\n", on ? "off" : "on");
     } return;
+    case 23: {  /* frame rate in the corner; read by the renderer each frame */
+        int n = !atomic_load(&overlay);
+        if (save_env_pair("MC3_FPS_OVERLAY", n ? "1" : "0"))
+            atomic_store(&overlay, n);
+    } return;
     default: return;
     }
 }
@@ -433,6 +438,8 @@ void windows_port_setting_label(int id, char *out, size_t size)
         int on = !(off && off[0] == '0');
         snprintf(out, size, "ONLINE: %s (RESTART)", on ? "ON" : "OFF");
     }
+    if (id == 23)
+        snprintf(out, size, "SHOW FPS: %s", atomic_load(&overlay) ? "ON" : "OFF");
 }
 
 /* nv2a_pb_replay.c expects these from the front end. The front-end cursor

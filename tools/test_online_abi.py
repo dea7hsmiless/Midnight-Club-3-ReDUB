@@ -27,6 +27,7 @@ def main():
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 static uint32_t g_eax,g_ecx,g_edx,g_ebx,g_esi,g_edi,g_esp,g_ebp,g_seh_ebp;
 static uint32_t memory[1024];
 #define MEM32(p) memory[(p)/4]
@@ -52,7 +53,9 @@ int main(void) {
             g_esp=512; online_cruise_pending=0; fallback=0; arcade=0; g_ecx=2;
             sub_00180160();
             assert(g_esp==516);
-            assert(arcade==(wanted||enabled));
+            /* 0.2.5: Free Roam is deferred, so the item does nothing; the
+             * callback still returns its guest frame either way. */
+            assert(arcade==0);
             assert(g_ecx==2);
             assert(fallback==!(wanted||enabled));
         }
