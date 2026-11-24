@@ -482,7 +482,7 @@ static NSString *JsonStr(NSString *s){
 
 - (void)pushOnline:(NSString*)rooms roster:(NSString*)roster ms:(int)ms{
  if(!self.online)return;
- long mine=[self.settings[@"MC3_ROAM_ROOM"] longValue];
+ long mine=[self.settings[@"MC3_ROAM_ROOM"] integerValue];
  NSMutableString *rj=[NSMutableString stringWithString:@"["];
  BOOL first=YES;
  if([rooms hasPrefix:@"MC3ROOMS"]){
@@ -518,7 +518,7 @@ static NSString *JsonStr(NSString *s){
 - (void)onlineAction:(NSString*)action data:(NSDictionary*)data{
  if([action isEqualToString:@"refresh"]){[self onlineRefresh];return;}
  if([action isEqualToString:@"join"]){
-  long room=[data[@"room"] longValue];
+  long room=[data[@"room"] integerValue];
   if(room<0||room>255)return;
   NSMutableDictionary *u=[self.settings mutableCopy];
   u[@"MC3_ROAM_ROOM"]=[NSString stringWithFormat:@"%ld",room];
@@ -529,7 +529,7 @@ static NSString *JsonStr(NSString *s){
   return;
  }
  if([action isEqualToString:@"invite"]){
-  long room=[self.settings[@"MC3_ROAM_ROOM"] longValue];
+  long room=[self.settings[@"MC3_ROAM_ROOM"] integerValue];
   if(room<=0)room=1+(long)arc4random_uniform(254);
   NSMutableDictionary *u=[self.settings mutableCopy];
   u[@"MC3_ROAM_ROOM"]=[NSString stringWithFormat:@"%ld",room];
