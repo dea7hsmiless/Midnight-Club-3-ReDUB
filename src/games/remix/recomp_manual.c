@@ -3186,8 +3186,8 @@ static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
 static const char *const online_label_from[4] = { "Networking",  "Xbox Live", "Xbox System Link", "Not Signed In" };
 /* Free Roam is deferred to 0.2.6: sub_00180160 is inert. The label stays so
  * the fixed two-slot movie keeps its layout (blanking it broke the panel). */
-static const char *const online_label_to[4]   = { "Online",      "Free Roam", "Online Race", "" };
-static const char *const online_label_short[4] = { "Online",     "Free Roam", "Online Race", "" };
+static const char *const online_label_to[4]   = { "Online",      "ROAM: OFF", "Online Race", "" };
+static const char *const online_label_short[4] = { "Online",     "ROAM: OFF", "Online Race", "" };
 static struct { uint32_t va; } online_label[4][8];
 static int online_label_n[4];
 static int online_labels_ready;            /* the main menu's label was renamed */
