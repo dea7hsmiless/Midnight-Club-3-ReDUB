@@ -17,4 +17,8 @@ int  xbox_host_on_main(void);
 /* Something the main thread runs after each event pump (controllers). */
 void xbox_host_main_tick(void (*fn)(void));
 
+/* Arm the quit watchdog before exit(0): if teardown has not finished six
+ * seconds later, dump every thread's stack and leave anyway. Idempotent. */
+void xbox_host_quit_watchdog(void);
+
 #endif

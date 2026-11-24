@@ -7911,8 +7911,10 @@ swap:
                 /* The window's close button, Cmd+Q, the Dock's Quit: the
                  * title has no way out of its own, so leave here (exit
                  * handlers flush the log and any audio dump). */
+                extern void xbox_host_quit_watchdog(void);
                 fprintf(stderr, "  [GL] window closed: quitting\n");
                 fflush(stderr);
+                xbox_host_quit_watchdog();
                 exit(0);
             }
             if(xbox_text_input_event(&e))continue;

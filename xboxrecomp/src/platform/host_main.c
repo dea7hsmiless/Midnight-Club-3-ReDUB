@@ -18,6 +18,57 @@
 
 #include "host_main.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+#else
+#include <time.h>
+#include <unistd.h>
+#endif
+
+/* --- the quit watchdog ----------------------------------------------------
+ * exit(0) runs the atexit handlers: the roam session stops (joining its
+ * network thread), audio and the disc reader take their quit. One of those
+ * waits can miss, and Windows then shows "stopped interacting with Windows
+ * and was closed" five seconds later -- which players report as a crash.
+ * Nothing after the quit matters to the player, so a detached thread waits a
+ * few seconds, says what is stuck, and leaves. Armed from every quit path. */
+static volatile int s_quit_watch_armed;
+
+static void *quit_watchdog(void *arg)
+{
+    (void)arg;
+#ifdef _WIN32
+    Sleep(6000);
+#else
+    {
+        struct timespec ts;
+        ts.tv_sec = 6;
+        ts.tv_nsec = 0;
+        nanosleep(&ts, NULL);
+    }
+#endif
+    fprintf(stderr, "  [HOST] quit did not finish in 6 s: dumping threads and leaving\n");
+    fflush(stderr);
+#ifdef _WIN32
+    {
+        extern void xbox_host_stacks_dump(const char *why);
+        xbox_host_stacks_dump("quit watchdog");
+    }
+#endif
+    _exit(0);
+}
+
+void xbox_host_quit_watchdog(void)
+{
+    pthread_t t;
+    if (s_quit_watch_armed)
+        return;
+    s_quit_watch_armed = 1;
+    if (pthread_create(&t, NULL, quit_watchdog, NULL) == 0)
+        pthread_detach(t);
+}
+
 /* Windows likewise: a window's messages reach only the thread that created
  * it. Created on the boot thread and presented from the title's, the window
  * never answered and Windows marked it "Not Responding" (2026-10-23). */
@@ -141,6 +192,7 @@ int xbox_host_main_run(int (*fn)(int, char **), int argc, char **argv)
             if (SDL_HasEvent(SDL_QUIT)) {
                 fprintf(stderr, "  [HOST] quit requested\n");
                 fflush(stderr);
+                xbox_host_quit_watchdog();
                 exit(0);
             }
         }
