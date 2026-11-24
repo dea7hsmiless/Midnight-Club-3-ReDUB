@@ -577,6 +577,17 @@ void ios_boot(void)
     if (home) {
         char log_path[2048];
         snprintf(log_path, sizeof log_path, "%s/Documents/mcdub3remix-launch.log", home);
+        /* A long online session writes kernel traces and disc reads for hours:
+         * the file reached 600 MB on device. Keep one previous log and start
+         * fresh once the current one passes 32 MB. */
+        {
+            struct stat st;
+            if (stat(log_path, &st) == 0 && st.st_size > (32 * 1024 * 1024)) {
+                char old_path[2100];
+                snprintf(old_path, sizeof old_path, "%s.old", log_path);
+                (void)rename(log_path, old_path);   /* replaces the older one */
+            }
+        }
         freopen(log_path, "a", stdout);
         freopen(log_path, "a", stderr);
         setvbuf(stdout, NULL, _IONBF, 0);

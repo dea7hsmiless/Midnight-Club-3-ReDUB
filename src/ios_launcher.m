@@ -116,6 +116,7 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  self.pane=[UIScrollView new];self.pane.alwaysBounceVertical=YES;[self.view addSubview:self.pane];
  self.footer=Text(self.status,11,NO);self.footer.backgroundColor=RGB(0x0E1627);[self.view addSubview:self.footer];
  self.timer=[NSTimer scheduledTimerWithTimeInterval:1.5 target:self selector:@selector(tick) userInfo:nil repeats:YES];
+ [self onlineSetup];
  if(s_pendingISOURL)[self acceptISOURL:s_pendingISOURL];
 }
 - (void)dealloc {if(s_activeLauncher==self)s_activeLauncher=nil;}
@@ -126,12 +127,19 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
 - (void)viewDidLayoutSubviews {
  [super viewDidLayoutSubviews];UIEdgeInsets safe=self.view.safeAreaInsets;CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height,rail=w<800?126:160;
  self.rail.frame=CGRectMake(safe.left,0,rail,h-safe.bottom-25);self.pane.frame=CGRectMake(safe.left+rail, safe.top,w-safe.left-safe.right-rail,h-safe.top-safe.bottom-25);self.footer.frame=CGRectMake(safe.left,h-safe.bottom-25,w-safe.left-safe.right,25);
+ if(self.online)self.online.frame=self.pane.frame;
+ /* Rebuilding the page on every layout pass, while the page changes the
+  * scroll size, is a feedback loop: render only when the window changed. */
+ static CGSize lastSize;CGSize size=self.view.bounds.size;
+ if(size.width==lastSize.width&&size.height==lastSize.height&&self.page)return;
+ lastSize=size;
  [self render];
 }
 - (void)nav:(UIButton*)sender {if(self.busy)return;self.page=sender.currentTitle;[self render];}
 - (void)label:(NSString*)s size:(CGFloat)size bold:(BOOL)bold frame:(CGRect)rect parent:(UIView*)v muted:(BOOL)muted {UILabel *l=Text(s,size,bold);l.frame=rect;if(muted)l.textColor=RGB(0x99A5BC);[v addSubview:l];}
 - (void)render {
  for(UIView *v in self.rail.subviews)[v removeFromSuperview];for(UIView *v in self.pane.subviews)[v removeFromSuperview];
+ self.online.hidden=YES;
  CGFloat rw=self.rail.bounds.size.width,w=self.pane.bounds.size.width,h=self.pane.bounds.size.height;if(w<1)return;
  /* The rail carries the game logo, not the word "ReDUB" in text: that is what
   * the desktop launcher's rail shows (Launcher.cs BrandPanel rail picture,
@@ -169,29 +177,7 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  [self button:@"Verify setup" frame:CGRectMake(x+cw*.43,y,cw*.27,48) parent:self.pane action:@selector(verify) primary:NO];
  [self button:@"Game files" frame:CGRectMake(x+cw*.73,y,cw*.27,48) parent:self.pane action:@selector(files) primary:NO];self.pane.contentSize=CGSizeMake(w,y+70);
  } else if([self.page isEqual:@"Online"]){
- /* The shared page (ui/online.html, also hosted by Windows and Android):
-  * the launcher answers its calls through the "redub" message handler. */
- if(!self.online){
-  WKWebViewConfiguration *cfg=[WKWebViewConfiguration new];
-  WKUserContentController *ucc=[WKUserContentController new];
-  RedubOnlineBridge *b=[RedubOnlineBridge new];b.launcher=self;
-  [ucc addScriptMessageHandler:b name:@"redub"];
-  cfg.userContentController=ucc;
-  self.onlineBridge=b;
-  self.online=[[WKWebView alloc]initWithFrame:CGRectZero configuration:cfg];
-  self.online.scrollView.scrollEnabled=NO;
-  self.online.backgroundColor=RGB(0x080D1A);
-  self.online.scrollView.backgroundColor=RGB(0x080D1A);
- }
- self.online.frame=CGRectMake(0,0,w,h);
- if(self.online.superview!=self.pane)[self.pane addSubview:self.online];
- if(!self.onlineLoaded){
-  self.onlineLoaded=YES;
-  NSString *path=[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Assets/online.html"];
-  [self.online loadFileURL:[NSURL fileURLWithPath:path] allowingReadAccessToURL:[NSURL fileURLWithPath:NSBundle.mainBundle.bundlePath]];
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{[self onlineRefresh];});
- }
- self.pane.contentSize=CGSizeMake(w,h);
+ [self onlineShow];
  } else if([self.page isEqual:@"Install"]){
  [self label:@"Install ReDUB" size:27 bold:YES frame:CGRectMake(x,16,cw,38) parent:self.pane muted:NO];
  [self label:@"Select your original Xbox DUB Edition Remix ISO. PS2 and Switch images are not supported." size:13 bold:NO frame:CGRectMake(x,59,cw,48) parent:self.pane muted:YES];
@@ -557,6 +543,32 @@ static NSString *JsonStr(NSString *s){
  }
 }
 
+/* The Online page is created once and only shown or hidden: creating it
+ * inside render() and reloading it on every pass is what crashed on open. */
+- (void)onlineSetup{
+ if(self.online)return;
+ WKWebViewConfiguration *cfg=[WKWebViewConfiguration new];
+ WKUserContentController *ucc=[WKUserContentController new];
+ RedubOnlineBridge *b=[RedubOnlineBridge new];b.launcher=self;
+ [ucc addScriptMessageHandler:b name:@"redub"];
+ cfg.userContentController=ucc;
+ self.onlineBridge=b;
+ self.online=[[WKWebView alloc]initWithFrame:CGRectZero configuration:cfg];
+ self.online.hidden=YES;
+ self.online.backgroundColor=RGB(0x080D1A);
+ self.online.scrollView.backgroundColor=RGB(0x080D1A);
+ [self.view addSubview:self.online];
+ NSString *path=[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Assets/online.html"];
+ [self.online loadFileURL:[NSURL fileURLWithPath:path] allowingReadAccessToURL:[NSURL fileURLWithPath:NSBundle.mainBundle.bundlePath]];
+}
+- (void)onlineShow{
+ [self onlineSetup];
+ self.online.frame=self.pane.frame;
+ self.online.hidden=NO;
+ [self.view bringSubviewToFront:self.online];
+ [self.view bringSubviewToFront:self.footer];
+ [self onlineRefresh];
+}
 - (void)play {
  fprintf(stderr,"[IOS STARTUP] Play pressed: game=%s verified=%d\n",self.activeGame.fileSystemRepresentation,self.verified?1:0);fflush(stderr);
  if(self.busy)return;if(!self.verified){self.page=@"Install";[self render];return;}
