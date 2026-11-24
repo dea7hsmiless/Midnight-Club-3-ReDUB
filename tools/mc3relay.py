@@ -82,9 +82,9 @@ T_BYE = 8
 
 
 class Member:
-    __slots__ = ("id", "addr", "room", "name", "last_seen", "rx", "tx")
+    __slots__ = ("id", "addr", "room", "name", "last_seen", "rx", "tx", "status")
 
-    def __init__(self, pid: int, addr, room: int, name: str) -> None:
+    def __init__(self, pid: int, addr, room: int, name: str, status: int = 0) -> None:
         self.id = pid
         self.addr = addr
         self.room = room
@@ -92,6 +92,9 @@ class Member:
         self.last_seen = time.monotonic()
         self.rx = 0
         self.tx = 0
+        # RC_ST_* from the client's HELLO: 0 menus, 1 loading, 2 roam,
+        # 3 event, 4 shop, 5 paused. The launcher shows it; the game ignores it.
+        self.status = status
 
     def age(self) -> float:
         return time.monotonic() - self.last_seen
@@ -213,7 +216,7 @@ class Relay:
                 continue
             name = "".join(c for c in (m.name or "Player")
                            if 0x20 <= ord(c) <= 0x7E and c != "|")[:24]
-            rows.append((group, int(m.status), name))
+            rows.append((group, int(getattr(m, "status", 0) or 0), name))
         rows.sort(key=lambda r: (r[0], r[2].lower()))
         rows = rows[:ROSTER_MAX_PLAYERS]
         lines = [f"MC3PLAYERS 1 {len(rows)}"]
@@ -290,7 +293,7 @@ class Relay:
             if hello is None:
                 self.dropped += 1
                 return []
-            (_core_ver, _platform, _status, _port, _cfg_rev, room, name,
+            (_core_ver, _platform, status, _port, _cfg_rev, room, name,
              _links) = hello
 
             if known is None:
@@ -306,7 +309,7 @@ class Relay:
                     self.say(f"refused  {name or '?'} {sender:08x} {addr[0]}:{addr[1]}"
                              f": room {room} is full ({MAX_MEMBERS_PER_ROOM} here)")
                     return []
-                m = Member(sender, addr, room, name)
+                m = Member(sender, addr, room, name, status)
                 self.members[sender] = m
                 self.say(f"joined   {name or '?'} {sender:08x} {addr[0]}:{addr[1]}"
                          f"  room {room}  ({len(self.members)} here)")
@@ -325,6 +328,7 @@ class Relay:
                 known.addr = addr          # follow a NAT re-binding
                 known.room = room
                 known.name = name
+                known.status = status
             known = self.members.get(sender)
             if known is None:           # reaped between the two lines
                 return []
