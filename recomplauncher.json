@@ -188,16 +188,6 @@
         { "label": "On", "set": { "MC3_SKIP_MOVIES": "1" } }
       ],
       "defaults": { "MC3_SKIP_MOVIES": "0" }
-    },
-    {
-      "id": "lan_play",
-      "label": "LAN Play (System Link)",
-      "help": "Lets copies on the same network see each other under Networking -> Xbox System Link. Your LAN address is detected; allow UDP 20000-21000 if a firewall asks. Restart to apply.",
-      "choices": [
-        { "label": "Off", "set": { "MC3_NETPLAY": "0" } },
-        { "label": "On", "set": { "MC3_NETPLAY": "1" } }
-      ],
-      "defaults": { "MC3_NETPLAY": "0" }
     }
   ],
   "actions": [
