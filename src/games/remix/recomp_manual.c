@@ -4300,6 +4300,7 @@ static void port_room_apply(int room)
  * who just launched from sitting in different rooms, and it needs no UI on any
  * platform. MC3_ROAM_AUTO=0 turns it off; MC3_ROAM_ROOM pins a room. */
 static int roam_auto_state = -1;         /* -1 unseen, 0 waiting, 1 done */
+static int roam_auto_tries;
 static time_t roam_auto_deadline;
 
 static void roam_auto_room_pass(void)
@@ -4314,10 +4315,12 @@ static void roam_auto_room_pass(void)
         roam_auto_deadline = time(NULL) + 6;
         if (pin && *pin) {
             roam_auto_state = 1;          /* a room was chosen: leave it */
+            fprintf(stderr, "[ROAM] auto-match off: room %s is pinned\n", pin);
             return;
         }
         if (off && off[0] == '0') {
             roam_auto_state = 1;
+            fprintf(stderr, "[ROAM] auto-match off: MC3_ROAM_AUTO=0\n");
             return;
         }
         fprintf(stderr, "[ROAM] auto-match: looking for a room\n");
@@ -4344,6 +4347,15 @@ static void roam_auto_room_pass(void)
         }
     }
     if (time(NULL) >= roam_auto_deadline) {
+        /* Booting before anyone else is online is normal: keep looking for a
+         * couple of minutes instead of staying in room 0 for the session. */
+        if (!atomic_load(&port_gameplay_active) && roam_auto_tries < 12) {
+            roam_auto_tries++;
+            roam_auto_deadline = time(NULL) + 10;
+            fprintf(stderr, "[ROAM] auto-match: no room yet, retrying (%d/12)\n",
+                    roam_auto_tries);
+            return;
+        }
         roam_auto_state = 1;
         fprintf(stderr, "[ROAM] auto-match: no room from the relay, staying in %d\n",
                 port_room_get());
