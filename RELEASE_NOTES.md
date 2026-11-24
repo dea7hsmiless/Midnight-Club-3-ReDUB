@@ -1,6 +1,6 @@
 # Release notes
 
-## v0.2.5 - 2026-11-21
+## v0.2.5 - 2026-11-24
 
 ### Split-screen, verified
 
@@ -45,6 +45,9 @@ checked on screen.
   (`[AUTOSTART] 11.4s title`), so start-up problems can be measured instead of guessed.
 - **A run log on Windows.** `work-remix/logs/latest.log` holds the last run, with the previous
   one kept as `.previous`, so a report has something to attach.
+- **Closing cannot hang.** A watchdog arms on every quit; if teardown has not finished six
+  seconds later it dumps each thread's stack and leaves. Windows used to show "stopped
+  interacting with Windows" and close the game instead.
 
 ### No settings file in the package
 
@@ -52,6 +55,30 @@ checked on screen.
 machine's own settings (including a forced 60 FPS). This build ships no settings file at all:
 the game creates one from the example on first run, and the release check refuses a package
 that contains one.
+
+### Online: staying in the room
+
+A client's receive loop parked the network thread on a blocking socket after the first
+datagram. A relay only forwards, so a quiet room sent nothing back: the thread never returned
+to its tick, the keepalives stopped, the relay reaped the player after 30 seconds, and the
+other machine saw **0 rooms** while both games were open. The socket is non-blocking now, and
+a datagram forwarded by the relay counts as the hub being alive. A four-minute idle test keeps
+the player in the census, and a synthetic player's 24-byte System Link broadcast reaches the
+game (`[XNET] rx ... 01 37 18 00`).
+
+### Your name, without editing files
+
+The launcher's **Online** page has **Your name** on Windows, Android and iOS. It follows the
+game's own rule (1-24 of `A-Z a-z 0-9`, space, `_`, `-`, `.`) and applies on the next start.
+Invites now name the sender: `ReDUB - <name> invites you to room N`, then the `redub://room/N`
+link.
+
+### Phones online
+
+A phone defaults to a 180 m remote-car radius and a 0.10 s pose-blend cap, so a spread-out
+field and one stalled frame cost less. 60 fps is still a setting the phone has to earn: render
+scale (2X by default) and anti-aliasing are the biggest levers. Adaptive resolution is
+scheduled for 0.2.6.
 
 ### Known issues
 
@@ -67,13 +94,14 @@ that contains one.
   career race was completed at 60 FPS, past RESULTS and back into the cruise. If you can
   reproduce it, please say which platform and package you used and attach
   `work-remix/logs/latest.log`.
+- **Online Race has its transport verified, not a two-device pass.** A loopback relay and a
+  synthetic player proved System Link packets reach the game; Create Match on one machine and
+  Join Game on the other on the release build is still to be done.
 
 ### Not in this release
 
-Multiplayer over a network. The engine work for it is in the tree and off by default, but it
-is not finished and is not described here: LAN System Link and online free roam both need a
-second machine, and online needs a server. Split-screen is the multiplayer mode in this
-release.
+Free Roam (deferred to 0.2.6; its Online item reads **`LINK: OFF`**) and its in-game nickname
+editor - the launcher's **Online** page sets your name instead. macOS is not built or tested.
 
 ## v0.2.4 - 2026-11-18
 
