@@ -188,9 +188,9 @@ public sealed class Launcher : Form {
     string SettingsPath(){string dir=RendererDist(root),selected=Path.Combine(dir,"mcdub3remix_env.txt");if(!File.Exists(selected)){string example=Path.Combine(dir,"mcdub3remix_env.example.txt");if(File.Exists(example)){try{File.Copy(example,selected);}catch{}}}if(File.Exists(selected))return selected;return PathAt("work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt");}
     public string ReadSetting(string key,string fallback){if(!File.Exists(SettingsPath()))return fallback;foreach(var raw in File.ReadAllLines(SettingsPath())){string line=raw.Trim();if(line.StartsWith(key+"=",StringComparison.Ordinal))return line.Substring(key.Length+1).Trim();}return fallback;}
     public void SavePreference(string key,string value){string path=SettingsPath();if(!File.Exists(path))throw new IOException("Install the game before saving settings.");var edits=new Dictionary<string,string>();edits[key]=value;if(key=="MC3_GRAPHICS_PRESET"&&value!="0"){int n=int.Parse(value);edits["RECOMP_GL_SCALE"]=n==1?"1.5":n==3?"3":"2";edits["RECOMP_GL_FXAA"]="1";edits["RECOMP_GL_ANISO"]=n==1?"4":"16";edits["RECOMP_GL_SHARPEN"]=n==1?"0.25":"0.5";edits["RECOMP_GL_VSYNC"]=n==3?"1":"0";}else if(new[]{"RECOMP_GL_SCALE","RECOMP_GL_FXAA","RECOMP_GL_ANISO","RECOMP_GL_SHARPEN","RECOMP_GL_VSYNC"}.Contains(key))edits["MC3_GRAPHICS_PRESET"]="0";var lines=File.ReadAllLines(path).Where(line=>!edits.Keys.Any(k=>line.TrimStart().StartsWith(k+"=",StringComparison.Ordinal))).ToList();foreach(var e in edits)lines.Add(e.Key+"="+e.Value);string backup=path+".launcher-backup";if(!File.Exists(backup))File.Copy(path,backup);string tmp=path+".launcher-tmp";File.WriteAllLines(tmp,lines,new UTF8Encoding(false));File.Replace(tmp,path,null);Append("Saved "+key+". Applies next launch.");}
-    /* ---- Online: live relay status, rooms, invites ---------------------- */
-    Label onlineServer,onlineYourRoom,onlinePlayerList,onlineRoomList,onlineHint;
-    TextBox onlineJoinBox;
+    /* ---- Online: the shared page, hosted in this window ----------------- */
+    WebBrowser onlineView;
+    OnlineShell onlineShell;
     int onlinePolling,onlineBestRoom=-1,onlineBestPlayers;
     DateTime onlineNextPoll=DateTime.MinValue;
     static int InviteRoom=-1;
@@ -216,22 +216,29 @@ public sealed class Launcher : Form {
     }
 
     void ShowOnline(){
-        Panel p=Standard("Online","Play together","Rooms keep separate matches apart; eight players per room. The game reads the room number when it starts.");
-        onlineServer=LabelAt("Server: checking...",10,true);onlineServer.SetBounds(36,142,Math.Max(520,content.Width-100),24);p.Controls.Add(onlineServer);
-        onlineYourRoom=LabelAt("",10,false);onlineYourRoom.SetBounds(36,172,Math.Max(520,content.Width-100),24);p.Controls.Add(onlineYourRoom);
-        onlinePlayerList=LabelAt("",9,false);onlinePlayerList.ForeColor=Muted;onlinePlayerList.SetBounds(36,208,Math.Max(520,content.Width-100),96);p.Controls.Add(onlinePlayerList);
-        onlineRoomList=LabelAt("",10,false);onlineRoomList.SetBounds(36,308,Math.Max(520,content.Width-100),170);p.Controls.Add(onlineRoomList);
-        onlineJoinBox=new TextBox {BackColor=Card,ForeColor=ForeColor,BorderStyle=BorderStyle.FixedSingle,Font=Font};
-        onlineJoinBox.SetBounds(36,505,250,28);onlineJoinBox.AccessibleName="Invite code or link";p.Controls.Add(onlineJoinBox);
-        ButtonAt(p,"Join a friend",298,499,140,()=>JoinFromBox(),true);
-        ButtonAt(p,"Invite friends",450,499,150,()=>InviteFriends());
-        ButtonAt(p,"Refresh",612,499,100,()=>RefreshOnline(true));
-        onlineHint=LabelAt("",9,false);onlineHint.ForeColor=Muted;onlineHint.SetBounds(36,548,Math.Max(520,content.Width-100),80);p.Controls.Add(onlineHint);
+        /* No native heading: the shared page brings its own, and the rail is
+         * already the launcher's header. */
+        Page("Online");
+        Panel host=new Panel {Dock=DockStyle.Fill,BackColor=Bg,Padding=new Padding(18)};
+        content.Controls.Add(host);
+        onlineView=new WebBrowser();
+        onlineView.ScriptErrorsSuppressed=true;
+        onlineView.AllowWebBrowserDrop=false;
+        onlineView.IsWebBrowserContextMenuEnabled=false;
+        onlineView.WebBrowserShortcutsEnabled=false;
+        onlineView.Dock=DockStyle.Fill;
+        onlineShell=new OnlineShell(this);
+        onlineView.ObjectForScripting=onlineShell;
+        string pagePath=Path.Combine(root,@"ui\online.html");
+        if(File.Exists(pagePath))onlineView.Url=new Uri(pagePath);
+        else onlineView.DocumentText="<html><body style='background:#080D1A;color:#EBEFF7;font-family:Segoe UI'><p>ui\\online.html is missing from this install.</p></body></html>";
+        host.Controls.Add(onlineView);
+        onlineNextPoll=DateTime.MinValue;
         RefreshOnline(true);
     }
 
     void RefreshOnline(bool force){
-        if(page!="Online"||onlineServer==null)return;
+        if(page!="Online"||onlineView==null)return;
         if(!force&&DateTime.UtcNow<onlineNextPoll)return;
         onlineNextPoll=DateTime.UtcNow.AddSeconds(3);
         if(Interlocked.Exchange(ref onlinePolling,1)==1)return;
@@ -248,20 +255,11 @@ public sealed class Launcher : Form {
     }
 
     void ApplyOnline(string rooms,string roster,string error,int ms,string host,int port){
-        if(page!="Online"||onlineServer==null)return;
-        if(error!=null){
-            onlineServer.Text="Server: no answer";
-            onlineServer.ForeColor=Color.FromArgb(245,120,120);
-        } else {
-            onlineServer.Text="Server: online, "+ms+" ms";
-            onlineServer.ForeColor=Color.FromArgb(84,210,165);
-        }
+        if(page!="Online")return;
         int mine=OnlineRoom();
-        string name=ReadSetting("MC3_ROAM_NAME","");
-        onlineYourRoom.Text=(mine==0?"Your room: shared (anyone online)":"Your room: "+mine)+
-                            (name.Length>0?"    Player: "+name:"");
         onlineBestRoom=-1;onlineBestPlayers=0;
-        StringBuilder sb=new StringBuilder();
+        StringBuilder rj=new StringBuilder("[");
+        bool firstRoom=true;
         if(rooms!=null&&rooms.StartsWith("MC3ROOMS")){
             string[] parts=rooms.Split(' ');
             for(int i=3;i<parts.Length;i++){
@@ -269,40 +267,92 @@ public sealed class Launcher : Form {
                 int g,n;
                 if(kv.Length==2&&int.TryParse(kv[0],out g)&&int.TryParse(kv[1],out n)){
                     if(n>onlineBestPlayers&&n<8){onlineBestPlayers=n;onlineBestRoom=g;}
-                    sb.AppendLine("Room "+g+"    "+n+"/8"+(g==mine?"    (you)":""));
+                    if(!firstRoom)rj.Append(',');
+                    firstRoom=false;
+                    rj.Append("{\"n\":").Append(g).Append(",\"players\":").Append(n).Append('}');
                 }
             }
         }
-        if(sb.Length==0)sb.AppendLine(error!=null?"No rooms: the server did not answer.":"No rooms have players right now.");
-        onlineRoomList.Text=sb.ToString().TrimEnd();
-        StringBuilder rb=new StringBuilder();
+        rj.Append(']');
+        StringBuilder pj=new StringBuilder("[");
+        bool firstPlayer=true;
         if(roster!=null&&roster.StartsWith("MC3PLAYERS")){
             string[] lines=roster.Replace("\r","").Split('\n');
             for(int i=1;i<lines.Length;i++){
                 string[] f=lines[i].Split('|');
-                int st;
-                if(f.Length>=3&&int.TryParse(f[1],out st))rb.AppendLine("Room "+f[0]+"    "+OnlineStatusName(st)+"    "+f[2]);
+                int st,rm;
+                if(f.Length>=3&&int.TryParse(f[0],out rm)&&int.TryParse(f[1],out st)){
+                    if(!firstPlayer)pj.Append(',');
+                    firstPlayer=false;
+                    pj.Append("{\"room\":").Append(rm).Append(",\"status\":").Append(st)
+                      .Append(",\"name\":").Append(Json(f[2])).Append('}');
+                }
             }
         }
-        if(rb.Length==0){
-            if(error!=null)rb.Append("Player list unavailable: the server did not answer.");
-            else if(rooms!=null&&rooms.StartsWith("MC3ROOMS"))rb.Append("Player names need the newest relay (relay/ in the release). Rooms above are live.");
-            else rb.Append("Nobody else is online right now.");
+        pj.Append(']');
+        StringBuilder s=new StringBuilder("{");
+        s.Append("\"ms\":").Append(ms);
+        s.Append(",\"yourRoom\":").Append(mine);
+        s.Append(",\"playerName\":").Append(Json(ReadSetting("MC3_ROAM_NAME","")));
+        s.Append(",\"rooms\":").Append(rj);
+        s.Append(",\"roster\":").Append(pj);
+        if(error!=null)s.Append(",\"error\":").Append(Json(error));
+        s.Append('}');
+        PushOnline(s.ToString());
+    }
+
+    /* The page is the UI; this window just answers it. InvokeScript carries a
+     * JSON string (IE passes strings, never objects). */
+    void PushOnline(string json){
+        if(page!="Online"||onlineView==null)return;
+        try{
+            if(onlineView.Document==null||onlineView.ReadyState!=WebBrowserReadyState.Complete)return;
+            onlineView.Document.InvokeScript("redubApply",new object[]{json});
+        }catch{}
+    }
+    internal void OnlineAction(string action,string json){
+        try{
+            if(action=="refresh"){RefreshOnline(true);return;}
+            if(action=="join"){
+                int room=JsonRoom(json);
+                if(room<0)MessageBox.Show(this,"Paste the invite link or type the room number (0-255).","Join a friend");
+                else JoinRoom(room);
+                return;
+            }
+            if(action=="invite"){InviteFriends();return;}
+        }catch(Exception x){Append("Online: "+x.Message);}
+    }
+    static int JsonRoom(string json){
+        if(json==null)return -1;
+        int i=json.IndexOf("\"room\"");
+        if(i<0)return -1;
+        int j=json.IndexOf(':',i+6);
+        if(j<0)return -1;
+        while(j+1<json.Length&&(json[j+1]==' '||json[j+1]=='\t'))j++;
+        int n=0;bool any=false;
+        for(int k=j+1;k<json.Length&&json[k]>='0'&&json[k]<='9';k++){n=n*10+(json[k]-'0');any=true;}
+        return any&&n>=0&&n<=255?n:-1;
+    }
+    static string Json(string s){
+        if(s==null)return "null";
+        StringBuilder b=new StringBuilder("\"");
+        for(int i=0;i<s.Length;i++){
+            char ch=s[i];
+            if(ch=='\"'||ch=='\\')b.Append('\\').Append(ch);
+            else if(ch=='\n')b.Append("\\n");
+            else if(ch=='\r')b.Append("\\r");
+            else if(ch=='\t')b.Append("\\t");
+            else if(ch<32)b.Append("\\u").Append(((int)ch).ToString("x4"));
+            else b.Append(ch);
         }
-        onlinePlayerList.Text=rb.ToString().TrimEnd();
-        onlineHint.Text="Invite works with a room number (1-255). The game reads it when it starts, so close the game before joining a new room. Room 0 means \"anyone online\" (auto-matched).";
+        return b.Append('"').ToString();
     }
 
     void JoinRoom(int room){
         if(room<0||room>255)return;
         if(GameRunning()){MessageBox.Show(this,"Close the game first: it reads the room number when it starts.","Game is running");return;}
-        try{SavePreference("MC3_ROAM_ROOM",room.ToString());Append("Room "+room+" saved. Starting the game.");PlayGame();ShowOnline();}
+        try{SavePreference("MC3_ROAM_ROOM",room.ToString());Append("Room "+room+" saved. Starting the game.");PlayGame();RefreshOnline(true);}
         catch(Exception x){MessageBox.Show(this,x.Message,"Join a friend");}
-    }
-    void JoinFromBox(){
-        int room=ParseInvite(onlineJoinBox==null?"":onlineJoinBox.Text);
-        if(room<0){MessageBox.Show(this,"Paste the invite link or type the room number (0-255).","Join a friend");return;}
-        JoinRoom(room);
     }
     void InviteFriends(){
         int room=OnlineRoom();
@@ -318,7 +368,7 @@ public sealed class Launcher : Form {
         string text="ReDUB - join my race in room "+room.ToString()+"\r\n"+link+"\r\n(In ReDUB: Online > Join a friend > "+room.ToString()+")";
         try{Clipboard.SetText(text);Append("Invite copied for room "+room.ToString()+".");}catch(Exception x){MessageBox.Show(this,x.Message,"Clipboard");}
         if(GameRunning())MessageBox.Show(this,"Room "+room.ToString()+" is saved. Close and reopen the game so it joins that room, then send the invite.","Invite friends");
-        if(page=="Online")ShowOnline();
+        RefreshOnline(true);
     }
     int PickPrivateRoom(){
         HashSet<int> full=new HashSet<int>();
@@ -356,6 +406,14 @@ public sealed class Launcher : Form {
                 k.SetValue("","URL:ReDUB invite");
                 k.SetValue("URL Protocol","");
                 using(var c=k.CreateSubKey(@"shell\open\command"))if(c!=null)c.SetValue("","\""+exe+"\" \"%1\"");
+            }
+        }catch{}
+        /* The WebBrowser control starts in an ancient document mode unless the
+         * host says otherwise; one per-user value puts the shared page in
+         * IE11-edge so its CSS and JSON behave like everywhere else. */
+        try{
+            using(var k=Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION")){
+                if(k!=null)k.SetValue(Path.GetFileName(Application.ExecutablePath),11001,Microsoft.Win32.RegistryValueKind.DWord);
             }
         }catch{}
     }
@@ -622,6 +680,15 @@ public sealed class Launcher : Form {
         if(ShouldBypass(BypassEnabled(root),args,(Control.ModifierKeys&Keys.Shift)!=0,InstallationReady(root))){try{StartDirect(root);return;}catch(Exception ex){startupError="Direct launch failed: "+ex.Message;}}
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);var app=new Launcher(root);if(startupError!=null)app.Append(startupError);Application.Run(app);
     }
+}
+
+/* The shared page's only handle on this window: window.external.redubCall(action,
+ * json). COM-visible so the WebBrowser control exposes it to script. */
+[System.Runtime.InteropServices.ComVisible(true)]
+public class OnlineShell {
+    readonly Launcher app;
+    internal OnlineShell(Launcher owner){app=owner;}
+    public void redubCall(string action,string json){app.OnlineAction(action,json);}
 }
 }
 
