@@ -116,7 +116,6 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  self.pane=[UIScrollView new];self.pane.alwaysBounceVertical=YES;[self.view addSubview:self.pane];
  self.footer=Text(self.status,11,NO);self.footer.backgroundColor=RGB(0x0E1627);[self.view addSubview:self.footer];
  self.timer=[NSTimer scheduledTimerWithTimeInterval:1.5 target:self selector:@selector(tick) userInfo:nil repeats:YES];
- [self onlineSetup];
  if(s_pendingISOURL)[self acceptISOURL:s_pendingISOURL];
 }
 - (void)dealloc {if(s_activeLauncher==self)s_activeLauncher=nil;}
@@ -563,6 +562,7 @@ static NSString *JsonStr(NSString *s){
 }
 - (void)onlineShow{
  [self onlineSetup];
+ if(!self.online)return;
  self.online.frame=self.pane.frame;
  self.online.hidden=NO;
  [self.view bringSubviewToFront:self.online];
