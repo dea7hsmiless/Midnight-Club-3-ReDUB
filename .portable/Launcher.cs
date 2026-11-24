@@ -366,9 +366,21 @@ public sealed class Launcher : Form {
 
     void JoinRoom(int room){
         if(room<0||room>255)return;
-        if(GameRunning()){MessageBox.Show(this,"Close the game first: it reads the room number when it starts.","Game is running");return;}
-        try{SavePreference("MC3_ROAM_ROOM",room.ToString());Append("Room "+room+" saved. Starting the game.");PlayGame();RefreshOnline(true);}
-        catch(Exception x){MessageBox.Show(this,x.Message,"Join a friend");}
+        if(GameRunning()){
+            PushNotice("Room "+room+" is saved.\r\nThe game is running and reads the room only at startup: close it and press Play to join room "+room+".");
+            MessageBox.Show(this,"Close the game first: it reads the room number when it starts.","Game is running");
+            return;
+        }
+        try{
+            SavePreference("MC3_ROAM_ROOM",room.ToString());
+            Append("Room "+room+" saved. Starting the game.");
+            PushNotice("Room "+room+" saved. Starting the game...\r\nFriends who join room "+room+" meet you there.");
+            PlayGame();
+            RefreshOnline(true);
+        }catch(Exception x){
+            PushNotice("Could not join room "+room+": "+x.Message);
+            MessageBox.Show(this,x.Message,"Join a friend");
+        }
     }
     void InviteFriends(){
         int room=OnlineRoom();

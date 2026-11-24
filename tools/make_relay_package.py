@@ -257,7 +257,7 @@ def build() -> Path:
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
 
-    for name in ("mc3relay.py", "mc3hub.py", "redub_addr.py"):
+    for name in ("mc3relay.py", "mc3hub.py", "redub_addr.py", "deploy_relay.sh"):
         shutil.copy2(TOOLS / name, stage / name)
     (stage / "README.md").write_text(README, encoding="utf-8", newline="\n")
     (stage / "start.sh").write_text(START_SH, encoding="utf-8", newline="\n")
@@ -281,7 +281,7 @@ def build() -> Path:
             # then fails with "Permission denied" and the README's own command
             # does not work. 0755 for the scripts, 0644 for everything else.
             mode = (0o755 if f.name in ("start.sh", "mc3relay.py", "mc3hub.py",
-                                        "redub_addr.py") else 0o644)
+                                        "redub_addr.py", "deploy_relay.sh") else 0o644)
             info = zipfile.ZipInfo.from_file(f, arc)
             info.external_attr = (0o100000 | mode) << 16
             info.compress_type = zipfile.ZIP_DEFLATED

@@ -70,6 +70,8 @@ EXPIRE_S = 30.0
 MAX_DGRAMS_PER_S = 300
 MAX_MEMBERS_PER_ROOM = 8        # the game's own player-slot count; docs/0.2.6-PLAN.md
 CENSUS_MAX_ROOMS = 32           # what the client parses, and what fits one datagram
+ROSTER_MAX_PLAYERS = 40         # names for the launcher's list; one datagram
+RELAY_VERSION = "0.2.5"         # answered to MC3V; bump with the release
 MAX_MEMBERS = 2048              # 256 rooms x 8, with slack: memory is not a client's to spend
 
 # A client this quiet is not "gone" yet, but it must not be relayed to for ever.
@@ -191,6 +193,35 @@ class Relay:
                  + (", ".join(f"{g}={counts[g]}" for g in groups) or "no rooms"))
         return b" ".join(parts)
 
+    def roster(self, addr) -> bytes:
+        """Reply to a client's MC3P: who is online, their room and state.
+
+        The launcher asks this to show a live player list; the game never does,
+        so the MC3Q answer above stays exactly as the game expects it.
+
+            MC3PLAYERS 1 <n>
+            <group>|<status>|<name>
+
+        Status is the client's RC_ST_* (0 menus, 1 loading, 2 roam, 3 event,
+        4 shop, 5 paused). One line per player, newest answer replaces the
+        launcher's list."""
+        self.reap()
+        rows = []
+        for m in self.members.values():
+            group = m.room >> 16
+            if group > 255:
+                continue
+            name = "".join(c for c in (m.name or "Player")
+                           if 0x20 <= ord(c) <= 0x7E and c != "|")[:24]
+            rows.append((group, int(m.status), name))
+        rows.sort(key=lambda r: (r[0], r[2].lower()))
+        rows = rows[:ROSTER_MAX_PLAYERS]
+        lines = [f"MC3PLAYERS 1 {len(rows)}"]
+        for group, status, name in rows:
+            lines.append(f"{group}|{status}|{name}")
+        self.log(f"roster to {addr[0]}:{addr[1]}: {len(rows)} player(s)")
+        return "\n".join(lines).encode("ascii", "replace")
+
     def flooding(self, addr) -> bool:
         """True when this source is over its datagram budget for the second."""
         now = time.monotonic()
@@ -211,6 +242,12 @@ class Relay:
         # in-game Find a Room both send exactly "MC3Q").
         if data == b"MC3Q":
             return [(self.census(addr), addr)]
+        # The launcher's live player list: names and states, never used by the
+        # game (which only asks MC3Q).
+        if data == b"MC3P":
+            return [(self.roster(addr), addr)]
+        if data == b"MC3V":
+            return [(b"MC3VER " + RELAY_VERSION.encode("ascii"), addr)]
 
         got = parse(data)
         if got is None:
