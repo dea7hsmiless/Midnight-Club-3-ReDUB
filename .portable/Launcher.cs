@@ -250,10 +250,10 @@ public sealed class Launcher : Form {
     void ApplyOnline(string rooms,string roster,string error,int ms,string host,int port){
         if(page!="Online"||onlineServer==null)return;
         if(error!=null){
-            onlineServer.Text="Server "+host+":"+port+" - no answer";
+            onlineServer.Text="Server: no answer";
             onlineServer.ForeColor=Color.FromArgb(245,120,120);
         } else {
-            onlineServer.Text="Server "+host+":"+port+" - online, "+ms+" ms";
+            onlineServer.Text="Server: online, "+ms+" ms";
             onlineServer.ForeColor=Color.FromArgb(84,210,165);
         }
         int mine=OnlineRoom();
