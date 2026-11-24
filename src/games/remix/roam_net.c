@@ -32,6 +32,51 @@
 
 void roam_net_start_now(void);
 
+/* Phone defaults for online play.
+ *
+ * A phone in a lobby of eight has less to spend than a desktop: the same city,
+ * the same draw calls, a doubled game rate at 60 fps, and every peer's car
+ * inside the radius adds its own build and per-frame blend work. Two defaults
+ * are lower on a phone, and both are only defaults -- a value the player set is
+ * never overridden:
+ *
+ *   MC3_ROAM_RADIUS  how near a peer must be to get a car built here (250 m on
+ *                    a desktop). The lobby is unchanged; a car that is not
+ *                    within the radius is still a blip on the map, so a race
+ *                    with a field spread out costs what the nearby cars cost
+ *                    instead of what the whole field costs.
+ *   MC3_ROAM_DT_MAX  the largest step the pose blend will take in one frame
+ *                    (clamped in roam_pool.c). A hitchy phone delivers a long
+ *                    frame; without a clamp every remote car is blended across
+ *                    that whole step in the next frame, which deepens the
+ *                    hitch. Clamping keeps a bad frame a bad frame instead of
+ *                    turning it into a catch-up storm.
+ *
+ * Called from the host after the env file is loaded, before the game boots. */
+void roam_mobile_online_defaults(int radius_m, double dt_max)
+{
+    char v[32];
+    const char *cur;
+    cur = getenv("MC3_ROAM_RADIUS");
+    if (!cur || !*cur) {
+        snprintf(v, sizeof v, "%d", radius_m);
+#ifdef _WIN32
+        _putenv_s("MC3_ROAM_RADIUS", v);
+#else
+        setenv("MC3_ROAM_RADIUS", v, 1);
+#endif
+    }
+    cur = getenv("MC3_ROAM_DT_MAX");
+    if (!cur || !*cur) {
+        snprintf(v, sizeof v, "%.2f", dt_max);
+#ifdef _WIN32
+        _putenv_s("MC3_ROAM_DT_MAX", v);
+#else
+        setenv("MC3_ROAM_DT_MAX", v, 1);
+#endif
+    }
+}
+
 static void roam_net_boot(void)
 {
     static int done;

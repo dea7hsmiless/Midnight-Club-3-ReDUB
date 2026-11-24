@@ -1446,7 +1446,18 @@ static void roam_player(uint32_t p)
         roam_pose *s = &s_roam_hist[s_roam_nhist % ROAM_HIST];
         if (s_roam_tlast > 0.0) {
             double dt = now - s_roam_tlast;
-            s_roam_dt = (float)(dt < 1.0 / 120 ? 1.0 / 120 : dt > 0.25 ? 0.25 : dt);
+            /* The largest step one frame may contribute to the pose blend. A
+             * quarter second is the desktop ceiling; a phone that stalls is
+             * told a lower one (MC3_ROAM_DT_MAX, roam_net.c) so one long frame
+             * does not become every remote car catching up at once. */
+            static double cap = -1.0;
+            if (cap < 0.0) {
+                const char *e = getenv("MC3_ROAM_DT_MAX");
+                cap = e && *e ? atof(e) : 0.25;
+                if (!(cap >= 1.0 / 120 && cap <= 0.25))
+                    cap = 0.25;
+            }
+            s_roam_dt = (float)(dt < 1.0 / 120 ? 1.0 / 120 : dt > cap ? cap : dt);
         }
         s_roam_tlast = now;
         mtx = MEM32(veh + 0x1Cu);

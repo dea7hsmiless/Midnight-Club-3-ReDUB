@@ -285,6 +285,12 @@ void android_boot(void)
             /* online play is the switch; a stale 0 must not disable races */
             setenv("MC3_NETPLAY", "1", 1);
         }
+        /* Phone online defaults (radius, blend cap): only when the file is
+         * silent. Same call and values as ios_host.c. */
+        {
+            extern void roam_mobile_online_defaults(int radius_m, double dt_max);
+            roam_mobile_online_defaults(180, 0.10);
+        }
     }
     {   /* the start screen's choice (android/LauncherActivity.java) wins */
         const char *l = getenv("MC3_LAUNCHER_GAME_DIR");

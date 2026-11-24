@@ -572,6 +572,11 @@ void ios_boot(void)
     }
     load_env_file();
     apply_online_default();
+    /* Phone online defaults (radius, blend cap): only when the file is silent. */
+    {
+        extern void roam_mobile_online_defaults(int radius_m, double dt_max);
+        roam_mobile_online_defaults(180, 0.10);
+    }
     settings_from_env();
     log_open();
     if (home) {
