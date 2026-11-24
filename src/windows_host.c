@@ -278,8 +278,9 @@ static void apply_online_default(void)
     }
     if (!getenv("MC3_ROAM_JOIN"))
         _putenv_s("MC3_ROAM_JOIN", MC3_ONLINE_SERVER);
-    if (!getenv("MC3_NETPLAY"))
-        _putenv_s("MC3_NETPLAY", "1");
+    /* Online play is the switch. Online Race needs the transport, so a stale
+     * MC3_NETPLAY=0 left by an old launcher row must not disable it. */
+    _putenv_s("MC3_NETPLAY", "1");
 }
 
 void windows_boot(void)

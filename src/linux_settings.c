@@ -97,7 +97,8 @@ static void load_settings(void)
     {   const char *off=getenv("MC3_ONLINE");
         if(off&&off[0]=='0'){unsetenv("MC3_ROAM_JOIN");unsetenv("MC3_NETPLAY");}
         else{if(!getenv("MC3_ROAM_JOIN"))setenv("MC3_ROAM_JOIN",MC3_ONLINE_SERVER,1);
-             if(!getenv("MC3_NETPLAY"))setenv("MC3_NETPLAY","1",1);}
+             /* online play is the switch; a stale 0 must not disable races */
+             setenv("MC3_NETPLAY","1",1);}
     }
 }
 

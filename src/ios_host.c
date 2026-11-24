@@ -222,8 +222,8 @@ static void apply_online_default(void)
     }
     if (!getenv("MC3_ROAM_JOIN"))
         setenv("MC3_ROAM_JOIN", MC3_ONLINE_SERVER, 1);
-    if (!getenv("MC3_NETPLAY"))
-        setenv("MC3_NETPLAY", "1", 1);
+    /* online play is the switch; a stale 0 must not disable races */
+    setenv("MC3_NETPLAY", "1", 1);
 }
 
 /* The title calls this with the row id (event-0x7F00) from its own UI
