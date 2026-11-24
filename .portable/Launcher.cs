@@ -284,7 +284,12 @@ public sealed class Launcher : Form {
                 if(f.Length>=3&&int.TryParse(f[1],out st))rb.AppendLine("Room "+f[0]+"    "+OnlineStatusName(st)+"    "+f[2]);
             }
         }
-        onlinePlayerList.Text=rb.Length==0?"Nobody else is online right now.":rb.ToString().TrimEnd();
+        if(rb.Length==0){
+            if(error!=null)rb.Append("Player list unavailable: the server did not answer.");
+            else if(rooms!=null&&rooms.StartsWith("MC3ROOMS"))rb.Append("Player names need the newest relay (relay/ in the release). Rooms above are live.");
+            else rb.Append("Nobody else is online right now.");
+        }
+        onlinePlayerList.Text=rb.ToString().TrimEnd();
         onlineHint.Text="Invite works with a room number (1-255). The game reads it when it starts, so close the game before joining a new room. Room 0 means \"anyone online\" (auto-matched).";
     }
 
