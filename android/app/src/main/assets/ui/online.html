@@ -121,7 +121,6 @@
   </p>
 
   <div id="notice" class="notice" style="display:none"></div>
-  <div id="bridge" class="hint" style="opacity:.55">bridge: ?</div>
 </div>
 
 <script>
@@ -283,11 +282,6 @@
   /* ---- start ----------------------------------------------------------- */
 
   shell = detect();
-  var bridgeProbe = el("bridge");
-  if (bridgeProbe) {
-    bridgeProbe.innerHTML = "bridge: " + (shell ? "connected" : "missing") +
-      (window.external ? " | external present" : " | external absent");
-  }
   if (!shell) {
     text("server", '<span class="muted">Open this page from the ReDUB launcher.</span>');
     text("names", "No launcher connected.");
