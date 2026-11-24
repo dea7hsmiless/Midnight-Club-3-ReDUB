@@ -3077,6 +3077,13 @@ void sub_0018C580(void) { online_leave("Tokyo Challenge"); sub_0018C580_gen(); }
  *
  * With MC3_ONLINE_SESSION unset this is the untouched menu item. */
 static void net_rows_arm(void);          /* the Online screen's two rows */
+extern void sub_001801C0(void);          /* Online Race's item callback */
+static void port_fire_event(uint32_t ev); /* the game's own menu dispatcher */
+static int race_picker_is_open(void);
+static void race_test_start(void);
+static void race_pending_pass(void);
+static void race_test_pass(void);
+static void roam_auto_room_pass(void);
 static void network_rows_pass(void);
 extern void sub_0018C5A0_gen(void);
 void sub_0018C5A0(void)
@@ -3186,8 +3193,8 @@ static void roam_caps_pass(void);       /* roam_caps.c, included at the end */
 static const char *const online_label_from[4] = { "Networking",  "Xbox Live", "Xbox System Link", "Not Signed In" };
 /* Free Roam is deferred to 0.2.6: sub_00180160 is inert. The label stays so
  * the fixed two-slot movie keeps its layout (blanking it broke the panel). */
-static const char *const online_label_to[4]   = { "Online",      "ROAM: OFF", "Online Race", "" };
-static const char *const online_label_short[4] = { "Online",     "ROAM: OFF", "Online Race", "" };
+static const char *const online_label_to[4]   = { "Online",      "LINK: OFF", "Online Race", "" };
+static const char *const online_label_short[4] = { "Online",     "LINK: OFF", "Online Race", "" };
 static struct { uint32_t va; } online_label[4][8];
 static int online_label_n[4];
 static int online_labels_ready;            /* the main menu's label was renamed */
@@ -3599,6 +3606,9 @@ void sub_0020B6F0(void)
     float dt, real;
     int frame_rate_mode = mc3_frame_rate_mode();
     network_rows_pass();
+    race_pending_pass();       /* START/BACK wait for this frame boundary */
+    race_test_pass();          /* MC3_TEST_RACE=1: unattended picker walk */
+    roam_auto_room_pass();     /* no pinned room: join the fullest one */
     port_test_pass();
     online_menu_patch();
     online_input_pass();       /* MC3_TEST_MENU only */
@@ -3879,6 +3889,60 @@ extern void sub_00348AF0(void);
 static time_t free_roam_setup_since;
 static void free_roam_setup_exit(int start);
 static int port_find_pending;            /* FIND A ROOM waiting for an answer */
+
+/* The Online Race room picker (sub_001801C0 wraps it). It is the Free Roam
+ * setup page without the city, the car and the nickname: the race lobby only
+ * needs to agree on the relay room. START opens the game's own System Link
+ * screen (event 0x20, the callback's own path), so Create/Join work as
+ * shipped and the relay carries the race in the chosen room. */
+static int race_room_active, race_room_requested;
+static int race_room_cursor = 1, race_room_vertical, race_room_direction;
+static int race_room_dispatching;
+static int race_pending;                 /* 1 start, 2 back: run next frame */
+static uint32_t race_room_row;
+static time_t race_room_since;
+static const char *port_title_name = "PORT OPTIONS";
+static void race_room_enter(void);
+static void race_room_exit(int start);
+static void race_lobby_open(void);
+static int race_picker_is_open(void) { return race_room_active; }
+static void race_test_start(void)
+{
+    race_room_dispatching = 1;
+    port_fire_event(0x7F31u);
+    race_room_dispatching = 0;
+}
+
+/* MC3_TEST_RACE=1: the unattended walk. Open Online, press Online Race, then
+ * START RACE, each at a frame boundary (the context the front end accepts a
+ * screen change from). It runs from the frame hook, not the menu patch: once
+ * the picker owns the list the menu patch stops matching it. */
+static void race_test_pass(void)
+{
+    static int race = -1, step, wait;
+    if (race < 0) {
+        const char *e = getenv("MC3_TEST_RACE");
+        race = e && e[0] == '1';
+    }
+    if (!race)
+        return;
+    if (step == 0 && online_labels_ready && ++wait >= 180) {
+        step = 1; wait = 0;
+        usb_gamepad_set_held(0, 0, 0);
+        online_frame_call(sub_0018C5A0);
+        fprintf(stderr, "[ONLINE] test hook: Online opened for the race test\n");
+    } else if (step == 1 && ++wait >= 90) {
+        step = 2; wait = 0;
+        online_frame_call(sub_001801C0);
+        fprintf(stderr, "[ONLINE] test hook: race item pressed\n");
+    } else if (step == 2 && race_picker_is_open() && ++wait >= 120) {
+        step = 3; wait = 0;
+        race_test_start();
+        fprintf(stderr, "[ONLINE] test hook: START RACE fired\n");
+    }
+}
+extern void sub_001801C0_gen(void);
+extern void sub_001801C0(void);
 
 /* Read by the autostart walker (src/autostart.c) so a test can wait for the
  * Port Options page instead of guessing that its press opened it. */
@@ -4231,6 +4295,61 @@ static void port_room_apply(int room)
     fprintf(stderr, "[PORT] room %d (applied now)\n", room);
 }
 
+/* Auto-match: unless the player (or the launcher) pinned a room, join the
+ * fullest room that has a free slot. This is the part that stops two people
+ * who just launched from sitting in different rooms, and it needs no UI on any
+ * platform. MC3_ROAM_AUTO=0 turns it off; MC3_ROAM_ROOM pins a room. */
+static int roam_auto_state = -1;         /* -1 unseen, 0 waiting, 1 done */
+static time_t roam_auto_deadline;
+
+static void roam_auto_room_pass(void)
+{
+    int age, players = 0, best;
+    if (roam_auto_state == 1)
+        return;
+    if (roam_auto_state < 0) {
+        const char *pin = getenv("MC3_ROAM_ROOM");
+        const char *off = getenv("MC3_ROAM_AUTO");
+        roam_auto_state = 0;
+        roam_auto_deadline = time(NULL) + 6;
+        if (pin && *pin) {
+            roam_auto_state = 1;          /* a room was chosen: leave it */
+            return;
+        }
+        if (off && off[0] == '0') {
+            roam_auto_state = 1;
+            return;
+        }
+        fprintf(stderr, "[ROAM] auto-match: looking for a room\n");
+    }
+    /* The session (and with it the relay address the census needs) can start a
+     * frame or two after this hook first runs, so keep asking until the
+     * deadline instead of giving up on the first answer. */
+    if (roam_census_age_ms() < 0) {
+        static time_t next_ask;
+        if (time(NULL) >= next_ask) {
+            next_ask = time(NULL) + 1;      /* never flood the relay */
+            if (roam_census_request() == 0)
+                fprintf(stderr, "[ROAM] auto-match: census asked\n");
+        }
+    }
+    age = roam_census_age_ms();
+    if (age >= 0 && age < 3000) {
+        best = roam_census_best(&players);
+        if (best >= 0) {
+            port_room_apply(best);
+            fprintf(stderr, "[ROAM] auto-matched to room %d (%d/8)\n", best, players);
+            roam_auto_state = 1;
+            return;
+        }
+    }
+    if (time(NULL) >= roam_auto_deadline) {
+        roam_auto_state = 1;
+        fprintf(stderr, "[ROAM] auto-match: no room from the relay, staying in %d\n",
+                port_room_get());
+    }
+}
+
 /* FIND A ROOM: ask, then move to the answer once it arrives (checked on every
  * label refresh, which runs while the list is on screen). */
 static void port_find_start(void)
@@ -4267,6 +4386,13 @@ static void port_find_poll(void)
     if (best < 0) {
         fprintf(stderr, "[PORT] find a room: nothing free, staying in %d\n",
                 port_room_get());
+        return;
+    }
+    if (best == port_room_get()) {
+        /* The census counts us, so the fullest room is often the one we are
+         * in: say so instead of "joining" it again. */
+        fprintf(stderr, "[PORT] find a room: already the fullest room (%d, %d/8)\n",
+                best, players);
         return;
     }
     fprintf(stderr, "[PORT] find a room: joining room %d (%d/8)\n", best, players);
@@ -4549,9 +4675,10 @@ static void port_labels(void)
         return;
     }
     port_find_poll();
-    if(free_roam_setup_active) {
+    if(free_roam_setup_active || race_room_active) {
         char text[96];
         int age=roam_census_age_ms(), here=roam_census_players(port_room_get());
+        time_t since = race_room_active ? race_room_since : free_roam_setup_since;
         if(age>=0 && age<30000) {
             free_roam_players_cached=here<0?0:here;
             free_roam_players_room=port_room_get();
@@ -4560,7 +4687,7 @@ static void port_labels(void)
         }
         if(free_roam_players_seen && time(NULL)-free_roam_players_seen<30 && free_roam_players_room==port_room_get())
             snprintf(text,sizeof text,"PLAYERS: %d / 8",free_roam_players_cached);
-        else snprintf(text,sizeof text,time(NULL)-free_roam_setup_since>6?"PLAYERS: UNAVAILABLE":"PLAYERS: CHECKING...");
+        else snprintf(text,sizeof text,time(NULL)-since>6?"PLAYERS: UNAVAILABLE":"PLAYERS: CHECKING...");
         port_text(free_roam_players_row,text);
     }
     if(free_roam_setup_active) {
@@ -4573,12 +4700,12 @@ static void port_labels(void)
     for(int k=0;k<port_row_n;k++){
         int i=port_row_id[k];char text[96];text[0]=0;
         windows_port_setting_label(i,text,sizeof text);
-        if(free_roam_setup_active && i==PORT_ROW_FIND && !port_find_pending && roam_census_age_ms()<0 &&
+        if((free_roam_setup_active||race_room_active) && i==PORT_ROW_FIND && !port_find_pending && roam_census_age_ms()<0 &&
            free_roam_players_seen && time(NULL)-free_roam_players_seen<30 && free_roam_find_cached[0])
             snprintf(text,sizeof text,"%s",free_roam_find_cached);
         port_text(port_rows[i],text);
     }
-    if(free_roam_setup_active && !port_find_pending && time(NULL)>=free_roam_census_next) {
+    if((free_roam_setup_active||race_room_active) && !port_find_pending && time(NULL)>=free_roam_census_next) {
         free_roam_census_next=time(NULL)+3;
         roam_census_request();
     }
@@ -4600,7 +4727,8 @@ static void port_title(int enter)
         memcpy(port_saved_title,(void *)XBOX_PTR(title),120);
         port_title_saved=1;
         memset((void *)XBOX_PTR(title),0,120);
-        memcpy((void *)XBOX_PTR(title),"PORT OPTIONS",12);
+        { size_t n = strlen(port_title_name); if (n > 119u) n = 119u;
+          memcpy((void *)XBOX_PTR(title), port_title_name, n); }
     } else if(enter==0 && port_title_saved) {
         memcpy((void *)XBOX_PTR(title),port_saved_title,120);
         port_title_saved=0;
@@ -4653,6 +4781,24 @@ static void port_build(void)
     int settings=15;
 #endif
     port_row_n=0;
+    if(race_room_active) {
+        port_add(0x7F33u,"RACE ROOM");
+        race_room_row=port_add(0x7F18u,NULL);
+        port_rows[PORT_ROW_ROOM]=race_room_row;
+        port_row_id[port_row_n++]=PORT_ROW_ROOM;
+        free_roam_players_row=port_add(0x7F33u,"PLAYERS: CHECKING...");
+        port_rows[PORT_ROW_FIND]=port_add(0x7F19u,NULL);
+        port_row_id[port_row_n++]=PORT_ROW_FIND;
+        port_add(0x7F31u,"START RACE");
+        port_add(0x7F32u,"BACK TO ONLINE");
+        /* A rebuild must not move the player's highlight back to the top. */
+        if(race_room_cursor<1 || race_room_cursor>5)race_room_cursor=1;
+        free_roam_select(race_room_cursor);
+        port_labels();
+        port_building=0;
+        fprintf(stderr,"[RACE] picker built: 6 rows, room %d\n",port_room_get());
+        return;
+    }
     if(free_roam_setup_active && free_roam_nickname_edit) {
         free_roam_nickname_status_row=port_add(0x7F33u,"ENTER NICKNAME - 24 CHARACTERS MAX");
         free_roam_nickname_row=port_add(0x7F33u,NULL);
@@ -4797,6 +4943,17 @@ void sub_0018D610(void)
     port_list_vtable=port_ram(port_list,0x300)?MEM32(port_list):0;
     if(port_ram(port_list,0x300))fprintf(stderr,"[PORT] Options context self=%08X list=%08X vtable=%08X page=%u capacity=%u columns=%u\n",port_self,port_list,port_list_vtable,MEM32(port_list+0x258),MEM32(port_list+0x230),MEM32(port_list+0x234));
     if(!port_context_valid()) {port_invalidate();return;}
+    if(race_room_requested) {
+        race_room_requested=0;race_room_active=1;port_open=1;
+        port_page=0;race_room_since=time(NULL);race_room_direction=0;
+        free_roam_players_seen=0;free_roam_find_cached[0]=0;race_room_vertical=0;
+        race_room_cursor=1;
+        XBOX_INPUT_STATE input={0};xbox_InputGetState(0,&input);
+        port_accept_down=input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]>XBOX_ANALOG_BUTTON_THRESHOLD;
+        port_back_down=input.Gamepad.bAnalogButtons[XBOX_BUTTON_B]>XBOX_ANALOG_BUTTON_THRESHOLD;
+        PortRegs r=port_save();port_title_name="RACE ROOM";port_build();port_title(1);port_restore(r);
+        fprintf(stderr,"[RACE] room picker opened (room %d)\n",port_room_get());
+    }
     if(free_roam_setup_requested) {
         free_roam_setup_requested=0;free_roam_setup_active=1;port_open=1;
         port_page=0;free_roam_census_frames=0;free_roam_room_direction=0;
@@ -4821,6 +4978,19 @@ void sub_00163830(void)
      * owns its cursor and actions; dispatch each press once from its input pass. */
     if(free_roam_setup_active && !free_roam_dispatching &&
        (event==0x7F18u || event==0x7F19u || (event>=0x7F31u && event<=0x7F38u) || event==0x7F3Au)) {
+        g_eax=0;g_esp+=8;return;
+    }
+    /* The race picker's own rows: swallowed unless our input pass dispatched
+     * them, so the native Options handler never acts on them twice. */
+    if(race_room_active && !race_room_dispatching &&
+       (event==0x7F18u || event==0x7F19u || (event>=0x7F31u && event<=0x7F33u))) {
+        g_eax=0;g_esp+=8;return;
+    }
+    if(race_room_active && event>=0x7F31u && event<=0x7F33u) {
+        if(event!=0x7F33u && !port_accept_down) {
+            port_accept_down=1;
+            race_room_exit(event==0x7F31u);
+        }
         g_eax=0;g_esp+=8;return;
     }
     if(free_roam_setup_active && event==0x7F3Au) {
@@ -4962,6 +5132,87 @@ static void free_roam_setup_exit(int start)
     fprintf(stderr,"[MATCHMAKING] %s\n",start?"starting Free Roam":"returned to Online");
 }
 
+/* The race room picker. Same canvas as the Free Roam setup page, but the only
+ * decision is the relay room: the race lobby on top of it is the game's own
+ * System Link screen. BACK returns to the Online screen; START re-runs the
+ * race item's own path (event 0x20) so Create Match / Join Game work as
+ * shipped and the relay carries the race in the chosen room. */
+static void race_room_enter(void)
+{
+    PortRegs r=port_save();
+    uint32_t front=MEM32(0x50F148u),owner=MEM32(front+0xCu);
+    race_room_requested=1;
+    g_ecx=MEM32(owner+0xCu);
+    port_push(7);port_push(0);
+    fprintf(stderr,"[RACE] entering the canvas (event 7)\n");
+    fflush(stderr);
+    sub_00163830_gen();
+    port_restore(r);
+    fprintf(stderr,"[RACE] room picker requested\n");
+}
+
+static void race_lobby_open(void)
+{
+    PortRegs r=port_save();
+    /* Run the race item's own body: it marks the item, does its network
+     * bring-up, plays its sound and opens the System Link screen (event 0x20).
+     * The body writes a flag at item+0x1E0 and pops its guest return address,
+     * so it gets a scratch object and a return address of our own. */
+    g_esp -= 0x200u;
+    uint32_t item = g_esp;
+    memset((void *)XBOX_PTR(item), 0, 0x200u);
+    g_ecx = item;
+    port_push(0);
+    sub_001801C0_gen();
+    port_restore(r);
+    fprintf(stderr,"[RACE] lobby screen opened (room %d)\n",port_room_get());
+}
+
+static void race_room_exit(int start)
+{
+    /* The press arrives from the front end's draw pass, and a screen change
+     * started there is dropped (or drawn half-way). Record it and let the
+     * frame hook run it, which is the context the menu's own actions use. */
+    race_pending = start ? 1 : 2;
+    fprintf(stderr,"[RACE] %s requested (next frame)\n",
+            start?"start":"back");
+}
+
+static void race_pending_pass(void)
+{
+    int what = race_pending;
+    if (!what)
+        return;
+    race_pending = 0;
+    PortRegs r=port_save();
+    port_title(0);
+    port_title_name="PORT OPTIONS";
+    race_room_active=race_room_requested=0;
+    port_open=0;port_find_pending=0;
+    if(what==1) race_lobby_open();
+    else online_frame_call(sub_0018C5A0_gen);
+    port_restore(r);
+    fprintf(stderr,"[RACE] %s\n",what==1?"starting the race lobby":"back to the Online screen");
+}
+
+/* Online Race's own item callback (0x1801C0). The lift keeps this wrapper and
+ * renames the generated body to sub_001801C0_gen (tools/regen.sh, LIFT_ONLY=1).
+ *
+ * 0.2.5 ships the straight path: rooms are handled by auto-match (join the
+ * fullest room) and by an invite link, so this opens the lobby as shipped.
+ * The dedicated room page is kept for 0.2.6 behind MC3_RACE_PAGE=1. */
+void sub_001801C0(void)
+{
+    const char *page = getenv("MC3_RACE_PAGE");
+    if (!(page && page[0] == '1')) {
+        sub_001801C0_gen();
+        return;
+    }
+    fprintf(stderr, "[RACE] room page enabled (MC3_RACE_PAGE)\n");
+    race_room_enter();
+    g_esp += 4;   /* guest RET: this callback has no stack arguments */
+}
+
 /* The setup owns navigation; the inherited Options list's input buffer may
  * still refer to its previous page. Select through the native list API so
  * highlights and scrolling agree with the action we dispatch. */
@@ -5033,9 +5284,41 @@ void sub_0018D590(void)
             if(free_roam_nickname_edit && erase && !free_roam_nickname_delete_down)free_roam_nickname_key(1);
             free_roam_nickname_delete_down=erase;
         }
+        if(race_room_active) {
+            int vertical=(input.Gamepad.wButtons&XBOX_GAMEPAD_DPAD_UP) || input.Gamepad.sThumbLY>16000 ? -1
+                       : (input.Gamepad.wButtons&XBOX_GAMEPAD_DPAD_DOWN) || input.Gamepad.sThumbLY < -16000 ? 1 : 0;
+            if(vertical && vertical!=race_room_vertical) {
+                static const int rows[]={1,3,4,5};
+                int index=0;
+                for(int k=0;k<4;k++)if(rows[k]==race_room_cursor)index=k;
+                race_room_cursor=rows[(index+vertical+4)%4];
+                free_roam_select(race_room_cursor);
+            }
+            race_room_vertical=vertical;
+            int accept=input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]>XBOX_ANALOG_BUTTON_THRESHOLD;
+            if(accept && !port_accept_down) {
+                uint32_t event=race_room_cursor==1?0x7F18u:race_room_cursor==3?0x7F19u:
+                               race_room_cursor==4?0x7F31u:0x7F32u;
+                race_room_dispatching=1;
+                port_fire_event(event);
+                race_room_dispatching=0;
+            }
+            if(!race_room_active) {g_esp+=4;return;}
+            if(vertical || accept) {PortRegs r=port_save();port_labels();port_restore(r);g_esp+=4;return;}
+            int direction=(input.Gamepad.wButtons&XBOX_GAMEPAD_DPAD_LEFT) || input.Gamepad.sThumbLX < -16000 ? -1
+                        : (input.Gamepad.wButtons&XBOX_GAMEPAD_DPAD_RIGHT) || input.Gamepad.sThumbLX > 16000 ? 1 : 0;
+            if(direction && direction!=race_room_direction) {
+                PortRegs r=port_save();
+                if(race_room_cursor==1)port_online_change(PORT_ROW_ROOM,direction);
+                port_labels();port_restore(r);
+            }
+            race_room_direction=direction;
+            if(direction) {g_esp+=4;return;}
+        }
         if(port_open && down && !port_back_down) {
             if(free_roam_nickname_edit)free_roam_nickname_finish(0);
             else if(free_roam_setup_active)free_roam_setup_exit(0);
+            else if(race_room_active)race_room_exit(0);
             else port_parent();
             port_back_release=1;port_back_down=down;g_esp+=4;return;
         }
