@@ -1,9 +1,14 @@
 #import <UIKit/UIKit.h>
+#import <WebKit/WebKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <QuartzCore/QuartzCore.h>
 #import "ios_xdvdfs.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 #ifndef MC3_VERSION
 #  define MC3_VERSION "dev"
@@ -57,7 +62,17 @@ void ios_haptic_tick(int strong){
 @property(nonatomic,strong) NSTimer *timer;
 @property(nonatomic) BOOL done,busy,verified;
 @property(nonatomic) UIBackgroundTaskIdentifier backgroundTask;
+@property(nonatomic,strong) WKWebView *online;
+@property(nonatomic,strong) id onlineBridge;
+@property(nonatomic) BOOL onlineLoaded;
+@property(nonatomic) double lastOnlinePush;
 - (void)acceptISOURL:(NSURL*)url;
+- (void)onlineAction:(NSString*)action data:(NSDictionary*)data;
+- (void)onlineRefresh;
+@end
+
+@interface RedubOnlineBridge : NSObject <WKScriptMessageHandler>
+@property(nonatomic,weak) ReDUBLauncher *launcher;
 @end
 
 static __weak ReDUBLauncher *s_activeLauncher;
@@ -104,7 +119,7 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  if(s_pendingISOURL)[self acceptISOURL:s_pendingISOURL];
 }
 - (void)dealloc {if(s_activeLauncher==self)s_activeLauncher=nil;}
-- (void)tick{self.footer.text=self.status;}
+- (void)tick{self.footer.text=self.status;if([self.page isEqual:@"Online"])[self onlineRefresh];}
 - (UIButton*)button:(NSString*)title frame:(CGRect)frame parent:(UIView*)parent action:(SEL)action primary:(BOOL)primary {
  UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem];b.frame=frame;b.backgroundColor=RGB(primary?0xEE3E50:0x0F172A);b.layer.cornerRadius=9;[b setTitle:title forState:UIControlStateNormal];[b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];b.titleLabel.font=[UIFont boldSystemFontOfSize:14];[b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];[parent addSubview:b];return b;
 }
@@ -139,8 +154,8 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
    [self label:@"ReDUB" size:26 bold:YES frame:CGRectMake(16,16,rw-20,42) parent:self.rail muted:NO];
   }
  }
- NSArray *pages=@[@"Game",@"Install",@"Settings",@"Support",@"About"];
- for(NSUInteger i=0;i<pages.count;i++){CGFloat y=i<3?navTop+i*49:MAX(228,self.rail.bounds.size.height-100)+(i-3)*45;UIButton *b=[self button:pages[i] frame:CGRectMake(9,y,rw-18,41) parent:self.rail action:@selector(nav:) primary:[self.page isEqual:pages[i]]];b.enabled=!self.busy;}
+ NSArray *pages=@[@"Game",@"Online",@"Install",@"Settings",@"Support",@"About"];
+ for(NSUInteger i=0;i<pages.count;i++){CGFloat y=i<3?navTop+i*49:MAX(228,self.rail.bounds.size.height-155)+(i-3)*45;UIButton *b=[self button:pages[i] frame:CGRectMake(9,y,rw-18,41) parent:self.rail action:@selector(nav:) primary:[self.page isEqual:pages[i]]];b.enabled=!self.busy;}
  CGFloat x=22,cw=w-44;
  if([self.page isEqual:@"Game"]){
  CGFloat heroH=MAX(150,MIN(280,h-160));UIView *hero=[[UIView alloc]initWithFrame:CGRectMake(0,0,w,heroH)];hero.clipsToBounds=YES;[self.pane addSubview:hero];
@@ -153,6 +168,30 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  CGFloat y=heroH+105;[self button:self.verified?@"Play":@"Install" frame:CGRectMake(x,y,MAX(110,cw*.4),48) parent:self.pane action:@selector(play) primary:YES];
  [self button:@"Verify setup" frame:CGRectMake(x+cw*.43,y,cw*.27,48) parent:self.pane action:@selector(verify) primary:NO];
  [self button:@"Game files" frame:CGRectMake(x+cw*.73,y,cw*.27,48) parent:self.pane action:@selector(files) primary:NO];self.pane.contentSize=CGSizeMake(w,y+70);
+ } else if([self.page isEqual:@"Online"]){
+ /* The shared page (ui/online.html, also hosted by Windows and Android):
+  * the launcher answers its calls through the "redub" message handler. */
+ if(!self.online){
+  WKWebViewConfiguration *cfg=[WKWebViewConfiguration new];
+  WKUserContentController *ucc=[WKUserContentController new];
+  RedubOnlineBridge *b=[RedubOnlineBridge new];b.launcher=self;
+  [ucc addScriptMessageHandler:b name:@"redub"];
+  cfg.userContentController=ucc;
+  self.onlineBridge=b;
+  self.online=[[WKWebView alloc]initWithFrame:CGRectZero configuration:cfg];
+  self.online.scrollView.scrollEnabled=NO;
+  self.online.backgroundColor=RGB(0x080D1A);
+  self.online.scrollView.backgroundColor=RGB(0x080D1A);
+ }
+ self.online.frame=CGRectMake(0,0,w,h);
+ if(self.online.superview!=self.pane)[self.pane addSubview:self.online];
+ if(!self.onlineLoaded){
+  self.onlineLoaded=YES;
+  NSString *path=[NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Assets/online.html"];
+  [self.online loadFileURL:[NSURL fileURLWithPath:path] allowingReadAccessToURL:[NSURL fileURLWithPath:NSBundle.mainBundle.bundlePath]];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{[self onlineRefresh];});
+ }
+ self.pane.contentSize=CGSizeMake(w,h);
  } else if([self.page isEqual:@"Install"]){
  [self label:@"Install ReDUB" size:27 bold:YES frame:CGRectMake(x,16,cw,38) parent:self.pane muted:NO];
  [self label:@"Select your original Xbox DUB Edition Remix ISO. PS2 and Switch images are not supported." size:13 bold:NO frame:CGRectMake(x,59,cw,48) parent:self.pane muted:YES];
@@ -387,6 +426,137 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
  if(self.busy)return;self.busy=YES;self.status=@"Verifying default.xbe…";
  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{char err[512];BOOL ok=ios_disc_verify(self.activeGame.fileSystemRepresentation,err,sizeof err);NSString *message=ok?@"Supported Xbox Remix executable verified. Game assets are checked when used by the runtime.":[NSString stringWithUTF8String:err];dispatch_async(dispatch_get_main_queue(),^{self.busy=NO;self.verified=ok;self.status=ok?@"Verification passed":@"Verification failed";[self render];[self alert:message];});});
 }
+/* ---- Online: the shared page, answered by this launcher ------------------ */
+
+static NSString *JsonStr(NSString *s){
+ if(!s)return @"null";
+ NSMutableString *b=[NSMutableString stringWithString:@"\""];
+ for(NSUInteger i=0;i<s.length;i++){
+  unichar c=[s characterAtIndex:i];
+  if(c=='"'||c=='\\')[b appendFormat:@"\\%C",c];
+  else if(c=='\n')[b appendString:@"\\n"];
+  else if(c=='\r')[b appendString:@"\\r"];
+  else if(c=='\t')[b appendString:@"\\t"];
+  else if(c<32)[b appendFormat:@"\\u%04x",(unsigned)c];
+  else[b appendFormat:@"%C",c];
+ }
+ [b appendString:@"\""];
+ return b;
+}
+
+- (BOOL)persistSettings:(NSDictionary*)updated{
+ NSMutableString *text=[NSMutableString stringWithString:@"# ReDUB iOS settings\n"];
+ for(NSString *k in [[updated allKeys] sortedArrayUsingSelector:@selector(compare:)])
+  [text appendFormat:@"%@=%@\n",k,updated[k]];
+ NSError *error=nil;
+ if(![text writeToFile:Env() atomically:YES encoding:NSUTF8StringEncoding error:&error]){
+  [self alert:error.localizedDescription];return NO;
+ }
+ self.settings=[updated mutableCopy];
+ for(NSString *k in updated)setenv([k UTF8String],[updated[k] UTF8String],1);
+ return YES;
+}
+
+- (NSString*)udpQuery:(NSString*)query host:(NSString*)host{
+ int s=socket(AF_INET,SOCK_DGRAM,0);
+ if(s<0)return nil;
+ struct timeval tv={2,0};
+ setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof tv);
+ struct sockaddr_in a;memset(&a,0,sizeof a);
+ a.sin_family=AF_INET;a.sin_port=htons(47210);
+ a.sin_addr.s_addr=inet_addr(host.UTF8String);
+ const char *q=query.UTF8String;
+ NSString *out=nil;
+ if(sendto(s,q,strlen(q),0,(struct sockaddr*)&a,sizeof a)>0){
+  char buf[2048];
+  ssize_t r=recv(s,buf,sizeof buf-1,0);
+  if(r>0){buf[r]=0;out=[NSString stringWithUTF8String:buf];}
+ }
+ close(s);
+ return out;
+}
+
+- (void)onlineRefresh{
+ if(!self.online)return;
+ double now=CFAbsoluteTimeGetCurrent();
+ if(now-self.lastOnlinePush<2.0)return;   /* the skin is polled, not hammered */
+ self.lastOnlinePush=now;
+ NSString *host=self.settings[@"MC3_ROAM_JOIN"];
+ if(!host.length)host=@"162.35.56.66";
+ dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+  double t0=CFAbsoluteTimeGetCurrent();
+  NSString *rooms=[self udpQuery:@"MC3Q" host:host];
+  int ms=rooms?(int)((CFAbsoluteTimeGetCurrent()-t0)*1000.0):-1;
+  NSString *roster=rooms?[self udpQuery:@"MC3P" host:host]:nil;
+  dispatch_async(dispatch_get_main_queue(),^{
+   [self pushOnline:rooms roster:roster ms:ms];
+  });
+ });
+}
+
+- (void)pushOnline:(NSString*)rooms roster:(NSString*)roster ms:(int)ms{
+ if(!self.online)return;
+ long mine=[self.settings[@"MC3_ROAM_ROOM"] longValue];
+ NSMutableString *rj=[NSMutableString stringWithString:@"["];
+ BOOL first=YES;
+ if([rooms hasPrefix:@"MC3ROOMS"]){
+  NSArray *p=[rooms componentsSeparatedByString:@" "];
+  for(NSUInteger i=3;i<p.count;i++){
+   NSArray *kv=[p[i] componentsSeparatedByString:@":"];
+   if(kv.count!=2)continue;
+   if(!first)[rj appendString:@","];first=NO;
+   [rj appendFormat:@"{\"n\":%@,\"players\":%@}",kv[0],kv[1]];
+  }
+ }
+ [rj appendString:@"]"];
+ NSMutableString *pj=[NSMutableString stringWithString:@"["];
+ first=YES;
+ if([roster hasPrefix:@"MC3PLAYERS"]){
+  NSArray *lines=[roster componentsSeparatedByString:@"\n"];
+  for(NSUInteger i=1;i<lines.count;i++){
+   NSArray *f=[lines[i] componentsSeparatedByString:@"|"];
+   if(f.count<3)continue;
+   if(!first)[pj appendString:@","];first=NO;
+   [pj appendFormat:@"{\"room\":%@,\"status\":%@,\"name\":%@}",f[0],f[1],JsonStr(f[2])];
+  }
+ }
+ [pj appendString:@"]"];
+ NSString *name=self.settings[@"MC3_ROAM_NAME"];
+ if(!name)name=@"";
+ NSString *json=[NSString stringWithFormat:
+  @"{\"ms\":%d,\"yourRoom\":%ld,\"playerName\":%@,\"rooms\":%@,\"roster\":%@,\"rosterOk\":%@}",
+  ms,mine,JsonStr(name),rj,pj,[roster hasPrefix:@"MC3PLAYERS"]?@"true":@"false"];
+ [self.online evaluateJavaScript:[NSString stringWithFormat:@"redubApply(%@)",json] completionHandler:nil];
+}
+
+- (void)onlineAction:(NSString*)action data:(NSDictionary*)data{
+ if([action isEqualToString:@"refresh"]){[self onlineRefresh];return;}
+ if([action isEqualToString:@"join"]){
+  long room=[data[@"room"] longValue];
+  if(room<0||room>255)return;
+  NSMutableDictionary *u=[self.settings mutableCopy];
+  u[@"MC3_ROAM_ROOM"]=[NSString stringWithFormat:@"%ld",room];
+  if([self persistSettings:u]){
+   self.status=[NSString stringWithFormat:@"Room %ld saved. Starting the game.",room];
+   [self play];
+  }
+  return;
+ }
+ if([action isEqualToString:@"invite"]){
+  long room=[self.settings[@"MC3_ROAM_ROOM"] longValue];
+  if(room<=0)room=1+(long)arc4random_uniform(254);
+  NSMutableDictionary *u=[self.settings mutableCopy];
+  u[@"MC3_ROAM_ROOM"]=[NSString stringWithFormat:@"%ld",room];
+  [self persistSettings:u];
+  NSString *text=[NSString stringWithFormat:
+   @"ReDUB - join my race in room %ld\nredub://room/%ld\n(In ReDUB: Online > Join a friend > %ld)",
+   room,room,room];
+  UIPasteboard.generalPasteboard.string=text;
+  [self alert:[NSString stringWithFormat:@"Invite copied for room %ld.\n\n%@",room,text]];
+  [self onlineRefresh];
+ }
+}
+
 - (void)play {
  fprintf(stderr,"[IOS STARTUP] Play pressed: game=%s verified=%d\n",self.activeGame.fileSystemRepresentation,self.verified?1:0);fflush(stderr);
  if(self.busy)return;if(!self.verified){self.page=@"Install";[self render];return;}
@@ -441,3 +611,13 @@ int ios_launcher_run(void) {
  return 1;
  }
 }
+
+@implementation RedubOnlineBridge
+- (void)userContentController:(WKUserContentController*)ucc didReceiveScriptMessage:(WKScriptMessage*)m{
+ if(![m.name isEqualToString:@"redub"])return;
+ NSDictionary *body=[m.body isKindOfClass:NSDictionary.class]?m.body:nil;
+ NSString *action=body[@"action"];
+ NSDictionary *data=[body[@"data"] isKindOfClass:NSDictionary.class]?body[@"data"]:@{};
+ if(action)[self.launcher onlineAction:action data:data];
+}
+@end

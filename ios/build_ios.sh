@@ -106,6 +106,6 @@ objs=$(find "$OBJ" -name '*.o' | tr '\n' ' ')
     -framework CoreVideo -framework GameController -framework Metal -framework MediaPlayer \
     -framework CoreMotion -framework Security -framework SystemConfiguration \
     -framework CoreHaptics -framework ImageIO -framework CoreText -framework UniformTypeIdentifiers \
-    -framework CoreBluetooth \
+    -framework CoreBluetooth -framework WebKit \
     -lSystem -lobjc -lc++ -lz -liconv 2>&1 | head -40
 [ -f "$OBJ/mcdub3remix" ] && echo "binary: $OBJ/mcdub3remix ($(stat -c %s "$OBJ/mcdub3remix") bytes)"

@@ -84,11 +84,12 @@ def payload_files(appdir: Path) -> None:
     assets = appdir / "Assets"
     assets.mkdir()
     for name, src in (("hero.jpg", ROOT / "launcher" / "art" / "hero.jpg"),
-                      ("logo.png", ROOT / "launcher" / "art" / "logo.png")):
+                      ("logo.png", ROOT / "launcher" / "art" / "logo.png"),
+                      ("online.html", ROOT / "ui" / "online.html")):
         if src.is_file():
             shutil.copy2(src, assets / name)
         else:
-            print(f"warning: no {src}: the launcher hero will be blank")
+            print(f"warning: no {src}: the launcher asset will be missing")
 
     hd = ROOT / "hd"
     if (hd / "textures").is_dir():
