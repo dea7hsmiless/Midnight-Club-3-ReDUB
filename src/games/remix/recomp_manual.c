@@ -67,6 +67,7 @@ static void port_gameplay_update(void);
  * These forward declarations let the overrides below call it; each entry
  * point does nothing unless roam_running() (the transport started). */
 int  roam_running(void);                        /* net/roam/roam_api.h */
+void roam_set_room(uint32_t room);              /* net/roam/roam_api.h: the city's room */
 static void roam_build(void);                   /* roam_game.c: the cruise's remote slots */
 static void roam_built(void);
 static void roam_pool_load(void);               /* roam_pool.c: standalone cars after the load */
@@ -3056,9 +3057,6 @@ static void unlock_all_pass(void);      /* unlock_all.c, included at the end */
  * These are added only when the override exists in the lift; LIFT_ONLY=1
  * tools/regen.sh keeps them. */
 extern void sub_0018C530_gen(void);
-/* Set when the Online screen's cruise item is chosen; online_input_pass()
- * performs the same presses a player would to reach Arcade. */
-static int online_cruise_pending;
 void sub_0018C530(void) { online_leave("Arcade"); sub_0018C530_gen(); }
 extern void sub_0018C560_gen(void);
 void sub_0018C560(void) { online_leave("Career"); sub_0018C560_gen(); }
@@ -3096,26 +3094,20 @@ void sub_0018C5A0(void)
  * service; here it is a dead end - pressing it opens "New Account", observed on
  * screen. Free Roam therefore cannot be reached through the item as shipped.
  *
- * In a session this makes that item mean Free Roam instead, by delegating to
- * Arcade's own menu callback (sub_0018C530_gen). That function already does the
- * whole sequence correctly - [0x50F14C] = 0, copy the picked car, sub_0013A590,
- * Go(0x19), the Arcade setup screen - so nothing here is rebuilt by hand.
+ * With online play on, the item opens the dedicated Free Roam setup page
+ * (free_roam_setup_enter): the Options canvas carries the city, the room and
+ * its fullness, FIND A ROOM, and the nickname editor. Start then calls the
+ * Cruise loader directly (free_roam_start_cruise) instead of routing through
+ * Arcade, so the page never depends on the Arcade menu's state.
  *
- * The earlier attempt hand-rolled that sequence with its own stack pushes and
- * killed the game: "[PB] NOP(...) trap still pending after 2 s", i.e. the
- * pushbuffer executor stalled, because calling a lifted function with a hand
- * built frame is not the same as RECOMP_ABI_CALL doing it. Calling the lifted
- * callback instead is both shorter and correct.
- *
- * Note it calls the _gen: sub_0018C530 (ours) ends the session, which is right
- * when the player picks Arcade from the menu but wrong here.
+ * The callback must consume its guest return address (g_esp += 4). An earlier
+ * version returned without it; that left the caller's frame shifted, dispatched
+ * a garbage function pointer and stalled the pushbuffer for ever ("[PB] NOP ...
+ * trap still pending"). tools/test_online_abi.py covers the return on both
+ * paths.
  *
  * Outside a session this is the untouched callback. */
 extern void sub_00180160_gen(void);
-extern void sub_0018C530_gen(void);
-/* Set by the Online screen's cruise item; online_cruise_pass() opens Arcade on
- * the next frame, outside the press handler. */
-static int online_cruise_pending;
 /* Online play is on unless MC3_ONLINE=0 says otherwise (ios_host.c applies * that default at boot; the file can carry the address on any platform). */
 static int online_play_enabled(void)
 {
@@ -3127,6 +3119,8 @@ static int online_play_enabled(void)
     roam = getenv("MC3_ROAM");
     return (join && *join) || (roam && *roam && strcmp(roam, "0") != 0);
 }
+static void free_roam_setup_enter(void);
+
 void sub_00180160(void)
 {
     extern int online_session_wanted(void);
@@ -3141,22 +3135,7 @@ void sub_00180160(void)
     }
     if (online_session_wanted())
         online_enter("networking screen, Online Cruise");
-    /* Do not change screens from inside this press handler. The front end calls
-     * it mid-layout: opening Arcade from here re-enters Go(screen) while the
-     * Online screen is still half-built, and that screen's backdrop is never
-     * torn down, so it keeps drawing over Arcade and the cruise loading screen.
-     * online_cruise_pass() makes the move at the top of the next game frame
-     * instead, where Go(screen) is called the way the game calls it. */
-    /* The front end's menu activation waits for its item's action to change the
-     * screen. Returning without one leaves it spinning for ever in a UI list
-     * walk with the guest lock held: the GPU trap is then never taken and the
-     * game freezes. Measured on iPhone and PC: "cruise: requested" with no
-     * "Arcade opened", then "[PB] NOP ... trap still pending" for ever. The
-     * game's own items make the same Go() from this callback, so make it here
-     * too, and accept the backdrop glitch until it can be fixed properly. */
-    fprintf(stderr, "[ONLINE] cruise: requested\n");
-    sub_0018C530_gen();
-    fprintf(stderr, "[ONLINE] cruise: Arcade opened synchronously\n");
+    free_roam_setup_enter();
     g_esp += 4;  /* guest RET: this callback has no stack arguments */
 }
 /** "Online" keeps the Networking item's place
@@ -3360,6 +3339,7 @@ static void online_labels_apply(void)
     }
 }
 
+static int online_at_main_menu(void);   /* below; the MC3_OPEN_ONLINE gate */
 void online_menu_patch(void)
 {
     uint32_t fe, lst, col, rows, count;
@@ -3430,8 +3410,10 @@ void online_menu_patch(void)
         }
         if (wanted && !opened) {
             /* Wait for the menu to be built and its opening press released: a
-             * held A would activate the Online screen's first item. */
-            if (online_labels_ready && ++idle >= 60) {
+             * held A would activate the Online screen's first item. The label
+             * strings are interned long before the menu is shown, so also wait
+             * for the main menu itself, or the screen opens over the profile. */
+            if (online_labels_ready && online_at_main_menu() && ++idle >= 60) {
                 opened = 1;
                 usb_gamepad_set_held(0, 0, 0);
                 online_frame_call(sub_0018C5A0);
@@ -3499,6 +3481,9 @@ static int online_at_main_menu(void)
     return count >= 4u && count <= 16u;
 }
 
+/* The setup page state, declared here because the MC3_TEST_MENU walker below
+ * must stop pressing once the page is up. */
+static int free_roam_setup_active;
 static void online_input_pass(void)
 {
     /* 0 idle, 1 back held, 2 back released, 3 wait menu, 4 up held,
@@ -3516,7 +3501,7 @@ static void online_input_pass(void)
          * swallowed. The presses stop the moment the item is chosen, so the
          * product sequence below takes over cleanly. */
         static int phase, hold, tries;
-        if (!online_cruise_pending) {
+        if (!free_roam_setup_active) {
             if (phase < 3) {
                 if (online_labels_ready && online_at_main_menu() && ++test_frames > 40) {
                     usb_gamepad_set_held(0, 0x02u, 0);      /* Down */
@@ -3592,19 +3577,6 @@ static void port_test_pass(void)
     }
 }
 
-/* Opens Arcade for the Online screen's cruise item, one frame after the press:
- * Go(screen) runs here at the top of a normal game frame, with no front-end
- * layout or animation half-done around it, which is what keeps the Online
- * screen's scene from being left alive on top of the next screens. */
-static void online_cruise_pass(void)
-{
-    if (!online_cruise_pending)
-        return;
-    online_cruise_pending = 0;
-    online_frame_call(sub_0018C530_gen);
-    fprintf(stderr, "[ONLINE] cruise: Arcade opened from the frame hook\n");
-}
-
 void sub_0020B6F0(void)
 {
     extern void online_menu_patch(void);
@@ -3619,7 +3591,6 @@ void sub_0020B6F0(void)
     static unsigned ped_steps;
     float dt, real;
     int frame_rate_mode = mc3_frame_rate_mode();
-    online_cruise_pass();
     network_rows_pass();
     port_test_pass();
     online_menu_patch();
@@ -3819,6 +3790,7 @@ void sub_003C3D23(void)
 
 /* Port Options uses the original Xbox list, text and controller navigation. */
 #include "input/xinput_xbox.h"
+#include "net/roam/roam_name.h"
 extern void sub_0018D610_gen(void);
 void sub_0018D610(void);
 extern void sub_00163830_gen(void);
@@ -3872,6 +3844,33 @@ static uint32_t port_list_vtable;
 static int port_open,port_back_down,port_back_release;
 static int port_accept_down;
 static int port_building;
+static int free_roam_setup_requested;
+static uint32_t free_roam_players_row,free_roam_city_row;
+static int free_roam_city;
+static const char *const free_roam_city_names[]={"SAN DIEGO","ATLANTA","DETROIT","TOKYO"};
+static int free_roam_start_cruise(void);
+extern void sub_0013AB20(void),sub_00184FD0(void);
+static int free_roam_census_frames, free_roam_room_direction;
+static int free_roam_cursor=1, free_roam_vertical, free_roam_dispatching;
+static time_t free_roam_census_next, free_roam_players_seen;
+static int free_roam_players_cached, free_roam_players_room;
+static char free_roam_find_cached[96];
+static void free_roam_select(int row);
+static void port_build(void);
+static void free_roam_nickname_begin(void);
+static void free_roam_nickname_finish(int save);
+static int free_roam_nickname_edit,free_roam_nickname_character,free_roam_nickname_delete_down;
+static atomic_flag free_roam_nickname_lock=ATOMIC_FLAG_INIT;
+static atomic_int free_roam_nickname_action;
+static char free_roam_nickname_buffer[MC3_NICKNAME_MAX+1],free_roam_nickname_error[64];
+static uint32_t free_roam_nickname_row,free_roam_character_row,free_roam_nickname_status_row;
+static const char free_roam_characters[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 _-.";
+extern int windows_port_save_nickname(const char *name);
+extern int roam_set_name(const char *name);
+extern void xbox_text_input_set(int on,void (*text)(const char *),void (*key)(int));
+extern void sub_00348AF0(void);
+static time_t free_roam_setup_since;
+static void free_roam_setup_exit(int start);
 static int port_find_pending;            /* FIND A ROOM waiting for an answer */
 
 /* Read by the autostart walker (src/autostart.c) so a test can wait for the
@@ -3944,6 +3943,8 @@ static int port_context_valid(void)
 }
 static void port_invalidate(void)
 {
+    if(free_roam_nickname_edit)xbox_text_input_set(0,NULL,NULL);
+    free_roam_nickname_edit=0;free_roam_setup_active=0;
     port_find_pending=0;              /* the search belonged to that page */
     port_open=port_back_release=port_back_down=port_accept_down=0;
     port_page=0;port_row_n=0;
@@ -4494,8 +4495,8 @@ static void port_fire_event(uint32_t ev)
     if (!port_context_valid())
         return;
     r = port_save();
-    port_push(0);          /* the return address the dispatcher pops */
     port_push(ev);
+    port_push(0);          /* guest CALL pushes return address above arguments */
     sub_00163830();
     port_restore(r);
     fprintf(stderr, "[PORT] test hook: event %04X fired\n", (unsigned)ev);
@@ -4503,13 +4504,76 @@ static void port_fire_event(uint32_t ev)
 
 static int port_page_open(void) { return port_open; }
 
+static void nickname_lock(void) {while(atomic_flag_test_and_set_explicit(&free_roam_nickname_lock,memory_order_acquire)){} }
+static void nickname_unlock(void) {atomic_flag_clear_explicit(&free_roam_nickname_lock,memory_order_release);}
+static void free_roam_nickname_text(const char *text)
+{
+    nickname_lock();
+    size_t n=strlen(free_roam_nickname_buffer);
+    for(const unsigned char *p=(const unsigned char *)text;*p;p++)
+        if(mc3_nickname_char(*p)&&n<MC3_NICKNAME_MAX)free_roam_nickname_buffer[n++]=(char)*p;
+    free_roam_nickname_buffer[n]=0;free_roam_nickname_error[0]=0;
+    nickname_unlock();
+}
+static void free_roam_nickname_key(int key)
+{
+    if(key==1) {
+        nickname_lock();size_t n=strlen(free_roam_nickname_buffer);
+        if(n)free_roam_nickname_buffer[n-1]=0;
+        free_roam_nickname_error[0]=0;nickname_unlock();
+    } else atomic_store(&free_roam_nickname_action,key);
+}
+static void free_roam_nickname_snapshot(char name[MC3_NICKNAME_MAX+1],char error[64])
+{
+    nickname_lock();memcpy(name,free_roam_nickname_buffer,MC3_NICKNAME_MAX+1);
+    memcpy(error,free_roam_nickname_error,64);nickname_unlock();
+}
+
 static void port_labels(void)
 {
     if(!port_context_valid())return;
+    if(free_roam_nickname_edit) {
+        char name[MC3_NICKNAME_MAX+1],error[64],text[96];
+        free_roam_nickname_snapshot(name,error);
+        snprintf(text,sizeof text,"NICKNAME: %s_",name);port_text(free_roam_nickname_row,text);
+        snprintf(text,sizeof text,"LETTER: < %c > (A TO ADD)",free_roam_characters[free_roam_nickname_character]);
+        port_text(free_roam_character_row,text);
+        port_text(free_roam_nickname_status_row,error[0]?error:"TYPE OR A ADD - X DELETE");
+        return;
+    }
     port_find_poll();
+    if(free_roam_setup_active) {
+        char text[96];
+        int age=roam_census_age_ms(), here=roam_census_players(port_room_get());
+        if(age>=0 && age<30000) {
+            free_roam_players_cached=here<0?0:here;
+            free_roam_players_room=port_room_get();
+            free_roam_players_seen=time(NULL)-age/1000;
+            port_online_label(PORT_ROW_FIND,free_roam_find_cached,sizeof free_roam_find_cached);
+        }
+        if(free_roam_players_seen && time(NULL)-free_roam_players_seen<30 && free_roam_players_room==port_room_get())
+            snprintf(text,sizeof text,"PLAYERS: %d / 8",free_roam_players_cached);
+        else snprintf(text,sizeof text,time(NULL)-free_roam_setup_since>6?"PLAYERS: UNAVAILABLE":"PLAYERS: CHECKING...");
+        port_text(free_roam_players_row,text);
+    }
+    if(free_roam_setup_active) {
+        char text[96];const char *name=getenv("MC3_ROAM_NAME");
+        snprintf(text,sizeof text,"ENTER NICKNAME: %s",name&&*name?name:"Player");
+        port_text(free_roam_nickname_row,text);
+        snprintf(text,sizeof text,"CITY: %s",free_roam_city_names[free_roam_city]);
+        port_text(free_roam_city_row,text);
+    }
     for(int k=0;k<port_row_n;k++){
         int i=port_row_id[k];char text[96];text[0]=0;
-        windows_port_setting_label(i,text,sizeof text);port_text(port_rows[i],text);
+        windows_port_setting_label(i,text,sizeof text);
+        if(free_roam_setup_active && i==PORT_ROW_FIND && !port_find_pending && roam_census_age_ms()<0 &&
+           free_roam_players_seen && time(NULL)-free_roam_players_seen<30 && free_roam_find_cached[0])
+            snprintf(text,sizeof text,"%s",free_roam_find_cached);
+        port_text(port_rows[i],text);
+    }
+    if(free_roam_setup_active && !port_find_pending && time(NULL)>=free_roam_census_next) {
+        free_roam_census_next=time(NULL)+3;
+        roam_census_request();
     }
 }
 static uint32_t port_add(uint32_t event,const char *text)
@@ -4582,6 +4646,34 @@ static void port_build(void)
     int settings=13;
 #endif
     port_row_n=0;
+    if(free_roam_setup_active && free_roam_nickname_edit) {
+        free_roam_nickname_status_row=port_add(0x7F33u,"ENTER NICKNAME - 24 CHARACTERS MAX");
+        free_roam_nickname_row=port_add(0x7F33u,NULL);
+        free_roam_character_row=port_add(0x7F35u,NULL);
+        port_add(0x7F36u,"CLEAR NICKNAME");
+        port_add(0x7F37u,"SAVE NICKNAME");
+        port_add(0x7F38u,"CANCEL");
+        free_roam_select(2);port_labels();port_building=0;
+        fprintf(stderr,"[MATCHMAKING] nickname editor opened\n");return;
+    }
+    if(free_roam_setup_active) {
+        port_add(0x7F33u,"FREE ROAM");
+        free_roam_nickname_row=port_add(0x7F34u,NULL);
+        free_roam_city_row=port_add(0x7F3Au,NULL);
+        port_add(0x7F33u,"CAR: CURRENT GARAGE CAR");
+        port_rows[PORT_ROW_ROOM]=port_add(0x7F18u,NULL);
+        port_row_id[port_row_n++]=PORT_ROW_ROOM;
+        free_roam_players_row=port_add(0x7F33u,"PLAYERS: CHECKING...");
+        port_rows[PORT_ROW_FIND]=port_add(0x7F19u,NULL);
+        port_row_id[port_row_n++]=PORT_ROW_FIND;
+        port_add(0x7F31u,"START FREE ROAM");
+        port_add(0x7F32u,"BACK TO ONLINE");
+        free_roam_select(1);
+        port_labels();
+        port_building=0;
+        fprintf(stderr,"[MATCHMAKING] setup built: 9 rows, room %d\n",port_room_get());
+        return;
+    }
     for(int k=0;k<settings;k++){
         int i=order[k];
         /* FRAME RATE is id 16 (0x7F12); the mobile controls are ids 17+ in
@@ -4621,6 +4713,35 @@ static void port_build(void)
     }
     port_building=0;
 }
+static void free_roam_nickname_begin(void)
+{
+    const char *name=getenv("MC3_ROAM_NAME");char clean[MC3_NICKNAME_MAX+1];
+    if(!mc3_nickname_normalize(name,clean))snprintf(clean,sizeof clean,"Player");
+    nickname_lock();snprintf(free_roam_nickname_buffer,sizeof free_roam_nickname_buffer,"%s",clean);
+    free_roam_nickname_error[0]=0;nickname_unlock();
+    free_roam_nickname_edit=1;free_roam_nickname_character=0;free_roam_nickname_delete_down=0;
+    atomic_store(&free_roam_nickname_action,0);
+    xbox_text_input_set(1,free_roam_nickname_text,free_roam_nickname_key);
+    port_build();
+}
+static void free_roam_nickname_finish(int save)
+{
+    if(save) {
+        char name[MC3_NICKNAME_MAX+1],clean[MC3_NICKNAME_MAX+1],error[64];
+        free_roam_nickname_snapshot(name,error);
+        const char *failure=!mc3_nickname_normalize(name,clean)?"ENTER AT LEAST ONE CHARACTER":
+                            !windows_port_save_nickname(clean)?"COULD NOT SAVE - TRY AGAIN":
+                            roam_set_name(clean)!=0?"COULD NOT APPLY - TRY AGAIN":NULL;
+        if(failure) {
+            nickname_lock();snprintf(free_roam_nickname_error,sizeof free_roam_nickname_error,"%s",failure);nickname_unlock();
+            port_labels();return;
+        }
+        fprintf(stderr,"[MATCHMAKING] nickname saved and applied\n");
+    }
+    xbox_text_input_set(0,NULL,NULL);free_roam_nickname_edit=0;
+    atomic_store(&free_roam_nickname_action,0);port_build();free_roam_select(1);
+}
+
 static void port_enter(void)
 {
     if(!port_context_valid()) {port_invalidate();return;}
@@ -4633,6 +4754,8 @@ static void port_enter(void)
 }
 static void port_parent(void)
 {
+    if(free_roam_nickname_edit) {free_roam_nickname_finish(0);return;}
+    if(free_roam_setup_active) {free_roam_setup_exit(0);return;}
     if(!port_context_valid()) {port_invalidate();return;}
     PortRegs r=port_save();port_open=0;
     port_push(0);sub_0018D610();port_title(0);
@@ -4674,6 +4797,18 @@ void sub_0018D610(void)
     port_list_vtable=port_ram(port_list,0x300)?MEM32(port_list):0;
     if(port_ram(port_list,0x300))fprintf(stderr,"[PORT] Options context self=%08X list=%08X vtable=%08X page=%u capacity=%u columns=%u\n",port_self,port_list,port_list_vtable,MEM32(port_list+0x258),MEM32(port_list+0x230),MEM32(port_list+0x234));
     if(!port_context_valid()) {port_invalidate();return;}
+    if(free_roam_setup_requested) {
+        free_roam_setup_requested=0;free_roam_setup_active=1;port_open=1;
+        port_page=0;free_roam_census_frames=0;free_roam_room_direction=0;
+        free_roam_setup_since=time(NULL);free_roam_census_next=0;
+        free_roam_players_seen=0;free_roam_find_cached[0]=0;free_roam_vertical=0;
+        XBOX_INPUT_STATE input={0};xbox_InputGetState(0,&input);
+        port_accept_down=input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]>XBOX_ANALOG_BUTTON_THRESHOLD;
+        port_back_down=input.Gamepad.bAnalogButtons[XBOX_BUTTON_B]>XBOX_ANALOG_BUTTON_THRESHOLD;
+        PortRegs r=port_save();port_build();port_title(1);port_restore(r);
+        fprintf(stderr,"[MATCHMAKING] Free Roam setup opened\n");
+        return;
+    }
     uint32_t page=MEM32(port_list+0x258),count=MEM32(port_list+0x238+page*4),capacity=MEM32(port_list+0x230);
     if(page>2 || count+1>capacity || MEM32(port_list+0x234)<3)return;
     PortRegs r=port_save();port_add(0x7F10u,"Port Options");port_restore(r);
@@ -4682,6 +4817,36 @@ void sub_00163830(void)
 {
     uint32_t event=MEM32(g_esp+4);
     if(port_open&&!port_context_valid())port_invalidate();
+    /* The native Options handler still receives guest input edges. This page
+     * owns its cursor and actions; dispatch each press once from its input pass. */
+    if(free_roam_setup_active && !free_roam_dispatching &&
+       (event==0x7F18u || event==0x7F19u || (event>=0x7F31u && event<=0x7F38u) || event==0x7F3Au)) {
+        g_eax=0;g_esp+=8;return;
+    }
+    if(free_roam_setup_active && event==0x7F3Au) {
+        if(!port_accept_down) {port_accept_down=1;free_roam_city=(free_roam_city+1)%4;port_labels();}
+        g_eax=0;g_esp+=8;return;
+    }
+    if(free_roam_setup_active && event>=0x7F34u && event<=0x7F38u) {
+        if(!port_accept_down) {
+            port_accept_down=1;
+            if(event==0x7F34u && !free_roam_nickname_edit)free_roam_nickname_begin();
+            else if(free_roam_nickname_edit) {
+                if(event==0x7F35u) {char text[]={free_roam_characters[free_roam_nickname_character],0};free_roam_nickname_text(text);}
+                else if(event==0x7F36u) {nickname_lock();free_roam_nickname_buffer[0]=0;free_roam_nickname_error[0]=0;nickname_unlock();}
+                else free_roam_nickname_finish(event==0x7F37u);
+                port_labels();
+            }
+        }
+        g_eax=0;g_esp+=8;return;
+    }
+    if(free_roam_setup_active && event>=0x7F31u && event<=0x7F33u) {
+        if(event!=0x7F33u && !port_accept_down) {
+            port_accept_down=1;
+            free_roam_setup_exit(event==0x7F31u);
+        }
+        g_eax=0;g_esp+=8;return;
+    }
     if(event==0x7F10) {port_enter();g_eax=0;g_esp+=8;return;}
     if(event==0x7F11) {
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
@@ -4734,6 +4899,86 @@ void sub_00163830(void)
     }
     sub_00163830_gen();
 }
+/* Use the same Options event and owner as its main-menu row. The screen
+ * change is synchronous; its real builder supplies a drawable native list. */
+static void free_roam_setup_enter(void)
+{
+    PortRegs r=port_save();
+    uint32_t front=MEM32(0x50F148u),owner=MEM32(front+0xCu);
+    online_frame_call(sub_0013AB20); /* copy the current garage car, not an Arcade menu */
+    uint32_t setup=MEM32(0x53F2E8u);
+    free_roam_city=port_ram(setup,4)&&MEM32(setup)<4?(int)MEM32(setup):0;
+    free_roam_setup_requested=1;
+    g_ecx=MEM32(owner+0xCu);
+    port_push(7);port_push(0);
+    sub_00163830_gen();
+    port_restore(r);
+    fprintf(stderr,"[MATCHMAKING] requested Options canvas\n");
+}
+
+/* sub_00184FD0 is the native final Start action: normalize weather/options,
+ * map the one local controller, copy the prepared setup, request loading state 6.
+ * Its only UI-context read is the layout byte at +0x1E0 (constructor default 1).
+ * Supply that byte on our own guest stack; no Arcade screen is opened. */
+static int free_roam_start_cruise(void)
+{
+    uint32_t setup=MEM32(0x53F2E8u);
+    if(!port_ram(setup,0x400u))return 0;
+    uint32_t cfg=MEM32(setup+0x120u);
+    if(!port_ram(cfg,264))return 0;
+    MEM32(setup)=free_roam_city;
+    MEM32(setup+0x18u)=0;       /* Cruise, never a remembered race type */
+    MEM32(setup+0x4Cu)=1;MEM32(setup+0x50u)=1;
+    MEM8(setup+0x108u)=0;      /* the separate Online Race flow owns System Link */
+    MEM8(setup+0x13Au)=0;     /* local entry has a car */
+    roam_set_room((uint32_t)free_roam_city);
+    PortRegs r=port_save();
+    g_esp-=0x1E4u;uint32_t context=g_esp;
+    memset((void *)XBOX_PTR(context),0,0x1E4u);MEM8(context+0x1E0u)=1;
+    g_ecx=context;g_esp-=4;MEM32(g_esp)=0;
+    sub_00184FD0();
+    port_restore(r);
+    fprintf(stderr,"[MATCHMAKING] direct Cruise load: city %d, type 0, one local player\n",free_roam_city);
+    return 1;
+}
+
+static void free_roam_setup_exit(int start)
+{
+    if(start && port_find_pending) {
+        fprintf(stderr,"[MATCHMAKING] start refused: search pending\n");
+        return;
+    }
+    PortRegs r=port_save();
+    port_title(0);
+    free_roam_setup_active=free_roam_setup_requested=0;
+    port_open=0;port_find_pending=0;
+    if(start) {
+        if(!free_roam_start_cruise()) {
+            free_roam_setup_active=1;port_open=1;port_build();
+            fprintf(stderr,"[MATCHMAKING] no valid garage car; staying on setup\n");
+        }
+    } else online_frame_call(sub_0018C5A0_gen);
+    port_restore(r);
+    fprintf(stderr,"[MATCHMAKING] %s\n",start?"starting Free Roam":"returned to Online");
+}
+
+/* The setup owns navigation; the inherited Options list's input buffer may
+ * still refer to its previous page. Select through the native list API so
+ * highlights and scrolling agree with the action we dispatch. */
+static void free_roam_select(int row)
+{
+    PortRegs r=port_save();
+    free_roam_cursor=row;
+    port_push(MEM32(port_list+0x258));port_push((uint32_t)row);port_push(0);
+    g_ecx=port_list;sub_00348AF0();
+    uint32_t page=MEM32(port_list+0x258),state=port_list+page*16;
+    /* Commit the displayed selection too; the old Options interpolation
+     * otherwise leaves its highlight at row zero after replacing the rows. */
+    memcpy((void *)XBOX_PTR(state+0x298),(void *)XBOX_PTR(state+0x268),16);
+    port_restore(r);
+    fprintf(stderr,"[MATCHMAKING] selected row %d (build %u input %u)\n",row,page,MEM32(port_list+0x25C));
+}
+
 void sub_0018D590(void)
 {
     if(port_open&&!port_context_valid()) {fprintf(stderr,"[PORT] Options owner replaced; clearing cached page\n");port_invalidate();}
@@ -4744,8 +4989,55 @@ void sub_0018D590(void)
         XBOX_INPUT_STATE input={0};
         int down=xbox_InputGetState(0,&input)==0 && input.Gamepad.bAnalogButtons[XBOX_BUTTON_B]>XBOX_ANALOG_BUTTON_THRESHOLD;
         if(input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]<=XBOX_ANALOG_BUTTON_THRESHOLD){port_accept_down=0;net_accept_down=0;}
+        if(free_roam_setup_active) {
+            int edit_action=atomic_exchange(&free_roam_nickname_action,0);
+            if(free_roam_nickname_edit && (edit_action==2 || edit_action==3)) {
+                free_roam_nickname_finish(edit_action==2);g_esp+=4;return;
+            }
+            int vertical=(input.Gamepad.wButtons&XBOX_GAMEPAD_DPAD_UP) || input.Gamepad.sThumbLY>16000 ? -1
+                       : (input.Gamepad.wButtons&XBOX_GAMEPAD_DPAD_DOWN) || input.Gamepad.sThumbLY < -16000 ? 1 : 0;
+            if(vertical && vertical!=free_roam_vertical) {
+                static const int setup_rows[]={1,2,4,6,7,8},edit_rows[]={2,3,4,5};
+                const int *rows=free_roam_nickname_edit?edit_rows:setup_rows;
+                int count=free_roam_nickname_edit?4:6,index=0;
+                for(int k=0;k<count;k++)if(rows[k]==free_roam_cursor)index=k;
+                free_roam_select(rows[(index+vertical+count)%count]);
+            }
+            free_roam_vertical=vertical;
+            int accept=input.Gamepad.bAnalogButtons[XBOX_BUTTON_A]>XBOX_ANALOG_BUTTON_THRESHOLD;
+            if(accept && !port_accept_down) {
+                uint32_t event=free_roam_nickname_edit?
+                               (free_roam_cursor==2?0x7F35u:free_roam_cursor==3?0x7F36u:free_roam_cursor==4?0x7F37u:0x7F38u):
+                               (free_roam_cursor==1?0x7F34u:free_roam_cursor==2?0x7F3Au:free_roam_cursor==4?0x7F18u:
+                                free_roam_cursor==6?0x7F19u:free_roam_cursor==7?0x7F31u:0x7F32u);
+                free_roam_dispatching=1;
+                port_fire_event(event);
+                free_roam_dispatching=0;
+            }
+            if(!free_roam_setup_active) {g_esp+=4;return;}
+            if(vertical || accept) {PortRegs r=port_save();port_labels();port_restore(r);g_esp+=4;return;}
+            int direction=(input.Gamepad.wButtons&XBOX_GAMEPAD_DPAD_LEFT) || input.Gamepad.sThumbLX < -16000 ? -1
+                        : (input.Gamepad.wButtons&XBOX_GAMEPAD_DPAD_RIGHT) || input.Gamepad.sThumbLX > 16000 ? 1 : 0;
+            if(direction && direction!=free_roam_room_direction) {
+                PortRegs r=port_save();
+                if(free_roam_nickname_edit) {
+                    int count=(int)sizeof free_roam_characters-1;
+                    free_roam_nickname_character=(free_roam_nickname_character+direction+count)%count;
+                } else if(free_roam_cursor==2)free_roam_city=(free_roam_city+direction+4)%4;
+                else if(free_roam_cursor==4)port_online_change(PORT_ROW_ROOM,direction);
+                port_labels();port_restore(r);
+            }
+            free_roam_room_direction=direction;
+            if(direction) {g_esp+=4;return;}
+            int erase=input.Gamepad.bAnalogButtons[XBOX_BUTTON_X]>XBOX_ANALOG_BUTTON_THRESHOLD;
+            if(free_roam_nickname_edit && erase && !free_roam_nickname_delete_down)free_roam_nickname_key(1);
+            free_roam_nickname_delete_down=erase;
+        }
         if(port_open && down && !port_back_down) {
-            port_parent();port_back_release=1;port_back_down=down;g_esp+=4;return;
+            if(free_roam_nickname_edit)free_roam_nickname_finish(0);
+            else if(free_roam_setup_active)free_roam_setup_exit(0);
+            else port_parent();
+            port_back_release=1;port_back_down=down;g_esp+=4;return;
         }
         port_back_down=down;
         if(port_back_release) {

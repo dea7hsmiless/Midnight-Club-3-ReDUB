@@ -377,6 +377,7 @@ void windows_port_setting_label(int id, char *out, size_t size)
     if (size) out[0] = 0;
 }
 void windows_port_setting_change(int id) { (void)id; }
+int windows_port_save_nickname(const char *name) { (void)name; return 0; }
 int windows_port_save_room(int room) { (void)room; return 0; }
 void windows_port_settings_attach(SDL_Window *win) { (void)win; }
 int windows_port_pc_music_get(void) { return 0; }

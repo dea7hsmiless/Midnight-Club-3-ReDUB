@@ -235,6 +235,11 @@ extern int port_online_label(int id, char *out, size_t size);
 extern int port_online_change(int id, int step);
 
 /* The shared online rows save the room number through the same env file. */
+int windows_port_save_nickname(const char *name)
+{
+    return save_env_pair("MC3_ROAM_NAME", name);
+}
+
 int windows_port_save_room(int room)
 {
     char v[16];

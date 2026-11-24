@@ -1,3 +1,51 @@
+/* Optional title-owned text editor. SDL work stays on the window thread;
+ * callbacks only queue/edit bounded text and never call guest code. */
+#include <SDL.h>
+#include <stdatomic.h>
+#include "../platform/host_main.h"
+typedef void (*xbox_text_callback)(const char *);
+typedef void (*xbox_text_key_callback)(int);
+static _Atomic(xbox_text_callback) s_text_callback;
+static _Atomic(xbox_text_key_callback) s_text_key_callback;
+static atomic_int s_text_requested;
+void xbox_text_input_set(int on,xbox_text_callback text,xbox_text_key_callback key)
+{
+    atomic_store(&s_text_callback,text);atomic_store(&s_text_key_callback,key);
+    atomic_store(&s_text_requested,on);
+}
+static void text_input_on_main(void *arg)
+{
+    if(*(int *)arg)SDL_StartTextInput();else SDL_StopTextInput();
+}
+void xbox_text_input_frame(void)
+{
+    static int applied;
+    int on=atomic_load(&s_text_requested);
+    if(on==applied)return;
+    applied=on;
+#if (!defined(_WIN32) || defined(XBOXRECOMP_SDL_HOST)) && !defined(__SWITCH__)
+    extern void xbox_sdl_keyboard_reset(void);xbox_sdl_keyboard_reset();
+#endif
+    xbox_host_main_call(text_input_on_main,&on);
+}
+int xbox_text_input_event(const SDL_Event *e)
+{
+    if(!atomic_load(&s_text_requested))return 0;
+    if(e->type==SDL_TEXTINPUT) {
+        xbox_text_callback fn=atomic_load(&s_text_callback);if(fn)fn(e->text.text);
+        return 1;
+    }
+    if(e->type==SDL_KEYDOWN) {
+        xbox_text_key_callback fn=atomic_load(&s_text_key_callback);
+        int key=e->key.keysym.sym==SDLK_BACKSPACE?1:
+                (e->key.keysym.sym==SDLK_RETURN||e->key.keysym.sym==SDLK_KP_ENTER)?2:
+                e->key.keysym.sym==SDLK_ESCAPE?3:0;
+        if(fn&&key)fn(key);
+        return 1; /* typing must not also press the game's face buttons */
+    }
+    return e->type==SDL_KEYUP || e->type==SDL_TEXTEDITING;
+}
+
 /*
  * sdl_keyboard.c -- the keyboard as player 1 on Linux (SDL), as the Windows
  * build already has it (xinput_device.c, RECOMP_KEYBOARD=1).

@@ -436,8 +436,10 @@ static int android_env_set(const char *key, const char *value)
             char *p = line;
             while (*p == ' ' || *p == '\t')
                 p++;
-            if (!strncmp(p, key, keylen) && p[keylen] == '=')
-                continue;
+            if (!strncmp(p, key, keylen)) {
+                const char *q=p+keylen;while(*q==' '||*q=='\t')q++;
+                if(*q=='=')continue;
+            }
             fputs(line, out);
             size_t n = strlen(line);
             if (n)
@@ -454,7 +456,8 @@ static int android_env_set(const char *key, const char *value)
     if (last != '\n')
         fputc('\n', out);
     fprintf(out, "%s=%s\n", key, value);
-    if (ferror(out) || fclose(out) != 0) {
+    int bad=ferror(out);if(fclose(out)!=0)bad=1;
+    if (bad) {
         remove(tmp);
         return 0;
     }
@@ -511,6 +514,11 @@ extern int port_online_change(int id, int step);
 
 /* The shared online rows save the room number through the same settings
  * storage every other Android setting uses. */
+int windows_port_save_nickname(const char *name)
+{
+    return android_env_set("MC3_ROAM_NAME", name);
+}
+
 int windows_port_save_room(int room)
 {
     android_save_int("MC3_ROAM_ROOM", room);

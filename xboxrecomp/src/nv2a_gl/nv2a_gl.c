@@ -162,6 +162,8 @@ static inline void es_read_pixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum
 #include "../kernel/nv2a_backend.h"
 
 #include <SDL.h>
+void xbox_text_input_frame(void);
+int xbox_text_input_event(const SDL_Event *e);
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 #include <SDL_syswm.h>               /* the UIKit screen framebuffer */
 #endif
@@ -7901,6 +7903,7 @@ swap:
          * (macOS, platform/host_main.c), only take what it queued: pumping
          * from here is not allowed there. */
         SDL_Event e;
+        xbox_text_input_frame();
         int pump = xbox_host_on_main();
         while (pump ? SDL_PollEvent(&e)
                     : SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT) > 0) {
@@ -7912,6 +7915,7 @@ swap:
                 fflush(stderr);
                 exit(0);
             }
+            if(xbox_text_input_event(&e))continue;
             if(e.type==SDL_KEYDOWN && e.key.repeat==0 && e.key.keysym.sym==SDLK_F11) {
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
                 extern void windows_port_setting_change(int);

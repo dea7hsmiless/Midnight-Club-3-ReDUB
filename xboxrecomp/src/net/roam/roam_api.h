@@ -100,6 +100,8 @@ typedef struct roam_far_peer {
 int  roam_start(const char *name, uint32_t vip);
 void roam_stop(void);                       /* BYE to every peer, network thread joined */
 int  roam_running(void);
+/* Rename without changing peer identity, room or session. 0 success, -1 invalid. */
+int  roam_set_name(const char *name);
 /* the players the hub links us with (1 .. ROAM_K_MAX); default ROAM_K_DEFAULT,
  * MC3_ROAM_K overrides; the hub hears it with our next HELLO */
 void roam_set_k(int k);

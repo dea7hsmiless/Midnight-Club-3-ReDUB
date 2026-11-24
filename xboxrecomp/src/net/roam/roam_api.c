@@ -20,6 +20,7 @@
 #endif
 #include "roam_plat.h"
 #include "roam_addr.h"
+#include "roam_name.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -288,6 +289,25 @@ void roam_stop(void){
     g_on = 0;
 }
 int roam_running(void){ return g_on; }
+int roam_set_name(const char *name)
+{
+    char clean[MC3_NICKNAME_MAX+1];
+    if(!mc3_nickname_normalize(name,clean))return -1;
+#ifdef _WIN32
+    if(_putenv_s("MC3_ROAM_NAME",clean)!=0)return -1;
+#else
+    if(setenv("MC3_ROAM_NAME",clean,1)!=0)return -1;
+#endif
+    if(g_on) {
+        roam_plat_lock();
+        snprintf(g_s.conf.name,sizeof g_s.conf.name,"%s",clean);
+        g_s.hub_hello_tx=INT64_MIN/4;
+        g_s.last_beacon=INT64_MIN/4;
+        for(int k=0;k<RC_TABLE;k++)g_s.peer[k].last_hello_tx=INT64_MIN/4;
+        roam_plat_unlock();
+    }
+    return 0;
+}
 void roam_set_room(uint32_t room){
     /* The game passes the city. With an explicit MC3_ROAM_ROOM the city is
      * packed under it, so the group survives the cruise load and two players
