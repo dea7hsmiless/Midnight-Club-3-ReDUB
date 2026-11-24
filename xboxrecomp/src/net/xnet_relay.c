@@ -33,6 +33,7 @@
 #include "roam/roam_api.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef _WIN32
@@ -61,6 +62,42 @@ static xr_sock  xr_s[XR_SOCKS];
 static uint32_t xr_me;                     /* our virtual address, 0 until known */
 static uint32_t xr_tx, xr_rx, xr_qfull, xr_notun;
 static int      xr_reported;
+
+/* XNET_TRACE=1: what the System Link sockets actually send and receive (the
+ * lobby list is built from these datagrams; an empty list with traffic is a
+ * different bug from an empty list with none). The first events are printed in
+ * full, then a summary, so a session cannot flood the log. */
+static int xr_trace = -1;
+static unsigned xr_trace_n;
+static void xr_trace_on(void)
+{
+    if (xr_trace < 0) {
+        const char *e = getenv("XNET_TRACE");
+        xr_trace = e && e[0] == '1';
+    }
+}
+static void xr_trace_ev(const char *what, uint32_t src, uint32_t dst,
+                        uint16_t sport, uint16_t dport, const void *d, int n)
+{
+    const unsigned char *p = (const unsigned char *)d;
+    if (!xr_trace) return;
+    if (xr_trace_n < 80) {
+        fprintf(stderr, "[XNET] %s %u.%u.%u.%u:%u -> %u.%u.%u.%u:%u %d bytes"
+                "  %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                what,
+                (unsigned)(src >> 24) & 255, (unsigned)(src >> 16) & 255,
+                (unsigned)(src >> 8) & 255, (unsigned)src & 255, (unsigned)sport,
+                (unsigned)(dst >> 24) & 255, (unsigned)(dst >> 16) & 255,
+                (unsigned)(dst >> 8) & 255, (unsigned)dst & 255, (unsigned)dport,
+                n, n > 0 ? p[0] : 0, n > 1 ? p[1] : 0, n > 2 ? p[2] : 0,
+                n > 3 ? p[3] : 0, n > 4 ? p[4] : 0, n > 5 ? p[5] : 0,
+                n > 6 ? p[6] : 0, n > 7 ? p[7] : 0);
+    } else if (xr_trace_n % 200 == 0) {
+        fprintf(stderr, "[XNET] traffic tx=%u rx=%u dropped=%u qfull=%u\n",
+                xr_tx, xr_rx, xr_notun, xr_qfull);
+    }
+    xr_trace_n++;
+}
 
 /* 10.77.a.b, a in 0..127 and b even in 2..126: never the network or a broadcast
  * address, and stable for the life of the session (the id is).
@@ -105,6 +142,8 @@ static void xr_on_tunnel(void *user, uint32_t src, uint32_t dst, uint16_t sport,
     int i;
     (void)user;
     if (n <= 0 || n > XR_DGRAM) return;
+    xr_trace_on();
+    xr_trace_ev("rx", src, dst, sport, dport, d, n);
     if (!xr_broadcast(dst) && dst != xr_me) return;      /* for another player */
     for (i = 0; i < XR_SOCKS; i++) {
         xr_sock *s = &xr_s[i];
@@ -161,6 +200,8 @@ static int xr_sendto(intptr_t h, const void *p, int n, uint32_t ip, uint16_t por
     if (n <= 0 || n > XR_DGRAM)
         return -XNET_WSAEMSGSIZE;
     s = &xr_s[h];
+    xr_trace_on();
+    xr_trace_ev("tx", xr_me, ntohl(ip), s->port, port, p, n);
     if (roam_tunnel_send(xr_me, ntohl(ip), s->port, port, p, n) != 0) {
         xr_notun++;
         return -XNET_WSAENETDOWN;

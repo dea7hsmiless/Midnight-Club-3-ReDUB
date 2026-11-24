@@ -740,6 +740,16 @@ void rc_receive(rc_session *s, uint32_t ip, uint16_t port, const uint8_t *buf, i
     if (e){ s->rx_bad++; return; }
     if (m.h.sender == s->conf.self_id) return;                 /* our own beacon */
     if (s->closed) return;              /* shut down: do not adopt peers again */
+    /* Relay mode: every player's traffic arrives from the relay, and the relay
+     * has no channel of its own to say "I am here" -- it only forwards. A frame
+     * it forwards is proof it is alive, so count it. Without this, hub_mode()
+     * expires T_HUB_SILENT after the last direct hub reply (which a pure
+     * forwarder never sends), the client prints "no free-roam hub answers" and
+     * stops trusting the room, and the relay reaps a player who is still in
+     * menus a minute into the session -- which looks exactly like "0 rooms". */
+    if (s->conf.relay && s->conf.relay_ip && ip == s->conf.relay_ip &&
+        port == s->conf.relay_port)
+        s->hub_heard_us = now;
     if (!s->conf.relay && s->conf.hub_ip && ip == s->conf.hub_ip && port == s->conf.hub_port){
         /* the players beyond our links: map markers only */
         if (m.h.type == RC_MSG_FAR){

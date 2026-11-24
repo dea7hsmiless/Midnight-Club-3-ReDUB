@@ -36,6 +36,7 @@ static CRITICAL_SECTION g_lock;
 static HANDLE g_thread;
 #else
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <sys/socket.h>
@@ -273,6 +274,26 @@ int roam_plat_start(rc_session *s, uint16_t port)
         g_lock_init = 0;
         return -1;
     }
+
+    /* Non-blocking. plat_receive_all() drains with recvfrom() after one
+     * select(), so a blocking socket parks this whole thread on the second call
+     * when the queue is empty -- and while it is parked it never returns to
+     * rc_tick(): no HELLOs, no peer timeouts, no pings. A relay only forwards,
+     * so a quiet room sends nothing back; the client then goes silent and the
+     * relay reaps a player who is still in the game. That is the "0 rooms after
+     * a minute, fixed by restarting" report. */
+#ifdef _WIN32
+    {
+        u_long nb = 1;
+        ioctlsocket(g_sock, FIONBIO, &nb);
+    }
+#else
+    {
+        int fl = fcntl(g_sock, F_GETFL, 0);
+        if (fl >= 0)
+            fcntl(g_sock, F_SETFL, fl | O_NONBLOCK);
+    }
+#endif
 
     parse_peers();
     if (s) {
