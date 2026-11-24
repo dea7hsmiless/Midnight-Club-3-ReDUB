@@ -59,6 +59,11 @@
   button.primary { background: #F55060; color: #fff; }
   button:disabled { opacity: .5; cursor: default; }
   .hint { color: #99A5BC; font-size: 12px; line-height: 1.55; margin-top: 16px; }
+  .hint.bad { color: #F57878; }
+  /* The name row: input and button share one line when there is room, and
+   * wrap cleanly on a phone without a flexbox (IE11). */
+  #name { width: 200px; margin-top: 8px; }
+  #name, #savename { vertical-align: top; }
   .notice {
     background: #16233B; border-left: 3px solid #F55060; border-radius: 6px;
     padding: 10px 12px; margin-top: 14px; font-size: 13px; color: #EBEFF7;
@@ -97,6 +102,13 @@
   </div>
 
   <div class="card">
+    <div class="label" style="margin-bottom:8px">Your name</div>
+    <input type="text" id="name" maxlength="24" autocomplete="off" placeholder="Player">
+    <button id="savename">Save name</button>
+    <div id="namehint" class="hint bad" style="display:none;margin-top:6px"></div>
+  </div>
+
+  <div class="card">
     <div class="label" style="margin-bottom:8px">Players online</div>
     <div id="names" class="names muted">Waiting for the launcher.</div>
   </div>
@@ -130,6 +142,7 @@
   var shell = null;          /* the host, once detected */
   var lastPush = 0;
   var haveState = false;
+  var nameDirty = false;     /* the field holds edits the shell has not saved */
 
   /* ---- shell adapters -------------------------------------------------- */
 
@@ -191,6 +204,7 @@
 
   function el(id) { return document.getElementById(id); }
   function text(id, value) { var n = el(id); if (n) n.innerHTML = value; }
+  function trim(s) { return String(s == null ? "" : s).replace(/^\s+|\s+$/g, ""); }
   function esc(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -221,8 +235,19 @@
       text("server", '<span class="muted">Server: starting...</span>');
     }
 
-    text("yourroom", "Your room: " + (mine === 0 ? "shared (anyone online)" : esc(mine)) +
-         (st.playerName ? " &nbsp;&middot;&nbsp; Player: " + esc(st.playerName) : ""));
+    text("yourroom", "Your room: " + (mine === 0 ? "shared (anyone online)" : esc(mine)));
+
+    /* The name field follows the shell's state, but never overwrites what the
+     * player is typing: a push arrives every few seconds and would otherwise
+     * erase a half-typed name. */
+    var field = el("name");
+    if (field) {
+      var current = st.playerName || "Player";
+      if (document.activeElement !== field && !(nameDirty && trim(field.value) !== current)) {
+        field.value = current;
+        nameDirty = false;
+      }
+    }
 
     /* rooms */
     var body = el("rooms").getElementsByTagName("tbody")[0];
@@ -266,6 +291,34 @@
     var room = parseInvite(el("code").value);
     if (room < 0) { alert("Paste the invite link or type the room number (0-255)."); return; }
     window.ReDUB.call("join", { room: room });
+  };
+
+  /* The game accepts 1-24 of A-Z a-z 0-9 space _ - . and nothing else; the
+   * same rule is repeated in every shell so an invalid name is refused before
+   * it can reach the relay. */
+  function nameHint(message) {
+    var n = el("namehint");
+    if (!n) return;
+    n.innerHTML = esc(message || "");
+    n.style.display = message ? "block" : "none";
+  }
+
+  function saveName() {
+    var value = trim(el("name").value);
+    if (!/^[A-Za-z0-9 _.-]{1,24}$/.test(value)) {
+      nameHint("Use 1-24 letters, numbers, spaces, _ - or .");
+      return;
+    }
+    nameHint("");
+    nameDirty = false;
+    window.ReDUB.call("name", { name: value });
+  }
+
+  el("savename").onclick = saveName;
+  el("name").oninput = function () { nameDirty = true; nameHint(""); };
+  el("name").onkeydown = function (ev) {
+    var key = ev.keyCode || ev.which;
+    if (key === 13) { saveName(); if (ev.preventDefault) ev.preventDefault(); return false; }
   };
 
   el("invite").onclick = function () { window.ReDUB.call("invite", {}); };

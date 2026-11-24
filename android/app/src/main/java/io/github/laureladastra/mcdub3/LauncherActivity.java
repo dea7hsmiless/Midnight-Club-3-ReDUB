@@ -1078,6 +1078,10 @@ public class LauncherActivity extends Activity {
         }
         pj.append(']');
         String name = settings.get("MC3_ROAM_NAME");
+        if (name == null || name.trim().isEmpty())
+            name = settings.get("MC3_PLAYER_NAME");
+        if (name == null || name.trim().isEmpty())
+            name = "Player";   /* the game's own fallback, so the page agrees */
         StringBuilder s = new StringBuilder("{");
         s.append("\"ms\":").append(ms);
         s.append(",\"yourRoom\":").append(mineN);
@@ -1127,6 +1131,21 @@ public class LauncherActivity extends Activity {
                 inviteFriends();
                 return;
             }
+            if ("name".equals(action)) {
+                final String who = jsonName(payload);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (!nameOk(who)) {
+                            toast("Names use 1-24 letters, numbers, spaces, _ - or .");
+                            return;
+                        }
+                        write("MC3_ROAM_NAME", who);
+                        toast("Your name is " + who + ". The game uses it when it starts.");
+                        refreshOnline();
+                    }
+                });
+                return;
+            }
             if ("join".equals(action)) {
                 final int room = jsonRoom(payload);
                 runOnUiThread(new Runnable() {
@@ -1142,6 +1161,49 @@ public class LauncherActivity extends Activity {
                 });
             }
         }
+    }
+
+    /* The name typed on the Online page: {"name":"..."}. The same rule as the
+     * game's mc3_nickname_normalize, so a bad name is refused before it can
+     * reach the relay. */
+    private static String jsonName(String payload) {
+        if (payload == null)
+            return "";
+        int i = payload.indexOf("\"name\"");
+        if (i < 0)
+            return "";
+        int j = payload.indexOf(':', i + 6);
+        if (j < 0)
+            return "";
+        i = payload.indexOf('"', j + 1);
+        if (i < 0)
+            return "";
+        StringBuilder b = new StringBuilder();
+        for (int k = i + 1; k < payload.length(); k++) {
+            char c = payload.charAt(k);
+            if (c == '"')
+                break;
+            if (c == '\\' && k + 1 < payload.length()) {
+                char e = payload.charAt(++k);
+                b.append(e == 'n' ? '\n' : e == 'r' ? '\r' : e == 't' ? '\t' : e);
+                continue;
+            }
+            b.append(c);
+        }
+        return b.toString().trim();
+    }
+
+    private static boolean nameOk(String name) {
+        if (name == null || name.isEmpty() || name.length() > 24)
+            return false;
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            boolean ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                      || (c >= '0' && c <= '9') || c == ' ' || c == '_' || c == '-' || c == '.';
+            if (!ok)
+                return false;
+        }
+        return true;
     }
 
     private static int jsonRoom(String payload) {
@@ -1177,7 +1239,13 @@ public class LauncherActivity extends Activity {
         if (room == 0)
             room = 1 + (int) (Math.random() * 254);
         final int chosen = room;
-        final String text = "ReDUB - join my race in room " + chosen + "\r\nredub://room/" + chosen
+        String who = settings.get("MC3_ROAM_NAME");
+        if (who == null || who.trim().isEmpty())
+            who = settings.get("MC3_PLAYER_NAME");
+        if (who == null || who.trim().isEmpty())
+            who = "Player";
+        final String text = "ReDUB - " + who + " invites you to room " + chosen
+                          + "\r\nredub://room/" + chosen
                           + "\r\n(In ReDUB: Online > Join a friend > " + chosen + ")";
         runOnUiThread(new Runnable() {
             public void run() {

@@ -17,8 +17,8 @@ using System.IO.Compression;
 [assembly: AssemblyProduct("ReDUB")]
 [assembly: AssemblyCompany("ReDUB")]
 [assembly: AssemblyCopyright("Fan project; Midnight Club 3 is a trademark of its owners")]
-[assembly: AssemblyVersion("0.2.4.0")]
-[assembly: AssemblyFileVersion("0.2.4.0")]
+[assembly: AssemblyVersion("0.2.5.0")]
+[assembly: AssemblyFileVersion("0.2.5.0")]
 namespace ReDUB {
 public class RedubButton : Control, IButtonControl {
     public bool Primary, Selected;
@@ -202,6 +202,9 @@ public sealed class Launcher : Form {
     string OnlineHost(){string h=ReadSetting("MC3_ROAM_JOIN","");return h.Length>0?h:"162.35.56.66";}
     int OnlinePort(){int p;if(int.TryParse(ReadSetting("MC3_ROAM_HUB_PORT","47210"),out p)&&p>0&&p<65536)return p;return 47210;}
     int OnlineRoom(){int r;if(int.TryParse(ReadSetting("MC3_ROAM_ROOM","0"),out r)&&r>=0&&r<=255)return r;return 0;}
+    /* What other players actually see: the game falls back to MC3_PLAYER_NAME
+     * and then "Player", so the page must show the same thing, not blank. */
+    string PlayerName(){string n=ReadSetting("MC3_ROAM_NAME","");if(n.Length==0)n=ReadSetting("MC3_PLAYER_NAME","");return n.Length>0?n:"Player";}
 
     static string OnlineQuery(string host,int port,string query,int timeoutMs){
         using(var u=new UdpClient()){
@@ -299,7 +302,7 @@ public sealed class Launcher : Form {
         StringBuilder s=new StringBuilder("{");
         s.Append("\"ms\":").Append(ms);
         s.Append(",\"yourRoom\":").Append(mine);
-        s.Append(",\"playerName\":").Append(Json(ReadSetting("MC3_ROAM_NAME","")));
+        s.Append(",\"playerName\":").Append(Json(PlayerName()));
         s.Append(",\"rooms\":").Append(rj);
         s.Append(",\"roster\":").Append(pj);
         s.Append(",\"rosterOk\":").Append(roster!=null&&roster.StartsWith("MC3PLAYERS")?"true":"false");
@@ -338,6 +341,16 @@ public sealed class Launcher : Form {
                 return;
             }
             if(action=="invite"){InviteFriends();return;}
+            if(action=="name"){
+                string who=JsonName(json);
+                if(!NameOk(who)){PushNotice("Names use 1-24 letters, numbers, spaces, _ - or .");MessageBox.Show(this,"Names use 1-24 letters, numbers, spaces, _ - or .","Your name");return;}
+                try{SavePreference("MC3_ROAM_NAME",who);}
+                catch(Exception x){OnlineLog("name failed: "+x);PushNotice("Could not save the name: "+x.Message);return;}
+                OnlineLog("name saved: "+who);
+                PushNotice("Your name is "+who+".\r\nThe game uses it when it starts.");
+                RefreshOnline(true);
+                return;
+            }
         }catch(Exception x){OnlineLog("action failed: "+x);Append("Online: "+x.Message);}
     }
     /* A file, because the footer is behind the page: when a button "does
@@ -349,6 +362,40 @@ public sealed class Launcher : Form {
             File.AppendAllText(Path.Combine(dir,"launcher-online.log"),
                 DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ")+text+Environment.NewLine);
         }catch{}
+    }
+    /* The name typed on the Online page. The page sends {"name":"..."}; the
+     * shell repeats the game's own rule (mc3_nickname_normalize) so a bad name
+     * is refused here instead of reaching the relay. */
+    static string JsonName(string json){
+        if(json==null)return "";
+        int i=json.IndexOf("\"name\"");
+        if(i<0)return "";
+        int j=json.IndexOf(':',i+6);
+        if(j<0)return "";
+        i=json.IndexOf('"',j+1);
+        if(i<0)return "";
+        StringBuilder b=new StringBuilder();
+        for(int k=i+1;k<json.Length;k++){
+            char ch=json[k];
+            if(ch=='"')break;
+            if(ch=='\\'&&k+1<json.Length){
+                char e=json[++k];
+                b.Append(e=='n'?'\n':e=='r'?'\r':e=='t'?'\t':e);
+                continue;
+            }
+            b.Append(ch);
+        }
+        return b.ToString().Trim();
+    }
+    static bool NameOk(string name){
+        if(name==null)return false;
+        if(name.Length<1||name.Length>24)return false;
+        foreach(char ch in name){
+            bool ok=(ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||(ch>='0'&&ch<='9')||
+                    ch==' '||ch=='_'||ch=='-'||ch=='.';
+            if(!ok)return false;
+        }
+        return true;
     }
     static int JsonRoom(string json){
         if(json==null)return -1;
@@ -409,7 +456,7 @@ public sealed class Launcher : Form {
             }
         }
         string link="redub://room/"+room.ToString();
-        string text="ReDUB - join my race in room "+room.ToString()+"\r\n"+link+"\r\n(In ReDUB: Online > Join a friend > "+room.ToString()+")";
+        string text="ReDUB - "+PlayerName()+" invites you to room "+room.ToString()+"\r\n"+link+"\r\n(In ReDUB: Online > Join a friend > "+room.ToString()+")";
         bool copied=false;
         try{Clipboard.SetText(text);copied=true;Append("Invite copied for room "+room.ToString()+".");}
         catch(Exception x){Append("Clipboard failed: "+x.Message);}
@@ -718,8 +765,17 @@ public sealed class Launcher : Form {
     }
     [STAThread] public static void Main(string[] args){string root;
         try{root=ResolveRoot();}catch(Exception ex){MessageBox.Show(ex.Message,"ReDUB setup");return;}
-        if(args.Length>0&&args[0]=="--self-test"){if(Quote(@"D:\folder with spaces\")!="\"D:\\folder with spaces\\\\\"")Environment.Exit(2);if(!File.Exists(Path.Combine(root,@".portable\Build.ps1")))Environment.Exit(3);Directory.CreateDirectory(Path.Combine(root,@"work-remix\logs"));File.WriteAllText(Path.Combine(root,@"work-remix\logs\launcher-self-test.log"),"PASS: relative project discovery and Windows argument quoting");return;}
-        if(args.Length>0){string command=args[0].ToLowerInvariant();if(command=="--import"||command=="--play"||command=="--check"||command=="--build")Environment.Exit(RunCommand(root,command,args));}
+        if(args.Length>0&&args[0]=="--self-test"){
+    if(Quote(@"D:\folder with spaces\")!="\"D:\\folder with spaces\\\\\"")Environment.Exit(2);
+    if(!File.Exists(Path.Combine(root,@".portable\Build.ps1")))Environment.Exit(3);
+    /* The Online page's name field: JSON parsing and the game's own rule. */
+    if(JsonName("{\"name\":\"Racer 1\"}")!="Racer 1")Environment.Exit(4);
+    if(JsonName("{\"name\":\"a\\\"b\"}")!="a\"b")Environment.Exit(5);
+    if(!NameOk("Racer 1")||NameOk("")||NameOk("bad!name")||NameOk(new string('x',25)))Environment.Exit(6);
+    Directory.CreateDirectory(Path.Combine(root,@"work-remix\logs"));
+    File.WriteAllText(Path.Combine(root,@"work-remix\logs\launcher-self-test.log"),"PASS: project discovery, argument quoting, name parsing and validation");
+    return;
+}        if(args.Length>0){string command=args[0].ToLowerInvariant();if(command=="--import"||command=="--play"||command=="--check"||command=="--build")Environment.Exit(RunCommand(root,command,args));}
         RegisterInviteScheme();
         if(args.Length>0)InviteRoom=ParseInvite(args[0]);
         if(args.Length>0&&args[0].ToLowerInvariant()=="--online")ShowOnlinePage=true;

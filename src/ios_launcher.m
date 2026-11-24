@@ -413,6 +413,21 @@ static void Progress(uint64_t done,uint64_t total,const char *name,void *context
 }
 /* ---- Online: the shared page, answered by this launcher ------------------ */
 
+/* The game's own nickname rule (roam_name.h: mc3_nickname_normalize), repeated
+ * here so an invalid name is refused before it can reach the relay. */
+static BOOL NickNameOk(NSString *s){
+ if(![s isKindOfClass:[NSString class]])return NO;
+ NSUInteger n=s.length;
+ if(n<1||n>24)return NO;
+ for(NSUInteger i=0;i<n;i++){
+  unichar c=[s characterAtIndex:i];
+  BOOL ok=(c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||
+          c==' '||c=='_'||c=='-'||c=='.';
+  if(!ok)return NO;
+ }
+ return YES;
+}
+
 static NSString *JsonStr(NSString *s){
  if(!s)return @"null";
  NSMutableString *b=[NSMutableString stringWithString:@"\""];
@@ -507,7 +522,8 @@ static NSString *JsonStr(NSString *s){
  }
  [pj appendString:@"]"];
  NSString *name=self.settings[@"MC3_ROAM_NAME"];
- if(!name)name=@"";
+ if(!name||!name.length)name=self.settings[@"MC3_PLAYER_NAME"];
+ if(!name||!name.length)name=@"Player";   /* the game's own fallback */
  NSString *json=[NSString stringWithFormat:
   @"{\"ms\":%d,\"yourRoom\":%ld,\"playerName\":%@,\"rooms\":%@,\"roster\":%@,\"rosterOk\":%@}",
   ms,mine,JsonStr(name),rj,pj,[roster hasPrefix:@"MC3PLAYERS"]?@"true":@"false"];
@@ -527,15 +543,36 @@ static NSString *JsonStr(NSString *s){
   }
   return;
  }
+ if([action isEqualToString:@"name"]){
+  NSString *who=data[@"name"];
+  if(![who isKindOfClass:[NSString class]])who=@"";
+  who=[who stringByTrimmingCharactersInSet:
+       [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if(!NickNameOk(who)){
+   [self alert:@"Names use 1-24 letters, numbers, spaces, _ - or ."];
+   return;
+  }
+  NSMutableDictionary *u=[self.settings mutableCopy];
+  u[@"MC3_ROAM_NAME"]=who;
+  if([self persistSettings:u]){
+   self.status=[NSString stringWithFormat:@"Your name is %@.",who];
+   [self alert:[NSString stringWithFormat:@"Your name is %@.\nThe game uses it when it starts.",who]];
+   [self onlineRefresh];
+  }
+  return;
+ }
  if([action isEqualToString:@"invite"]){
   long room=[self.settings[@"MC3_ROAM_ROOM"] integerValue];
   if(room<=0)room=1+(long)arc4random_uniform(254);
   NSMutableDictionary *u=[self.settings mutableCopy];
   u[@"MC3_ROAM_ROOM"]=[NSString stringWithFormat:@"%ld",room];
   [self persistSettings:u];
+  NSString *who=self.settings[@"MC3_ROAM_NAME"];
+  if(!who||!who.length)who=self.settings[@"MC3_PLAYER_NAME"];
+  if(!who||!who.length)who=@"Player";
   NSString *text=[NSString stringWithFormat:
-   @"ReDUB - join my race in room %ld\nredub://room/%ld\n(In ReDUB: Online > Join a friend > %ld)",
-   room,room,room];
+   @"ReDUB - %@ invites you to room %ld\nredub://room/%ld\n(In ReDUB: Online > Join a friend > %ld)",
+   who,room,room,room];
   UIPasteboard.generalPasteboard.string=text;
   [self alert:[NSString stringWithFormat:@"Invite copied for room %ld.\n\n%@",room,text]];
   [self onlineRefresh];
