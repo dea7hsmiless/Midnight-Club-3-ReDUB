@@ -1,6 +1,8 @@
 package io.github.laureladastra.mcdub3;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
@@ -16,6 +18,9 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
@@ -31,6 +36,9 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -57,9 +65,9 @@ import java.util.Map;
 public class LauncherActivity extends Activity {
     private static final int PICK_FOLDER = 1, PICK_ISO = 2;
 
-    private static final int PAGE_GAME = 0, PAGE_INSTALL = 1, PAGE_SETTINGS = 2,
-                             PAGE_SUPPORT = 3, PAGE_ABOUT = 4;
-    private static final String[] PAGES = { "Game", "Install", "Settings", "Support", "About" };
+    private static final int PAGE_GAME = 0, PAGE_ONLINE = 1, PAGE_INSTALL = 2,
+                             PAGE_SETTINGS = 3, PAGE_SUPPORT = 4, PAGE_ABOUT = 5;
+    private static final String[] PAGES = { "Game", "Online", "Install", "Settings", "Support", "About" };
 
     private static final String PREFS = "launcher", FOLDERS = "folders", LAST = "last",
                                 REMOVED = "removed";
@@ -93,6 +101,9 @@ public class LauncherActivity extends Activity {
     private TextView footer, status;
     private int current = PAGE_GAME;
     private final Map<String, String> settings = new HashMap<>();
+    private WebView onlineView;
+    private final android.os.Handler onlineTicker =
+        new android.os.Handler(android.os.Looper.getMainLooper());
     private final Map<String, TextView> values = new HashMap<>();
     private final List<Row> rows = new ArrayList<>();
     /* The chosen disc image and the import's progress (Install page). */
@@ -243,16 +254,17 @@ public class LauncherActivity extends Activity {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(41));
             lp.topMargin = dp(i == 0 ? 16 : 8);
-            if (i >= 3)
-                lp.topMargin = dp(i == 3 ? 0 : 8);
+            if (i >= PAGE_SUPPORT)
+                lp.topMargin = dp(i == PAGE_SUPPORT ? 0 : 8);
             rail.addView(b, lp);
-            if (i == 2)
+            if (i == PAGE_SETTINGS)
                 rail.addView(new View(this), new LinearLayout.LayoutParams(
                     1, 0, 1f));      /* Support and About sit at the bottom */
         }
 
         switch (current) {
         case PAGE_GAME:      gamePage(); break;
+        case PAGE_ONLINE:    onlinePage(); break;
         case PAGE_INSTALL:   installPage(); break;
         case PAGE_SETTINGS:  settingsPage(); break;
         case PAGE_SUPPORT:   textPage("Support",
@@ -937,6 +949,238 @@ public class LauncherActivity extends Activity {
         String removed = prefs.getString(REMOVED, "");
         prefs.edit().putString(REMOVED, removed.isEmpty() ? f : removed + "\n" + f).apply();
         render();
+    }
+
+    /* ---- Online: the shared page (assets/ui/online.html) ----------------- */
+
+    private static final String ONLINE_HOST = "162.35.56.66";
+    private static final int ONLINE_PORT = 47210;
+
+    private void onlinePage() {
+        WebView w = new WebView(this);
+        WebSettings s = w.getSettings();
+        s.setJavaScriptEnabled(true);
+        w.setBackgroundColor(BG);
+        w.addJavascriptInterface(new OnlineBridge(), "ReDUBAndroid");
+        onlineView = w;
+        pane.addView(w, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        w.loadUrl("file:///android_asset/ui/online.html");
+        refreshOnline();
+        onlineTicker.removeCallbacksAndMessages(null);
+        onlineTicker.postDelayed(new Runnable() {
+            public void run() {
+                if (current == PAGE_ONLINE && onlineView != null) {
+                    refreshOnline();
+                    onlineTicker.postDelayed(this, 3000);
+                }
+            }
+        }, 3000);
+    }
+
+    private void refreshOnline() {
+        new Thread(new Runnable() {
+            public void run() {
+                String rooms = null, roster = null, error = null;
+                int ms = -1;
+                try {
+                    long t0 = System.currentTimeMillis();
+                    rooms = udp("MC3Q");
+                    ms = (int) (System.currentTimeMillis() - t0);
+                } catch (Exception e) {
+                    error = e.getClass().getSimpleName();
+                }
+                if (error == null) {
+                    try { roster = udp("MC3P"); } catch (Exception ignored) { }
+                }
+                final String fr = rooms, fp = roster, fe = error;
+                final int fms = ms;
+                runOnUiThread(new Runnable() {
+                    public void run() { pushOnline(fr, fp, fe, fms); }
+                });
+            }
+        }).start();
+    }
+
+    private String udp(String query) throws Exception {
+        DatagramSocket sock = new DatagramSocket();
+        try {
+            sock.setSoTimeout(800);
+            byte[] q = query.getBytes("US-ASCII");
+            sock.send(new DatagramPacket(q, q.length,
+                InetAddress.getByName(ONLINE_HOST), ONLINE_PORT));
+            byte[] buf = new byte[2048];
+            DatagramPacket p = new DatagramPacket(buf, buf.length);
+            sock.receive(p);
+            return new String(buf, 0, p.getLength(), "US-ASCII");
+        } finally {
+            sock.close();
+        }
+    }
+
+    private void pushOnline(String rooms, String roster, String error, int ms) {
+        if (onlineView == null)
+            return;
+        onlineView.evaluateJavascript("redubApply(" + onlineJson(rooms, roster, error, ms) + ")", null);
+    }
+
+    private String onlineJson(String rooms, String roster, String error, int ms) {
+        String mine = settings.get("MC3_ROAM_ROOM");
+        int mineN;
+        try { mineN = Integer.parseInt(mine == null || mine.isEmpty() ? "0" : mine); }
+        catch (NumberFormatException e) { mineN = 0; }
+        StringBuilder rj = new StringBuilder("[");
+        boolean first = true;
+        if (rooms != null && rooms.startsWith("MC3ROOMS")) {
+            String[] parts = rooms.split(" ");
+            for (int i = 3; i < parts.length; i++) {
+                String[] kv = parts[i].split(":");
+                if (kv.length != 2)
+                    continue;
+                try {
+                    int g = Integer.parseInt(kv[0]), n = Integer.parseInt(kv[1]);
+                    if (!first)
+                        rj.append(',');
+                    first = false;
+                    rj.append("{\"n\":").append(g).append(",\"players\":").append(n).append('}');
+                } catch (NumberFormatException ignored) { }
+            }
+        }
+        rj.append(']');
+        StringBuilder pj = new StringBuilder("[");
+        boolean firstP = true;
+        if (roster != null && roster.startsWith("MC3PLAYERS")) {
+            String[] lines = roster.replace("\r", "").split("\n");
+            for (int i = 1; i < lines.length; i++) {
+                String[] f = lines[i].split("\\|", 3);
+                if (f.length < 3)
+                    continue;
+                try {
+                    int rm = Integer.parseInt(f[0]), st = Integer.parseInt(f[1]);
+                    if (!firstP)
+                        pj.append(',');
+                    firstP = false;
+                    pj.append("{\"room\":").append(rm).append(",\"status\":").append(st)
+                      .append(",\"name\":").append(json(f[2])).append('}');
+                } catch (NumberFormatException ignored) { }
+            }
+        }
+        pj.append(']');
+        String name = settings.get("MC3_ROAM_NAME");
+        StringBuilder s = new StringBuilder("{");
+        s.append("\"ms\":").append(ms);
+        s.append(",\"yourRoom\":").append(mineN);
+        s.append(",\"playerName\":").append(json(name == null ? "" : name));
+        s.append(",\"rooms\":").append(rj);
+        s.append(",\"roster\":").append(pj);
+        if (error != null)
+            s.append(",\"error\":").append(json(error));
+        s.append('}');
+        return s.toString();
+    }
+
+    private static String json(String v) {
+        if (v == null)
+            return "null";
+        StringBuilder b = new StringBuilder("\"");
+        for (int i = 0; i < v.length(); i++) {
+            char c = v.charAt(i);
+            if (c == '"' || c == '\\')
+                b.append('\\').append(c);
+            else if (c == '\n')
+                b.append("\\n");
+            else if (c == '\r')
+                b.append("\\r");
+            else if (c == '\t')
+                b.append("\\t");
+            else if (c < 32)
+                b.append(String.format("\\u%04x", (int) c));
+            else
+                b.append(c);
+        }
+        return b.append('"').toString();
+    }
+
+    /* window.ReDUBAndroid.call(action, json): the page's only handle on this
+     * launcher. Runs on the JS bridge thread, so anything touching views goes
+     * through the UI thread inside the helpers. */
+    private final class OnlineBridge {
+        @JavascriptInterface
+        public void call(String action, String payload) {
+            if ("refresh".equals(action)) {
+                refreshOnline();
+                return;
+            }
+            if ("invite".equals(action)) {
+                inviteFriends();
+                return;
+            }
+            if ("join".equals(action)) {
+                final int room = jsonRoom(payload);
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (room < 0) {
+                            toast("Paste the invite link or type the room number (0-255).");
+                            return;
+                        }
+                        write("MC3_ROAM_ROOM", Integer.toString(room));
+                        toast("Room " + room + " saved. Starting the game.");
+                        play();
+                    }
+                });
+            }
+        }
+    }
+
+    private static int jsonRoom(String payload) {
+        if (payload == null)
+            return -1;
+        int i = payload.indexOf("\"room\"");
+        if (i < 0)
+            return -1;
+        int j = payload.indexOf(':', i + 6);
+        if (j < 0)
+            return -1;
+        int n = 0;
+        boolean any = false;
+        for (int k = j + 1; k < payload.length(); k++) {
+            char c = payload.charAt(k);
+            if (c >= '0' && c <= '9') {
+                n = n * 10 + (c - '0');
+                any = true;
+            } else if (any) {
+                break;
+            } else if (c != ' ') {
+                return -1;
+            }
+        }
+        return any && n >= 0 && n <= 255 ? n : -1;
+    }
+
+    private void inviteFriends() {
+        String mine = settings.get("MC3_ROAM_ROOM");
+        int room;
+        try { room = Integer.parseInt(mine == null || mine.isEmpty() ? "0" : mine); }
+        catch (NumberFormatException e) { room = 0; }
+        if (room == 0)
+            room = 1 + (int) (Math.random() * 254);
+        final int chosen = room;
+        final String text = "ReDUB - join my race in room " + chosen + "\r\nredub://room/" + chosen
+                          + "\r\n(In ReDUB: Online > Join a friend > " + chosen + ")";
+        runOnUiThread(new Runnable() {
+            public void run() {
+                write("MC3_ROAM_ROOM", Integer.toString(chosen));
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (cm != null)
+                    cm.setPrimaryClip(ClipData.newPlainText("ReDUB invite", text));
+                toast("Invite copied for room " + chosen + ". Close the game before joining a new room.");
+                refreshOnline();
+            }
+        });
+    }
+
+    private void toast(String text) {
+        android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_LONG).show();
     }
 
     private void verify() {

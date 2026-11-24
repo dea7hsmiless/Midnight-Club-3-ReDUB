@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<!--
+  ReDUB - Play together.
+
+  One page, hosted by every shell: the Windows launcher (WebBrowser control +
+  window.external), Android (WebView + @JavascriptInterface), iOS (WKWebView +
+  script message handler) and Linux (WebKitGTK, or a browser against the local
+  helper). ES5 only: the Windows control is IE11, and building to the oldest
+  engine keeps one source for all four.
+
+  The shell owns the network and the settings; it pushes state in through
+  redubApply() and receives actions through ReDUB.call(). A shell that has not
+  pushed anything yet shows "starting"; a browser with no shell says so.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReDUB - Play together</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: #080D1A; color: #EBEFF7;
+    font: 15px "Segoe UI", Roboto, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #wrap { max-width: 760px; margin: 0 auto; padding: 28px 22px 40px 22px; }
+  h1 { font-size: 26px; margin: 0 0 6px 0; letter-spacing: .2px; }
+  .sub { color: #99A5BC; font-size: 13px; margin: 0 0 22px 0; }
+  .ok { color: #54D2A5; }
+  .bad { color: #F57878; }
+  .muted { color: #99A5BC; }
+  .card {
+    background: #0F172A; border-radius: 10px; padding: 14px 16px;
+    margin: 0 0 12px 0;
+  }
+  .row { display: block; margin: 0 0 4px 0; }
+  .label { color: #99A5BC; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .big { font-size: 17px; font-weight: bold; }
+  table.rooms { width: 100%; border-collapse: collapse; }
+  table.rooms td { padding: 7px 4px; border-bottom: 1px solid #1B2A45; }
+  table.rooms tr:last-child td { border-bottom: none; }
+  table.rooms td.n { width: 90px; font-weight: bold; }
+  table.rooms td.p { width: 70px; color: #99A5BC; }
+  table.rooms td.you { color: #F55060; font-weight: bold; }
+  .controls { margin-top: 18px; }
+  input[type=text] {
+    background: #0F172A; color: #EBEFF7; border: 1px solid #1E2C47;
+    border-radius: 8px; padding: 12px 12px; font-size: 15px;
+    width: 240px; outline: none;
+  }
+  input[type=text]:focus { border-color: #F55060; }
+  button {
+    border: none; border-radius: 8px; padding: 12px 18px; font-size: 14px;
+    font-weight: bold; cursor: pointer; margin: 8px 8px 0 0;
+    background: #16233B; color: #EBEFF7;
+  }
+  button.primary { background: #F55060; color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { color: #99A5BC; font-size: 12px; line-height: 1.55; margin-top: 16px; }
+  .names { margin-top: 4px; }
+  .names div { padding: 5px 0; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 4px;
+         background: #54D2A5; margin-right: 8px; vertical-align: middle; }
+  .dot.idle { background: #5A6B8A; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Play together</h1>
+  <p class="sub">Rooms keep separate matches apart; eight players per room. The game reads the room number when it starts.</p>
+
+  <div class="card">
+    <div class="row"><span id="server" class="big muted">Server: starting...</span></div>
+    <div class="row" style="margin-top:8px"><span id="yourroom" class="muted">Your room: ...</span></div>
+  </div>
+
+  <div class="card">
+    <div class="label" style="margin-bottom:8px">Players online</div>
+    <div id="names" class="names muted">Waiting for the launcher.</div>
+  </div>
+
+  <div class="card">
+    <div class="label" style="margin-bottom:4px">Rooms</div>
+    <table class="rooms" id="rooms"><tbody>
+      <tr><td class="p" colspan="3">No rooms have players right now.</td></tr>
+    </tbody></table>
+  </div>
+
+  <div class="controls">
+    <input type="text" id="code" placeholder="Invite code or link" autocomplete="off">
+    <button class="primary" id="join">Join a friend</button>
+    <button id="invite">Invite friends</button>
+    <button id="refresh">Refresh</button>
+  </div>
+
+  <p class="hint">
+    Invite works with a room number (1-255). The game reads it when it starts, so close the game before
+    joining a new room. Room 0 means "anyone online" (auto-matched).
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var shell = null;          /* the host, once detected */
+  var lastPush = 0;
+  var haveState = false;
+
+  /* ---- shell adapters -------------------------------------------------- */
+
+  function detect() {
+    if (window.external && window.external.redubCall) {
+      return function (action, data) {
+        window.external.redubCall(action, JSON.stringify(data || {}));
+      };
+    }
+    if (window.ReDUBAndroid && window.ReDUBAndroid.call) {
+      return function (action, data) {
+        window.ReDUBAndroid.call(action, JSON.stringify(data || {}));
+      };
+    }
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.redub) {
+      return function (action, data) {
+        window.webkit.messageHandlers.redub.postMessage({ action: action, data: data || {} });
+      };
+    }
+    return null;
+  }
+
+  /* Exposed global: ReDUB.call(action, data) from the page, redubApply(state)
+   * from the shell. Keeping both names global is what the shells bind to. */
+  window.ReDUB = {
+    call: function (action, data) { if (shell) shell(action, data); }
+  };
+
+  window.redubApply = function (state) {
+    /* The Windows shell passes a JSON string through InvokeScript; the other
+     * shells can pass the object directly. */
+    if (typeof state === "string") {
+      try { state = JSON.parse(state); } catch (e) { return; }
+    }
+    haveState = true;
+    lastPush = +new Date();
+    try { render(state || {}); } catch (e) { /* keep the page alive */ }
+  };
+
+  /* ---- helpers --------------------------------------------------------- */
+
+  function el(id) { return document.getElementById(id); }
+  function text(id, value) { var n = el(id); if (n) n.innerHTML = value; }
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  var STATUS = { 0: "in menus", 1: "loading", 2: "on the road", 3: "in an event", 4: "in a shop", 5: "paused" };
+
+  function parseInvite(raw) {
+    var s = String(raw || "").replace(/^\s+|\s+$/g, "");
+    var i = s.toLowerCase().indexOf("room/");
+    if (i >= 0) s = s.substring(i + 5);
+    if (!/^\d{1,3}$/.test(s)) return -1;
+    var n = parseInt(s, 10);
+    return (n >= 0 && n <= 255) ? n : -1;
+  }
+
+  /* ---- render ---------------------------------------------------------- */
+
+  function render(st) {
+    var rooms = st.rooms || [];
+    var roster = st.roster || [];
+    var mine = typeof st.yourRoom === "number" ? st.yourRoom : parseInt(st.yourRoom || "0", 10);
+
+    if (st.error) {
+      text("server", '<span class="bad">Server: no answer</span>');
+    } else if (typeof st.ms === "number" && st.ms >= 0) {
+      text("server", '<span class="ok">Server: online, ' + st.ms + ' ms</span>');
+    } else {
+      text("server", '<span class="muted">Server: starting...</span>');
+    }
+
+    text("yourroom", "Your room: " + (mine === 0 ? "shared (anyone online)" : esc(mine)) +
+         (st.playerName ? " &nbsp;&middot;&nbsp; Player: " + esc(st.playerName) : ""));
+
+    /* rooms */
+    var body = el("rooms").getElementsByTagName("tbody")[0];
+    if (!rooms.length) {
+      body.innerHTML = '<tr><td class="p" colspan="3">' +
+        (st.error ? "No rooms: the server did not answer." : "No rooms have players right now.") +
+        "</td></tr>";
+    } else {
+      var html = "", i;
+      for (i = 0; i < rooms.length; i++) {
+        var r = rooms[i];
+        html += "<tr><td class=\"n\">Room " + esc(r.n) + (r.n === mine ? " <span class=\"you\">&larr; you</span>" : "") +
+                "</td><td class=\"p\">" + esc(r.players) + "/8</td><td class=\"p\">" +
+                (r.n === mine ? "" : '<button class="jsjoin" data-room="' + esc(r.n) + '">Join</button>') +
+                "</td></tr>";
+      }
+      body.innerHTML = html;
+    }
+
+    /* names */
+    if (roster.length) {
+      var names = "";
+      for (i = 0; i < roster.length; i++) {
+        var p = roster[i];
+        var live = p.status === 2 || p.status === 1 || p.status === 3;
+        names += '<div><span class="dot' + (live ? "" : " idle") + '"></span>' + esc(p.name) +
+                 ' <span class="muted">&middot; Room ' + esc(p.room) + ' &middot; ' +
+                 esc(STATUS[p.status] || "online") + "</span></div>";
+      }
+      text("names", names);
+    } else {
+      text("names", st.error ? "Player list unavailable: the server did not answer."
+                             : (rooms.length ? "Player names need the newest relay." : "Nobody else is online right now."));
+    }
+  }
+
+  /* ---- actions --------------------------------------------------------- */
+
+  el("join").onclick = function () {
+    var room = parseInvite(el("code").value);
+    if (room < 0) { alert("Paste the invite link or type the room number (0-255)."); return; }
+    window.ReDUB.call("join", { room: room });
+  };
+
+  el("invite").onclick = function () { window.ReDUB.call("invite", {}); };
+  el("refresh").onclick = function () { window.ReDUB.call("refresh", {}); };
+
+  /* Per-room Join buttons are rebuilt each render, so delegate from the table. */
+  el("rooms").onclick = function (ev) {
+    var t = ev.target || ev.srcElement;
+    if (t && t.className && t.className.indexOf("jsjoin") >= 0) {
+      window.ReDUB.call("join", { room: parseInt(t.getAttribute("data-room"), 10) });
+    }
+  };
+
+  /* ---- start ----------------------------------------------------------- */
+
+  shell = detect();
+  if (!shell) {
+    text("server", '<span class="muted">Open this page from the ReDUB launcher.</span>');
+    text("names", "No launcher connected.");
+  } else {
+    window.ReDUB.call("refresh", {});
+  }
+
+  /* If the shell stops pushing (crashed, suspended), say so instead of
+   * leaving stale numbers on screen. */
+  setInterval(function () {
+    if (!shell || !haveState) return;
+    if (+new Date() - lastPush > 12000) {
+      text("server", '<span class="bad">Server: the launcher stopped answering</span>');
+      haveState = false;
+    }
+  }, 5000);
+})();
+</script>
+</body>
+</html>
