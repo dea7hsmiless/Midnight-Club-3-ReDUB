@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#include "windows_paths.h"
 #include "input/xinput_xbox.h"
 #ifndef MC3_APP
 #define MC3_APP "mcdub3"
