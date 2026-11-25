@@ -137,6 +137,7 @@ public sealed class Launcher : Form {
                     Choice(card,ref y,"Wheel deadzone","MC3_WHEEL_DEADZONE",new[]{"0%","2%","5%","10%"},new[]{"0","655","1638","3276"},"1638");
                 }
             }
+            ButtonAt(card,"Rebind keyboard…",24,y,240,()=>ShowKeyBindings());y+=58;
             var controlsHint=LabelAt("Xbox controllers use Windows gamepad support. Wheel compatibility depends on the model and its SDL input mapping. Rumble requires device support; full force-feedback steering is not included.",10,false);controlsHint.ForeColor=Muted;controlsHint.SetBounds(24,y+8,Math.Max(400,card.Width-48),64);controlsHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(controlsHint);
         }
         if(cat=="Music"){Choice(card,ref y,"PC Music while driving","MC3_PC_MUSIC",new[]{"Off","On"},new[]{"0","1"},"0");Choice(card,ref y,"Song display","MC3_PC_MUSIC_HUD",new[]{"Overlay","Radio + fallback"},new[]{"0","1"},"1");Choice(card,ref y,"Player volume","MC3_PC_MUSIC_VOLUME",new[]{"Mute","10%","20%","30%","40%","50%","60%","70%","80%","90%","100%"},new[]{"0","10","20","30","40","50","60","70","80","90","100"},"100");var info=LabelAt("Uses built-in Windows media controls with supported players/services\nsuch as YouTube Music, Spotify and Pandora. No login is needed in ReDUB.\nMusic plays directly from your PC; ReDUB reads track info and controls\nsupported players. D-pad left/right requests track changes while driving.",10,false);info.ForeColor=Muted;info.SetBounds(24,y+10,Math.Max(400,card.Width-48),130);info.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(info);}
@@ -174,6 +175,74 @@ public sealed class Launcher : Form {
         }
         card.AutoScrollMinSize=new Size(0,y+40);
 
+    }
+    /* ---- keyboard rebinding ---------------------------------------------
+     * The game reads MC3_KEY_<ACTION> from the env file at start, as SDL
+     * scancode names (sdl_keyboard.c). Capturing a key here writes that name;
+     * a name the game cannot resolve keeps the default and says so in its log,
+     * so a bad value here is reported rather than silently dead. */
+    static readonly string[] KeyActions={"DPAD_UP","DPAD_DOWN","DPAD_LEFT","DPAD_RIGHT","START","BACK","LSTICK","RSTICK","A","B","X","Y","WHITE","BLACK","LT","RT","LSTICK_LEFT","LSTICK_RIGHT","LSTICK_UP","LSTICK_DOWN","RSTICK_LEFT","RSTICK_RIGHT","RSTICK_UP","RSTICK_DOWN"};
+    static readonly string[] KeyDefaults={"I","K","J","L","Return","Backspace","Z","C","A","B","X","Y","Q","E","Down","Up","Left","Right","Up","Down","Keypad 4","Keypad 6","Keypad 8","Keypad 2"};
+    static string SdlKeyName(Keys k){
+        if(k>=Keys.A&&k<=Keys.Z)return ((char)('A'+(k-Keys.A))).ToString();
+        if(k>=Keys.D0&&k<=Keys.D9)return ((char)('0'+(k-Keys.D0))).ToString();
+        if(k>=Keys.NumPad0&&k<=Keys.NumPad9)return "Keypad "+(k-Keys.NumPad0);
+        if(k>=Keys.F1&&k<=Keys.F12)return "F"+(((int)k-(int)Keys.F1)+1);
+        switch(k){
+            case Keys.Space:return "Space";case Keys.Enter:return "Return";case Keys.Tab:return "Tab";
+            case Keys.Back:return "Backspace";case Keys.Escape:return "Escape";
+            case Keys.Up:return "Up";case Keys.Down:return "Down";case Keys.Left:return "Left";case Keys.Right:return "Right";
+            case Keys.LShiftKey:return "Left Shift";case Keys.RShiftKey:return "Right Shift";
+            case Keys.LControlKey:return "Left Ctrl";case Keys.RControlKey:return "Right Ctrl";
+            case Keys.LMenu:return "Left Alt";case Keys.RMenu:return "Right Alt";
+            case Keys.OemMinus:return "-";case Keys.Oemplus:return "=";case Keys.Oemcomma:return ",";
+            case Keys.OemPeriod:return ".";case Keys.OemQuestion:return "/";case Keys.OemSemicolon:return ";";
+            case Keys.OemOpenBrackets:return "[";case Keys.OemCloseBrackets:return "]";case Keys.OemQuotes:return "'";
+            case Keys.OemPipe:return "\\";case Keys.Oemtilde:return "`";
+            case Keys.Insert:return "Insert";case Keys.Delete:return "Delete";case Keys.Home:return "Home";
+            case Keys.End:return "End";case Keys.PageUp:return "PageUp";case Keys.PageDown:return "PageDown";
+            case Keys.CapsLock:return "CapsLock";
+        }
+        return null;
+    }
+    void ShowKeyBindings(){
+        if(GameRunning()){MessageBox.Show(this,"Save and close the game first: the layout is read when the game starts.","Game is running");return;}
+        var f=new Form{Text="Keyboard (player 1)",ClientSize=new Size(520,660),StartPosition=FormStartPosition.CenterParent,FormBorderStyle=FormBorderStyle.FixedDialog,MaximizeBox=false,MinimizeBox=false,BackColor=Bg,ForeColor=Color.FromArgb(228,232,240)};
+        var list=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(16),BackColor=Bg};f.Controls.Add(list);
+        var bar=new Panel{Dock=DockStyle.Bottom,Height=56,BackColor=Bg};f.Controls.Add(bar);
+        var buttons=new Dictionary<string,RedubButton>();
+        string capturing=null;
+        Action redraw=()=>{
+            int y=0;
+            foreach(var action in KeyActions){
+                string pretty=action.Replace("RSTICK","RIGHT STICK").Replace("LSTICK","LEFT STICK").Replace("DPAD","D-PAD").Replace('_',' ');
+                var name=LabelAt(pretty,9,false);name.ForeColor=Color.FromArgb(228,232,240);name.SetBounds(0,y,200,36);list.Controls.Add(name);
+                string current=ReadSetting("MC3_KEY_"+action,KeyDefaults[Array.IndexOf(KeyActions,action)]);
+                if(current=="-1"||current=="")current="not set";
+                RedubButton b;
+                if(!buttons.TryGetValue(action,out b)){
+                    b=ButtonAt(list,current,210,y,180,()=>{});
+                    var captured=action;
+                    b.Click+=(s,e)=>{capturing=captured;b.Text="Press a key…";};
+                    buttons[action]=b;
+                }else b.Text=current;
+                y+=44;
+            }
+            list.AutoScrollMinSize=new Size(0,y+8);
+        };
+        redraw();
+        f.KeyPreview=true;
+        f.KeyDown+=(s,e)=>{
+            if(capturing==null)return;
+            e.Handled=true;e.SuppressKeyPress=true;
+            if(e.KeyCode==Keys.Escape){capturing=null;redraw();return;}
+            string n=SdlKeyName(e.KeyCode);
+            if(n==null){MessageBox.Show(f,"That key cannot be sent to the game. Try a letter, a digit, an F-key, an arrow, or a modifier.","Keyboard");return;}
+            try{SavePreference("MC3_KEY_"+capturing,n);capturing=null;redraw();}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+        };
+        ButtonAt(bar,"Reset to defaults",16,8,200,()=>{try{for(int i=0;i<KeyActions.Length;i++)SavePreference("MC3_KEY_"+KeyActions[i],KeyDefaults[i]);redraw();Append("Keyboard layout reset to defaults.");}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);}});
+        ButtonAt(bar,"Done",286,8,200,()=>f.Close());
+        f.ShowDialog(this);
     }
     void Choice(Control host,ref int y,string name,string key,string[] labels,string[] vals,string fallback){
         var title=LabelAt(name,10,false);title.SetBounds(24,y,220,38);host.Controls.Add(title);
