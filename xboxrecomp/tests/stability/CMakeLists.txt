@@ -19,6 +19,13 @@ target_link_libraries(thread_suspend_test PRIVATE xboxrecomp)
 add_test(NAME thread_suspend COMMAND thread_suspend_test)
 if(WIN32)
     add_executable(pushbuffer_test pushbuffer_test.c ../../src/kernel/nv2a_pb_scan.c)
+    # nv2a_pb_scan.c times its passes with clock_gettime; MinGW's UCRT build
+    # resolves that through winpthreads (as clock_gettime64), which is why the
+    # test failed to link on MSYS2 CLANG64 and took the whole Windows stability
+    # job with it. Threads::Threads is CMake's -pthread, and the linker then
+    # finds the symbol.
+    find_package(Threads REQUIRED)
+    target_link_libraries(pushbuffer_test PRIVATE Threads::Threads)
     add_test(NAME pushbuffer COMMAND pushbuffer_test)
     foreach(test IN ITEMS kernel_directory kernel_object_paths kernel_irql_abi kernel_dispatch idex_channel)
         if(test STREQUAL "kernel_dispatch")
