@@ -449,12 +449,55 @@ int xbox_kernel_suspend_pending(void)
         !xbox_thread_holds_dispatch();
 }
 
+/* Last presented frame, published by the renderer (nv2a_gl). A parked guest
+ * thread is only suspicious if the game stopped presenting while it waits:
+ * a thread the title suspends across a save load sits for tens of seconds
+ * with everything else running normally. */
+static volatile long s_frames;
+
+void xbox_kernel_frame_heartbeat(long frames)
+{
+    __atomic_store_n(&s_frames, frames, __ATOMIC_RELAXED);
+}
+
 void xbox_kernel_suspend_checkpoint(void)
 {
+    unsigned long parked = 0;
+    int told = 0;
+    long frames_at_park;
+
     if (!xbox_kernel_suspend_pending()) return;
     suspend_lock();
-    while (t_kslot->suspend_count > 0)
-        SleepConditionVariableCS(&s_suspend_cv, &s_suspend_lock, INFINITE);
+    frames_at_park = __atomic_load_n(&s_frames, __ATOMIC_RELAXED);
+    while (t_kslot->suspend_count > 0) {
+        /* Waited a second at a time instead of for ever. The park itself stays:
+         * resuming a thread the title asked to suspend would corrupt its state
+         * (the console parks it too). What changes is that a park during which
+         * nothing is presented stops being silent -- a frozen game used to look
+         * like a live one with no explanation, and the frame watchdog cannot
+         * see a worker thread. A park while frames still arrive is normal. */
+        if (SleepConditionVariableCS(&s_suspend_cv, &s_suspend_lock, 1000)) {
+            parked = 0;
+            frames_at_park = __atomic_load_n(&s_frames, __ATOMIC_RELAXED);
+            continue;
+        }
+        {
+            long now = __atomic_load_n(&s_frames, __ATOMIC_RELAXED);
+            if (now != frames_at_park) {
+                parked = 0;
+                frames_at_park = now;
+                continue;
+            }
+        }
+        if (++parked == 10 && !told) {
+            told = 1;
+            fprintf(stderr, "[SYNC] guest thread %lu parked %lu s with no frame "
+                            "presented (suspend_count %ld)\n",
+                    (unsigned long)t_kslot->tid, parked,
+                    (long)InterlockedCompareExchange(&t_kslot->suspend_count, 0, 0));
+            fflush(stderr);
+        }
+    }
     LeaveCriticalSection(&s_suspend_lock);
 }
 
