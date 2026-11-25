@@ -107,6 +107,29 @@
 # Vibration strength in percent (0 .. 200).
 #MC3_RUMBLE_STRENGTH=100
 
+# Keyboard as player 1: 1 to turn it on, 0 (the default) to leave it off.
+#RECOMP_KEYBOARD=1
+
+# Rebind the keyboard. Each line takes an SDL key name, or a scancode number,
+# and -1 leaves that action unbound. Names: A-Z, 0-9, F1-F12, Space, Return,
+# Tab, Backspace, Escape, Up, Down, Left, Right, "Keypad 0".."9",
+# "Left Shift", "Left Ctrl", "Left Alt", Delete, Insert, Home, End, PageUp,
+# PageDown. Actions: DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT, START, BACK,
+# LSTICK, RSTICK, A, B, X, Y, WHITE, BLACK, LT, RT, LSTICK_LEFT,
+# LSTICK_RIGHT, LSTICK_UP, LSTICK_DOWN, RSTICK_LEFT, RSTICK_RIGHT,
+# RSTICK_UP, RSTICK_DOWN. Example: MC3_KEY_A=Space
+#
+# The defaults are the layout the port has always used: I/J/K/L d-pad,
+# arrows steering, A/B/X/Y face buttons, Q/E white/black, 1/3 triggers,
+# Keypad 4/6/8/2 camera. Space still acts as A, Shift as WHITE and Ctrl as
+# BLACK, so binding another key never takes a working one away.
+#MC3_KEY_START=Return
+#MC3_KEY_A=A
+
+# Log every keyboard action as the pad layer sees it (for "my key does
+# nothing" reports: it says whether a press became a button).
+#MC3_KEY_TRACE=1
+
 # ============================================================================
 # Online play (free roam and System Link races)
 # ============================================================================

@@ -2,6 +2,9 @@
  * callbacks only queue/edit bounded text and never call guest code. */
 #include <SDL.h>
 #include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "../platform/host_main.h"
 typedef void (*xbox_text_callback)(const char *);
 typedef void (*xbox_text_key_callback)(int);
@@ -167,11 +170,16 @@ static int keyboard_stick_y(void)
     return !(xbox_keyboard_driving && xbox_keyboard_driving());
 }
 
+static int held(int sc)
+{
+    return sc >= 0 && sc < SDL_NUM_SCANCODES && s_down[sc];
+}
+
 static SHORT axis(int negative, int positive)
 {
     int v = 0;
-    if (s_down[negative]) v -= 32767;
-    if (s_down[positive]) v += 32767;
+    if (held(negative)) v -= 32767;
+    if (held(positive)) v += 32767;
     return (SHORT)v;
 }
 
@@ -182,6 +190,122 @@ static SHORT axis2(int neg1, int pos1, int neg2, int pos2)
     return (SHORT)(v > 32767 ? 32767 : v < -32767 ? -32767 : v);
 }
 
+/* ---- rebindable keys -----------------------------------------------------
+ *
+ * The defaults are the layout this port has always used: I/J/K/L for the
+ * d-pad (so the left hand never leaves W/A/S/D country), arrows for steering
+ * and the triggers, the numeric pad for the camera. Each action can be
+ * rebound from the settings file, one key per line:
+ *
+ *   MC3_KEY_A=SPACE              an SDL key name (SDL_GetScancodeFromName)
+ *   MC3_KEY_DPAD_UP=W            letters, digits, F1-F12, RETURN, LCTRL, ...
+ *   MC3_KEY_RT=119               or a number, if a name is not enough
+ *   MC3_KEY_LT=-1                -1 (or none) leaves the action unbound
+ *
+ * Read once, on the first state query. A name SDL does not know keeps the
+ * default and says so: a typo that silently unbinds a button is a support
+ * ticket, not a feature. The alternates the layout already had (Space for A,
+ * Shift for WHITE, Ctrl for BLACK, Tab for BACK, the F/H/G/T camera keys)
+ * stay, so binding these cannot take a working key away.
+ */
+enum {
+    K_DPAD_UP, K_DPAD_DOWN, K_DPAD_LEFT, K_DPAD_RIGHT,
+    K_START, K_BACK, K_LSTICK, K_RSTICK,
+    K_A, K_B, K_X, K_Y, K_WHITE, K_BLACK, K_LT, K_RT,
+    K_LS_LEFT, K_LS_RIGHT, K_LS_UP, K_LS_DOWN,
+    K_RS_LEFT, K_RS_RIGHT, K_RS_UP, K_RS_DOWN,
+    K_COUNT
+};
+
+static const struct { const char *name; int sc; } s_key_defaults[K_COUNT] = {
+    { "DPAD_UP",      SDL_SCANCODE_I },  { "DPAD_DOWN",    SDL_SCANCODE_K },
+    { "DPAD_LEFT",    SDL_SCANCODE_J },  { "DPAD_RIGHT",   SDL_SCANCODE_L },
+    { "START",        SDL_SCANCODE_RETURN },
+    { "BACK",         SDL_SCANCODE_BACKSPACE },
+    { "LSTICK",       SDL_SCANCODE_Z },  { "RSTICK",       SDL_SCANCODE_C },
+    { "A",            SDL_SCANCODE_A },  { "B",            SDL_SCANCODE_B },
+    { "X",            SDL_SCANCODE_X },  { "Y",            SDL_SCANCODE_Y },
+    { "WHITE",        SDL_SCANCODE_Q },  { "BLACK",        SDL_SCANCODE_E },
+    { "LT",           SDL_SCANCODE_DOWN }, { "RT",         SDL_SCANCODE_UP },
+    { "LSTICK_LEFT",  SDL_SCANCODE_LEFT }, { "LSTICK_RIGHT", SDL_SCANCODE_RIGHT },
+    { "LSTICK_UP",    SDL_SCANCODE_UP },  { "LSTICK_DOWN", SDL_SCANCODE_DOWN },
+    { "RSTICK_LEFT",  SDL_SCANCODE_KP_4 },{ "RSTICK_RIGHT", SDL_SCANCODE_KP_6 },
+    { "RSTICK_UP",    SDL_SCANCODE_KP_8 },{ "RSTICK_DOWN", SDL_SCANCODE_KP_2 },
+};
+
+static int s_key[K_COUNT];
+static int s_key_ready;
+
+static int same_word(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++) {
+        int ca = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a;
+        int cb = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;
+        if (ca != cb) return 0;
+    }
+    return *a == 0 && *b == 0;
+}
+
+static void key_init(void)
+{
+    s_key_ready = 1;
+    for (int i = 0; i < K_COUNT; i++) {
+        char env[48];
+        const char *v;
+        s_key[i] = s_key_defaults[i].sc;
+        snprintf(env, sizeof env, "MC3_KEY_%s", s_key_defaults[i].name);
+        v = getenv(env);
+        if (!v || !*v) continue;
+        if (same_word(v, "none") || (v[0] == '-' && v[1] == '1' && !v[2])) {
+            s_key[i] = -1;
+        } else {
+            char *end;
+            long n = strtol(v, &end, 10);
+            if (end != v && *end == 0) {
+                s_key[i] = (int)n;
+            } else {
+                SDL_Scancode sc = SDL_GetScancodeFromName(v);
+                if (sc == SDL_SCANCODE_UNKNOWN) {
+                    fprintf(stderr, "  [INPUT] %s=%s: SDL does not know that key; "
+                                    "keeping %s\n", env, v,
+                            SDL_GetScancodeName((SDL_Scancode)s_key[i]));
+                    continue;
+                }
+                s_key[i] = (int)sc;
+            }
+        }
+        fprintf(stderr, "  [INPUT] keyboard %s is %s\n", s_key_defaults[i].name,
+                s_key[i] < 0 ? "unbound" : SDL_GetScancodeName((SDL_Scancode)s_key[i]));
+    }
+}
+
+static int kb(int action)
+{
+    if (!s_key_ready) key_init();
+    return s_key[action];
+}
+
+/* MC3_KEY_TRACE=1: each action as the pad layer sees it. The key names in the
+ * log say what the layout resolved to; this says whether a press actually
+ * became a button, which is the half a rebind can break. */
+static void key_trace(void)
+{
+    static int trace = -1;
+    static int prev[K_COUNT];
+    if (trace < 0) {
+        const char *v = getenv("MC3_KEY_TRACE");
+        trace = v && *v == '1';
+    }
+    if (!trace) return;
+    for (int i = 0; i < K_COUNT; i++) {
+        int now = held(kb(i));
+        if (now != prev[i]) {
+            fprintf(stderr, "  [KEYS] %s %s\n", s_key_defaults[i].name, now ? "down" : "up");
+            prev[i] = now;
+        }
+    }
+}
+
 /* Merge the keyboard into a state (a real pad's, or an empty one): buttons
  * OR'ed, analog buttons at full pressure, sticks where a key is held. */
 void xbox_sdl_keyboard_state(XBOX_INPUT_STATE *s)
@@ -190,37 +314,39 @@ void xbox_sdl_keyboard_state(XBOX_INPUT_STATE *s)
     BYTE *an = s->Gamepad.bAnalogButtons;
     SHORT x;
 
-    if (s_down[SDL_SCANCODE_I])         b |= XBOX_GAMEPAD_DPAD_UP;
-    if (s_down[SDL_SCANCODE_K])         b |= XBOX_GAMEPAD_DPAD_DOWN;
-    if (s_down[SDL_SCANCODE_J])         b |= XBOX_GAMEPAD_DPAD_LEFT;
-    if (s_down[SDL_SCANCODE_L])         b |= XBOX_GAMEPAD_DPAD_RIGHT;
-    if (s_down[SDL_SCANCODE_RETURN] || s_down[SDL_SCANCODE_KP_ENTER])
+    if (held(kb(K_DPAD_UP)))            b |= XBOX_GAMEPAD_DPAD_UP;
+    if (held(kb(K_DPAD_DOWN)))          b |= XBOX_GAMEPAD_DPAD_DOWN;
+    if (held(kb(K_DPAD_LEFT)))          b |= XBOX_GAMEPAD_DPAD_LEFT;
+    if (held(kb(K_DPAD_RIGHT)))         b |= XBOX_GAMEPAD_DPAD_RIGHT;
+    if (held(kb(K_START)) || held(SDL_SCANCODE_KP_ENTER))
                                         b |= XBOX_GAMEPAD_START;
-    if (s_down[SDL_SCANCODE_BACKSPACE] || s_down[SDL_SCANCODE_TAB]
-        || s_down[SDL_SCANCODE_AC_BACK])  /* Android's Back */
+    if (held(kb(K_BACK)) || held(SDL_SCANCODE_TAB)
+        || held(SDL_SCANCODE_AC_BACK))  /* Android's Back */
                                         b |= XBOX_GAMEPAD_BACK;
-    if (s_down[SDL_SCANCODE_Z])         b |= XBOX_GAMEPAD_LEFT_THUMB;
-    if (s_down[SDL_SCANCODE_C])         b |= XBOX_GAMEPAD_RIGHT_THUMB;
+    if (held(kb(K_LSTICK)))             b |= XBOX_GAMEPAD_LEFT_THUMB;
+    if (held(kb(K_RSTICK)))             b |= XBOX_GAMEPAD_RIGHT_THUMB;
     s->Gamepad.wButtons |= b;
 
-    if (s_down[SDL_SCANCODE_A] || s_down[SDL_SCANCODE_SPACE]) an[XBOX_BUTTON_A] = 255;
-    if (s_down[SDL_SCANCODE_B]) an[XBOX_BUTTON_B] = 255;
-    if (s_down[SDL_SCANCODE_X]) an[XBOX_BUTTON_X] = 255;
-    if (s_down[SDL_SCANCODE_Y]) an[XBOX_BUTTON_Y] = 255;
-    if (s_down[SDL_SCANCODE_Q] || s_down[SDL_SCANCODE_LSHIFT] || s_down[SDL_SCANCODE_RSHIFT])
+    if (held(kb(K_A)) || held(SDL_SCANCODE_SPACE)) an[XBOX_BUTTON_A] = 255;
+    if (held(kb(K_B))) an[XBOX_BUTTON_B] = 255;
+    if (held(kb(K_X))) an[XBOX_BUTTON_X] = 255;
+    if (held(kb(K_Y))) an[XBOX_BUTTON_Y] = 255;
+    if (held(kb(K_WHITE)) || held(SDL_SCANCODE_LSHIFT) || held(SDL_SCANCODE_RSHIFT))
         an[XBOX_BUTTON_WHITE] = 255;
-    if (s_down[SDL_SCANCODE_E] || s_down[SDL_SCANCODE_LCTRL] || s_down[SDL_SCANCODE_RCTRL])
+    if (held(kb(K_BLACK)) || held(SDL_SCANCODE_LCTRL) || held(SDL_SCANCODE_RCTRL))
         an[XBOX_BUTTON_BLACK] = 255;
-    if (s_down[SDL_SCANCODE_DOWN]) an[XBOX_BUTTON_LTRIGGER] = 255;
-    if (s_down[SDL_SCANCODE_UP])   an[XBOX_BUTTON_RTRIGGER] = 255;
+    if (held(kb(K_LT))) an[XBOX_BUTTON_LTRIGGER] = 255;
+    if (held(kb(K_RT)))   an[XBOX_BUTTON_RTRIGGER] = 255;
 
-    if ((x = axis(SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT)) != 0) s->Gamepad.sThumbLX = x;
-    if (keyboard_stick_y() && (x = axis(SDL_SCANCODE_DOWN, SDL_SCANCODE_UP)) != 0)
+    if ((x = axis(kb(K_LS_LEFT), kb(K_LS_RIGHT))) != 0) s->Gamepad.sThumbLX = x;
+    if (keyboard_stick_y() && (x = axis(kb(K_LS_DOWN), kb(K_LS_UP))) != 0)
         s->Gamepad.sThumbLY = x;
-    if ((x = axis2(SDL_SCANCODE_KP_4, SDL_SCANCODE_KP_6, SDL_SCANCODE_F, SDL_SCANCODE_H)) != 0)
+    if ((x = axis2(kb(K_RS_LEFT), kb(K_RS_RIGHT), SDL_SCANCODE_F, SDL_SCANCODE_H)) != 0)
         s->Gamepad.sThumbRX = x;
-    if ((x = axis2(SDL_SCANCODE_KP_2, SDL_SCANCODE_KP_8, SDL_SCANCODE_G, SDL_SCANCODE_T)) != 0)
+    if ((x = axis2(kb(K_RS_DOWN), kb(K_RS_UP), SDL_SCANCODE_G, SDL_SCANCODE_T)) != 0)
         s->Gamepad.sThumbRY = x;
+
+    key_trace();
 }
 
 #endif
