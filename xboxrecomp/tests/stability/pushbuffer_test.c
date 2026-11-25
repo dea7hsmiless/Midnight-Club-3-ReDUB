@@ -47,7 +47,11 @@ int main(void)
     RAM(0x2004)=(1u<<18)|0x400u;RAM(0x2008)=22;RAM(0x200C)=0x2000100C;
     check(nv2a_pb_scan(0x100C)==0x100C&&calls==2&&values[0]==11&&values[1]==22,"follow jump, call, return and ring wrap");
     reset();RAM(0x1000)=0x08000001;
-    check(nv2a_pb_scan(0x100C)==0x1000&&calls==0,"invalid GPU target is not reported consumed");
+    /* A bad target drops the rest of the batch and resumes at PUT. Leaving
+     * GET on the offending word is what produced the 4.88-million-resync
+     * permanent hang (d2143fd); what must not happen is the jump target being
+     * read as commands, which is what calls==0 proves. */
+    check(nv2a_pb_scan(0x100C)==0x100C&&calls==0,"invalid GPU target is not executed as commands");
     VirtualFree(memory,0,MEM_RELEASE);
     return 0;
 }
