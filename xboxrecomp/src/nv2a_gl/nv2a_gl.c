@@ -23,7 +23,11 @@
  * its events pumped, on flip.
  *
  * Runtime switches:
- *   RECOMP_GL_DUMP=<prefix>[,every[,from[,to]]]  write presented frames as BMP
+ *   RECOMP_GL_DUMP=<prefix>[,every[,from[,to]]]  write the game's own surface
+ *                                    as BMP -- before FXAA, sharpening, the
+ *                                    post effects and the aspect blit
+ *   RECOMP_GL_DUMP_OUT=<prefix>[,every]  write the picture as presented, after
+ *                                    those passes: what the screen shows
  *   RECOMP_GL_TRACE=1                shader sources and link errors
  *   RECOMP_GL_WATCH=<hex va>         state, vertices and pixels read back for
  *                                    the first draws into / sampling that VA
@@ -159,6 +163,12 @@ static inline void es_read_pixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum
 #include "../platform/host_main.h"
 #include "hd_pack.h"
 #include "../kernel/nv2a_present.h"
+
+/* Not in every GL header this file builds against (the Switch/iOS variants
+ * trim their enum lists); the value is GL 3.0's and fixed. */
+#ifndef GL_READ_FRAMEBUFFER_BINDING
+#define GL_READ_FRAMEBUFFER_BINDING 0x8CAA
+#endif
 #include "../kernel/nv2a_backend.h"
 
 #include <SDL.h>
@@ -6519,8 +6529,21 @@ void nv2a_gl_fill_hold(int delta)
 
 static GLint  s_fx_rcp, s_fx_max, s_fx_sharp, s_fx_full, s_fx_crop, s_fx_band, s_fx_fill;
 static GLint  s_fx_steady, s_fx_gamma, s_fx_brightness, s_fx_aa;
+static GLint  s_fx_glow, s_fx_vig, s_fx_colour, s_fx_play;
 static float  s_fx_sharpness = -1.0f;
+static float  s_fx_glow_k, s_fx_vig_k, s_fx_colour_k;   /* 0..1, from the env file */
 static int    s_fx_on = -1;
+
+/* A 0..1 presentation setting from the env file; anything unparsable keeps the
+ * default. Read once per process, like RECOMP_GL_SHARPEN: a change needs a
+ * restart, which is what the launcher says next to these rows. */
+static float env01(const char *name, float fallback)
+{
+    const char *e = getenv(name);
+    if (!e || !*e) return fallback;
+    float v = (float)atof(e);
+    return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v;
+}
 
 static int fxaa_init(void)
 {
@@ -6552,6 +6575,44 @@ static int fxaa_init(void)
         "vec3 displayColor(vec3 c) { return pow(clamp(c * u_brightness, 0.0, 1.0), vec3(1.0 / u_gamma)); }\n"
         "float L(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }\n"
         "float LA(vec2 p) { return L(S(p)); }\n"
+        "uniform float u_glow, u_vignette, u_colour;\n"
+        "uniform int u_play;           /* gameplay only: menus keep their text */\n"
+        "/* Glow: one ring of 8 taps around the pixel, weighted by brightness above\n"
+        " * a threshold, added back before grading. Deliberately one radius: a\n"
+        " * second, wider ring costs 8 more samples for a halo the eye does not\n"
+        " * ask for at 60 fps. */\n"
+        "vec3 glowAt(vec2 uv, vec2 r) {\n"
+        "    vec3 s = vec3(0.0);\n"
+        "    for (int i = 0; i < 8; i++) {\n"
+        "        float a = float(i) * 0.7853982;\n"
+        "        vec2 o = vec2(cos(a), sin(a)) * r * 5.0;\n"
+        "        vec3 c = S(uv + o);\n"
+        "        s += c * max(0.0, L(c) - 0.55);\n"
+        "    }\n"
+        "    return s * 0.125;\n"
+        "}\n"
+        "/* Colour: more saturation and a warm highlight, and no contrast: the\n"
+        " * game is mostly night, and a contrast curve around 0.5 measured 8%\n"
+        " * darker in the middle of the frame (verified on screen, 2026-11-24).\n"
+        " * Saturation is a mix around luma, so it leaves brightness alone. */\n"
+        "vec3 colourAt(vec3 c) {\n"
+        "    float l = L(c);\n"
+        "    return clamp(mix(vec3(l), c, 1.14) + vec3(0.010, 0.0, -0.010), 0.0, 1.0);\n"
+        "}\n"
+        "/* Vignette inside the drawn picture, not the window, so a stretched 4:3\n"
+        " * frame darkens its own corners and not the bars. */\n"
+        "float vignetteAt(vec2 uv, vec4 R) {\n"
+        "    vec2 q = vec2((uv.x - R.x) / max(R.y - R.x, 1e-4),\n"
+        "                  (uv.y - R.z) / max(R.w - R.z, 1e-4)) - 0.5;\n"
+        "    float d = dot(q, q) * 2.0;               /* ~0 centre, ~1 corner */\n"
+        "    return mix(1.0, clamp(1.3 - 0.5 * d, 0.0, 1.0), u_vignette);\n"
+        "}\n"
+        "vec3 graded(vec2 uv, vec3 c) {\n"
+        "    if (u_play == 0) return c;\n"
+        "    if (u_glow > 0.0) c = min(c + glowAt(uv, u_rcp) * (1.5 * u_glow), vec3(1.0));\n"
+        "    if (u_colour > 0.0) c = mix(c, colourAt(c), u_colour);\n"
+        "    return c;\n"
+        "}\n"
         "/* Both side bands black from top to bottom: a 4:3 screen the title\n"
         " * pillarboxed itself. Same texels for every pixel: cache hits. */\n"
         "bool bars() {\n"
@@ -6567,7 +6628,7 @@ static int fxaa_init(void)
         "    vec4 R = (u_fill != 0 && filled) ? u_crop : u_full;\n"
         "    vec2 uv = vec2(mix(R.x, R.y, vT.x), mix(R.z, R.w, vT.y)), r = u_rcp;\n"
         "    vec3 cM = S(uv);\n"
-        "    if (u_aa == 0) { o = vec4(displayColor(cM), 1.0); return; }\n"
+        "    if (u_aa == 0) { o = vec4(displayColor(graded(uv, cM)) * vignetteAt(uv, R), 1.0); return; }\n"
         "    float m = L(cM);\n"
         "    float n = LA(uv + vec2(0.0, -r.y)), s = LA(uv + vec2(0.0, r.y));\n"
         "    float e = LA(uv + vec2(r.x, 0.0)), w = LA(uv + vec2(-r.x, 0.0));\n"
@@ -6585,7 +6646,7 @@ static int fxaa_init(void)
         "            vec3 wt = -amp * u_sharp;         /* the negative lobe */\n"
         "            cM = clamp((cM + wt * (cn + cs + ce + cw)) / (1.0 + 4.0 * wt), 0.0, 1.0);\n"
         "        }\n"
-        "        o = vec4(displayColor(cM), 1.0); return;\n"
+        "        o = vec4(displayColor(graded(uv, cM)) * vignetteAt(uv, R), 1.0); return;\n"
         "    }\n"
         "    float nw = LA(uv + vec2(-r.x, -r.y)), ne = LA(uv + vec2(r.x, -r.y));\n"
         "    float sw = LA(uv + vec2(-r.x, r.y)), se = LA(uv + vec2(r.x, r.y));\n"
@@ -6625,7 +6686,7 @@ static int fxaa_init(void)
         "    off = max(off, sp * sp * 0.75);\n"
         "    vec2 f = uv;\n"
         "    if (horz) f.y += off * stp; else f.x += off * stp;\n"
-        "    o = vec4(displayColor(S(f)), 1.0);\n"
+        "    o = vec4(displayColor(graded(f, S(f))) * vignetteAt(f, R), 1.0);\n"
         "}\n" };
     GLuint v, f;
     GLint ok = 0;
@@ -6670,6 +6731,16 @@ static int fxaa_init(void)
     s_fx_brightness=glGetUniformLocation(s_fx_prog,"u_brightness");
     s_fx_aa=glGetUniformLocation(s_fx_prog,"u_aa");
     s_fx_sharp = glGetUniformLocation(s_fx_prog, "u_sharp");
+    s_fx_glow = glGetUniformLocation(s_fx_prog, "u_glow");
+    s_fx_vig = glGetUniformLocation(s_fx_prog, "u_vignette");
+    s_fx_colour = glGetUniformLocation(s_fx_prog, "u_colour");
+    s_fx_play = glGetUniformLocation(s_fx_prog, "u_play");
+    s_fx_glow_k = env01("RECOMP_GL_GLOW", 0.0f);
+    s_fx_vig_k = env01("RECOMP_GL_VIGNETTE", 0.0f);
+    s_fx_colour_k = env01("RECOMP_GL_COLOUR", 0.0f);
+    if (s_fx_glow_k > 0.0f || s_fx_vig_k > 0.0f || s_fx_colour_k > 0.0f)
+        fprintf(stderr, "  [GL] post: glow %g, vignette %g, colour %g\n",
+                s_fx_glow_k, s_fx_vig_k, s_fx_colour_k);
     {
         /* RECOMP_GL_SHARPEN: 0..1 (default 0.5, 0 = off), AMD CAS's
          * "sharpness": the negative lobe -1/mix(8, 5, k). */
@@ -7361,7 +7432,11 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
     float gamma=1.0f,brightness=1.0f;
     {extern float windows_port_gamma_get(void),windows_port_brightness_get(void);gamma=windows_port_gamma_get();brightness=windows_port_brightness_get();}
     glUniform1f(s_fx_gamma,gamma);glUniform1f(s_fx_brightness,brightness);
+    glUniform1f(s_fx_glow, s_fx_glow_k);
+    glUniform1f(s_fx_vig, s_fx_vig_k);
+    glUniform1f(s_fx_colour, s_fx_colour_k);
     int aa_mode=s_fx_on;
+    int play_mode=1;                 /* menus keep their text; see graded() */
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
     {
         /* iOS has no gameplay/media split to gate on; the setting applies
@@ -7378,10 +7453,12 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
         /* Final-image FXAA softens native menu text and loading artwork.
          * Keep it confined to the 3D driving state. */
         aa_mode=windows_media_gameplay_get()?windows_port_fxaa_get():0;
+        play_mode=windows_media_gameplay_get()?1:0;
         if(aa_mode!=previous_mode){fprintf(stderr,"  [GL] active presentation FXAA mode %d\n",aa_mode);previous_mode=aa_mode;}
     }
 #endif
     glUniform1i(s_fx_aa,aa_mode);
+    glUniform1i(s_fx_play,play_mode);
     glUniform1f(s_fx_sharp, -s_fx_sharpness);   /* 1 / mix(8, 5, k); 0 = off */
     {
         int steady = fill && fill_steady_init();
@@ -7533,6 +7610,12 @@ static void gl_flip(void)
     static int dump_every = -1;
     static uint32_t dump_from, dump_to;     /* RECOMP_GL_DUMP=prefix,every,from,to */
     static char dump_prefix[256];
+    /* RECOMP_GL_DUMP_OUT=prefix[,every]: the picture as presented, read back
+     * after the FXAA/post pass and the aspect blit. RECOMP_GL_DUMP reads the
+     * game's own surface, before any of that, so it cannot show what the
+     * presentation shaders did. */
+    static int dump_out_every = -1;
+    static char dump_out_prefix[256];
     static uint8_t *pix;
     static size_t pix_cap;
     int ww, wh;
@@ -7634,8 +7717,7 @@ static void gl_flip(void)
         }
     }
     if (dump_every < 0) {
-        const char *d = getenv("RECOMP_GL_DUMP");
-        dump_every = 0;
+        const char *d = getenv("RECOMP_GL_DUMP");        dump_every = 0;
         if (d && *d) {
             const char *comma = strchr(d, ',');
             size_t n = comma ? (size_t)(comma - d) : strlen(d);
@@ -7651,6 +7733,19 @@ static void gl_flip(void)
                 if ((comma = strchr(comma + 1, ',')) != NULL)
                     dump_to = (uint32_t)strtoul(comma + 1, NULL, 10);
             }
+        }
+    }
+    if (dump_out_every < 0) {
+        const char *d = getenv("RECOMP_GL_DUMP_OUT");
+        dump_out_every = 0;
+        if (d && *d) {
+            const char *comma = strchr(d, ',');
+            size_t n = comma ? (size_t)(comma - d) : strlen(d);
+            if (n >= sizeof dump_out_prefix) n = sizeof dump_out_prefix - 1;
+            memcpy(dump_out_prefix, d, n);
+            dump_out_prefix[n] = 0;
+            dump_out_every = comma ? atoi(comma + 1) : 60;
+            if (dump_out_every <= 0) dump_out_every = 60;
         }
     }
     if (!s || !s_drew_any) {
@@ -7767,6 +7862,35 @@ static void gl_flip(void)
             glBlitFramebuffer(0, 0, sw, (GLint)s->ph,
                               dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, GL_LINEAR);
         glDisable(GL_SCISSOR_TEST);
+    }
+    if (dump_out_every > 0 && (s_frame % (uint32_t)dump_out_every) == 0) {
+        size_t need = (size_t)ww * (size_t)wh * 4;
+        if (need > pix_cap) {
+            free(pix);
+            pix_cap = need;
+            pix = (uint8_t *)malloc(pix_cap);
+        }
+        if (pix) {
+            char path[320];
+            GLint prev = 0;
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, s_screen_fbo);
+            glPixelStorei(GL_PACK_ALIGNMENT, 4);
+            glReadPixels(0, 0, ww, wh, GL_BGRA, GL_UNSIGNED_BYTE, pix);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev);
+            /* Rows come back bottom-first from the window; flip them so the
+             * BMP reads the same way up as the screen and as RECOMP_GL_DUMP. */
+            size_t stride = (size_t)ww * 4;
+            for (int y = 0; y < wh / 2; y++) {
+                uint8_t *a = pix + stride * (size_t)y;
+                uint8_t *b = pix + stride * (size_t)(wh - 1 - y);
+                for (size_t i = 0; i < stride; i++) {
+                    uint8_t t = a[i]; a[i] = b[i]; b[i] = t;
+                }
+            }
+            snprintf(path, sizeof path, "%s%05u.bmp", dump_out_prefix, s_frame);
+            dump_bmp(path, pix, (uint32_t)ww, (uint32_t)wh);
+        }
     }
 swap:
 #if (!defined(_WIN32) || defined(XBOXRECOMP_SDL_HOST)) && !defined(__SWITCH__)

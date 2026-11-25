@@ -46,6 +46,16 @@
 # Sharpening strength, 0 (off) to 1.
 #RECOMP_GL_SHARPEN=0.5
 
+# Final-picture effects, 0 (off) to 1. They apply while driving only, so
+# menus and loading screens keep their text crisp. Restart to change.
+#
+# Glow: bright areas bleed a little light, the way neon and headlights do.
+#RECOMP_GL_GLOW=0
+# Vignette: the corners of the picture are gently darkened.
+#RECOMP_GL_VIGNETTE=0
+# Colour: a little more contrast and saturation, and a warm highlight.
+#RECOMP_GL_COLOUR=0
+
 # Vertical sync: 0 off, 1 on, -1 adaptive.
 #RECOMP_GL_VSYNC=0
 
