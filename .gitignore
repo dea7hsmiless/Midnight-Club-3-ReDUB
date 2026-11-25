@@ -81,3 +81,7 @@ tools.zip
 /ios/dist/
 /work-remix/ios-build/
 /work-remix/iossdl/
+
+# Handoff and working notes are snapshots, not documentation (see AGENTS.md):
+# keep them on this machine, never in the published repository.
+*HANDOFF*.md

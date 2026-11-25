@@ -6,8 +6,8 @@
 #       -Seconds 420 -GameDir 'C:\Games\ReDUB\game-remix'
 #
 # The switches below are the ones that convicted two 0.2.5 regressions
-# (docs/0.2.5-HANDOFF.md 15.5-15.7). They exist so the next report can be
-# bisected without rebuilding:
+# (0.2.5 investigation notes, sections 15.5-15.7; kept locally, not in the
+# repository). They exist so the next report can be bisected without rebuilding:
 #   -Quiet 0        old per-read logging (the logo freeze came from it)
 #   -MovieWaitMs 0  no INFINITE-wait ceiling (the 114 s crash came from it)
 #   -Guard 0        no frame-progress guard on the capped wait

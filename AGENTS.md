@@ -3,7 +3,8 @@
 Midnight Club 3: DUB Edition Remix, statically recompiled for Windows, Linux, iOS and Android.
 
 **Read `docs/STATUS.md` first.** It is the only current state; Desktop handoffs are
-snapshots and may be stale.
+snapshots and may be stale. Handoff notes are gitignored (`*HANDOFF*.md`): they stay on
+the machine, never in the published repository.
 
 ## Working trees
 
