@@ -702,7 +702,7 @@ public sealed class Launcher : Form {
         var problems=new List<string>();
         string game=Path.Combine(root,@"game-remix"),xbe=Path.Combine(game,"default.xbe");
         if(!File.Exists(xbe))problems.Add("Game files are missing: "+xbe+". Choose Install.");
-        else{string edition,error;if(!Xdvdfs.TryVerify(game,out edition,out error))problems.Add(error);}
+        else{string edition,error;if(!Xdvdfs.TryVerify(game,out edition,out error))problems.Add(error);else{string data=Xdvdfs.CheckArchives(game);if(data!=null)problems.Add("Game data is incomplete ("+data+"). Install the disc again.");}}
         string dist=RendererDist(root),exe=Path.Combine(dist,"mcdub3remix.exe"),sdl=Path.Combine(dist,"SDL2.dll");
         if(!File.Exists(exe))problems.Add("Game executable is missing: "+exe+". Use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.");
         else if(!File.Exists(sdl))problems.Add("Controller runtime is missing: "+sdl+". Use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.");

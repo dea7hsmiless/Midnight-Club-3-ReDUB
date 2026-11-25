@@ -360,6 +360,91 @@ public static class Xdvdfs {
         return edition;
     }
 
+    /* The data archives, checked by their own header rather than by their size.
+     *
+     * A missing or short numbered archive does not fail gracefully in the game:
+     * a model that lives in assets_x.dat_2 surfaces as 0xC0000034 or a
+     * KeBugCheck mid-race (roam_game.c documents the same path), and the
+     * launcher used to accept the import because it only ever checked
+     * default.xbe.
+     *
+     * A Dave pack starts with "Dave", then the entry count and a table of that
+     * many 12-byte entries {offset|0x80000000, length, id}. So the file must be
+     * long enough for its own table, and every entry that names data must sit
+     * inside the file. That catches truncation and a chain cut short (the
+     * numbered parts are read in order, so the chain stops at the first gap),
+     * without assuming anything about which edition or how many parts. */
+    public static string CheckArchives(string directory) {
+        string first = null;
+        int parts = 0;
+        for (int i = 0; ; i++) {
+            string name = i == 0 ? "assets_x.dat" : "assets_x.dat_" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            string path = Path.Combine(directory, name);
+            if (!File.Exists(path)) break;
+            string why = DaveProblem(path);
+            if (why != null) {
+                if (first == null) first = name + ": " + why;
+            }
+            parts++;
+        }
+        if (parts == 0) return "assets_x.dat is missing: the game cannot load models, textures or sounds.";
+        {
+            string banks = Path.Combine(directory, "banks.dat");
+            string why = File.Exists(banks) ? DaveProblem(banks) : "is missing: the game has no audio banks.";
+            if (why != null && first == null) first = "banks.dat: " + why;
+        }
+        return first;
+    }
+
+    /* null when the pack looks usable, else what is wrong with it. */
+    static string DaveProblem(string path) {
+        long length;
+        FileStream s;
+        try {
+            s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.RandomAccess);
+            length = s.Length;
+        } catch (Exception) {
+            return "cannot be opened (in use, or no read permission).";
+        }
+        try {
+            byte[] head = new byte[8];
+            if (length < 8 || s.Read(head, 0, 8) != 8) return "is too short to be a game archive.";
+            if (!(head[0] == (byte)'D' && head[1] == (byte)'a' && head[2] == (byte)'v' && head[3] == (byte)'e')
+                && !(head[0] == (byte)'D' && head[1] == (byte)'A' && head[2] == (byte)'V' && head[3] == (byte)'E'))
+                return "is not a game archive (no Dave header).";
+            uint count = (uint)(head[4] | (head[5] << 8) | (head[6] << 16) | (head[7] << 24));
+            if (count == 0 || count > 4000000u) return "has a damaged table (" + count + " entries).";
+            long tableEnd = 8L + 12L * count;
+            if (tableEnd > length) return "is truncated: its table needs " + tableEnd + " bytes and it has " + length + ".";
+            byte[] table = new byte[12 * 8192];
+            long at = 8;
+            uint seen = 0;
+            while (seen < count) {
+                int want = (int)Math.Min((long)count - seen, 8192u) * 12;
+                s.Seek(at, SeekOrigin.Begin);
+                int got = 0;
+                while (got < want) {
+                    int n = s.Read(table, got, want - got);
+                    if (n <= 0) return "is truncated inside its table.";
+                    got += n;
+                }
+                for (int i = 0; i < want; i += 12) {
+                    uint off = (uint)(table[i] | (table[i + 1] << 8) | (table[i + 2] << 16) | (table[i + 3] << 24));
+                    uint len = (uint)(table[i + 4] | (table[i + 5] << 8) | (table[i + 6] << 16) | (table[i + 7] << 24));
+                    if (len != 0 && (long)off + len > length)
+                        return "is truncated or corrupt: an entry at " + off + " runs past its " + length + " bytes.";
+                    seen++;
+                }
+                at += want;
+            }
+            return null;
+        } catch (Exception) {
+            return "cannot be read.";
+        } finally {
+            try { s.Dispose(); } catch (Exception) { }
+        }
+    }
+
     public static void Extract(string imagePath, string destinationDirectory, Action<long, long, string> progress) {
         Extract(imagePath, destinationDirectory, progress, CancellationToken.None);
     }

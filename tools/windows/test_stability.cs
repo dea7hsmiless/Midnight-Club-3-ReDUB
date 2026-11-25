@@ -63,6 +63,9 @@ namespace ReDUB {
     public static class Xdvdfs {
         public static string Verify(string path){if(File.ReadAllText(Path.Combine(path,"default.xbe"))!="valid fixture")throw new IOException("Invalid fixture");return "fixture";}
         public static bool TryVerify(string path,out string edition,out string error){try{edition=Verify(path);error=null;return true;}catch(IOException e){edition=null;error=e.Message;return false;}}
+        /* The fixture carries no archives; the importer's own archive check is
+         * covered by its unit tests, not by these fixtures. */
+        public static string CheckArchives(string path){return null;}
         public static void Extract(string source,string destination,Action<long,long,string> progress,CancellationToken token){throw new NotSupportedException();}
     }
 }
