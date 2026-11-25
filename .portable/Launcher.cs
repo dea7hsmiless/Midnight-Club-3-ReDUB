@@ -97,7 +97,7 @@ public sealed class Launcher : Form {
         var title=LabelAt("Midnight Club 3: ReDUB",23,true);title.SetBounds(0,58,360,48);left.Controls.Add(title);
         var desc=LabelAt("DUB Edition Remix, rebuilt for PC.",10,false);desc.ForeColor=Muted;desc.SetBounds(0,112,360,30);left.Controls.Add(desc);
         Action sizeLabels=()=>{foreach(Control label in left.Controls)label.Width=Math.Max(1,left.ClientSize.Width-16);float fontSize=left.ClientSize.Width<440?20:23;if(Math.Abs(title.Font.Size-fontSize)>.1f){var oldFont=title.Font;title.Font=new Font("Segoe UI",fontSize,FontStyle.Bold);oldFont.Dispose();}};left.SizeChanged+=(sender,e)=>sizeLabels();left.Layout+=(sender,e)=>sizeLabels();sizeLabels();
-        var right=new Panel {Dock=DockStyle.Fill,Margin=Padding.Empty,BackColor=Bg};bottom.Controls.Add(right,1,0);play.Text=ready?"▶   Play":"Install";play.SetBounds(0,22,288,58);right.Controls.Add(play);ButtonAt(right,"Verify setup",0,92,140,()=>VerifySetup());ButtonAt(right,"Repair",148,92,140,()=>ShowInstall());ButtonAt(right,"Game folder",0,146,140,()=>Open(RendererDist(root)));ButtonAt(right,"Add shortcut",148,146,140,()=>Run(".portable/Build-Launcher.ps1","-ShortcutsOnly"));UpdateStatus();}
+        var right=new Panel {Dock=DockStyle.Fill,Margin=Padding.Empty,BackColor=Bg};bottom.Controls.Add(right,1,0);play.Text=ready?"▶   Play":"Install";play.SetBounds(0,22,288,58);right.Controls.Add(play);ButtonAt(right,"Verify setup",0,92,140,()=>VerifySetup());ButtonAt(right,"Repair",148,92,140,()=>ShowInstall());ButtonAt(right,"Game folder",0,146,140,()=>Open(RendererDist(root)));ButtonAt(right,"Add shortcut",148,146,140,()=>Run(".portable/Build-Launcher.ps1","-ShortcutsOnly"));string crash=LastCrash(root);if(crash!=null)ButtonAt(right,"Report the last crash",0,194,288,()=>ReportCrash(crash));UpdateStatus();}
     void ShowInstall(){
         bool ready=Ready(),runtime=RuntimePresent(root);
         var p=Standard("Install","Install ReDUB",ready?"Your original Xbox disc files are installed. Play starts the game directly; nothing is compiled.":"Copy your own original Xbox DUB Edition Remix disc into this folder. Nothing is compiled.");
@@ -115,7 +115,7 @@ public sealed class Launcher : Form {
         var card=new Panel {BackColor=Card,Location=new Point(220,145),Size=new Size(Math.Max(510,content.Width-256),Math.Max(420,content.Height-185)),Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right,AutoScroll=true};p.Controls.Add(card);var heading=LabelAt(cat,17,true);heading.SetBounds(24,20,480,38);card.Controls.Add(heading);int y=84;
         if(cat=="Display"){Choice(card,ref y,"Window mode","MC3_FULLSCREEN",new[]{"Windowed","Borderless fullscreen","Exclusive fullscreen"},new[]{"0","1","2"},"0");Choice(card,ref y,"Resolution","MC3_RESOLUTION",new[]{"Automatic (desktop)","1280 × 720","1600 × 900","1920 × 1080","2560 × 1440","3840 × 2160"},new[]{"auto","1280x720","1600x900","1920x1080","2560x1440","3840x2160"},"auto");Choice(card,ref y,"Aspect ratio (restart)","RECOMP_GL_ASPECT",new[]{"Auto (16:9)","4:3","Stretch"},new[]{"auto","4:3","fill"},"auto");Choice(card,ref y,"VSync","RECOMP_GL_VSYNC",new[]{"Off","On","Adaptive"},new[]{"0","1","-1"},"0");Choice(card,ref y,"Gamma","MC3_GAMMA",new[]{"0.8","0.9","1.0","1.1","1.2","1.3","1.4"},new[]{"0.8","0.9","1","1.1","1.2","1.3","1.4"},"1");Choice(card,ref y,"Brightness","MC3_BRIGHTNESS",new[]{"80%","85%","90%","95%","100%","105%","110%","115%","120%"},new[]{"0.8","0.85","0.9","0.95","1","1.05","1.1","1.15","1.2"},"1");}
         
-        if(cat=="Graphics"){Choice(card,ref y,"Preset","MC3_GRAPHICS_PRESET",new[]{"Custom","Performance","Balanced","Quality"},new[]{"0","1","2","3"},"0");Choice(card,ref y,"Internal resolution","RECOMP_GL_SCALE",new[]{"1× native (720 × 480)","1.5× native (1080 × 720)","2× native (1440 × 960)","3× native (2160 × 1440)","5× native (3600 × 2400)"},new[]{"1","1.5","2","3","5"},"2");Choice(card,ref y,"Frame generation","RECOMP_FG",new[]{"Off","Crossfade","Motion-compensated"},new[]{"0","1","2"},"0");Choice(card,ref y,"Frame rate","MC3_FRAME_RATE",new[]{"30 FPS (Xbox)","60 FPS","120 FPS (needs a 120 Hz display)"},new[]{"30","60","120"},"30");Choice(card,ref y,"HUD texture quality","RECOMP_GL_UI_SCALE",new[]{"1×","2×","3×","5×"},new[]{"1","2","3","5"},"2");Choice(card,ref y,"Anti-aliasing","RECOMP_GL_FXAA",new[]{"Off","FXAA Low","FXAA","FXAA High"},new[]{"0","2","1","3"},"1");Choice(card,ref y,"Texture filtering","RECOMP_GL_ANISO",new[]{"1×","4×","16×"},new[]{"1","4","16"},"16");Choice(card,ref y,"Sharpening","RECOMP_GL_SHARPEN",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0.5");var scaleHint=LabelAt("Internal resolution multiplies the game's 720 × 480 surface. 3× is 2160 × 1440, 5× is 3600 × 2400 (4K-class detail).",9,false);scaleHint.ForeColor=Muted;scaleHint.SetBounds(24,y+8,Math.Max(400,card.Width-48),40);scaleHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(scaleHint);y+=56;}
+        if(cat=="Graphics"){Choice(card,ref y,"Preset","MC3_GRAPHICS_PRESET",new[]{"Custom","Performance","Balanced","Quality"},new[]{"0","1","2","3"},"0");Choice(card,ref y,"Internal resolution","RECOMP_GL_SCALE",new[]{"1× native (720 × 480)","1.5× native (1080 × 720)","2× native (1440 × 960)","3× native (2160 × 1440)","5× native (3600 × 2400)"},new[]{"1","1.5","2","3","5"},"2");Choice(card,ref y,"Frame generation","RECOMP_FG",new[]{"Off","Crossfade","Motion-compensated"},new[]{"0","1","2"},"0");Choice(card,ref y,"Frame rate","MC3_FRAME_RATE",new[]{"30 FPS (Xbox)","60 FPS","120 FPS (needs a 120 Hz display)"},new[]{"30","60","120"},"30");Choice(card,ref y,"HUD texture quality","RECOMP_GL_UI_SCALE",new[]{"1×","2×","3×","5×"},new[]{"1","2","3","5"},"2");Choice(card,ref y,"Anti-aliasing","RECOMP_GL_FXAA",new[]{"Off","FXAA Low","FXAA","FXAA High"},new[]{"0","2","1","3"},"1");Choice(card,ref y,"Texture filtering","RECOMP_GL_ANISO",new[]{"1×","4×","16×"},new[]{"1","4","16"},"16");Choice(card,ref y,"Sharpening","RECOMP_GL_SHARPEN",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0.5");Choice(card,ref y,"Glow (restart)","RECOMP_GL_GLOW",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0");Choice(card,ref y,"Vignette (restart)","RECOMP_GL_VIGNETTE",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0");Choice(card,ref y,"Colour (restart)","RECOMP_GL_COLOUR",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0");var scaleHint=LabelAt("Internal resolution multiplies the game's 720 × 480 surface. 3× is 2160 × 1440, 5× is 3600 × 2400 (4K-class detail).",9,false);scaleHint.ForeColor=Muted;scaleHint.SetBounds(24,y+8,Math.Max(400,card.Width-48),40);scaleHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(scaleHint);y+=56;}
         if(cat=="Graphics"){
             var advanced=ButtonAt(card,advancedGraphicsSettings?"Hide advanced graphics":"Advanced graphics  ›",24,y,280,()=>{advancedGraphicsSettings=!advancedGraphicsSettings;ShowSettings("Graphics");});y+=58;
             if(advancedGraphicsSettings)Choice(card,ref y,"Frame queue","RECOMP_GL_QUEUE_FRAMES",new[]{"1 frame (lower latency)","2 frames (default)"},new[]{"1","2"},"2");
@@ -540,7 +540,7 @@ public sealed class Launcher : Form {
         }catch{}
     }
 
-    void ShowSupport(){var p=Standard("Support","Support & activity","Local setup output. Your game and saves are never uploaded.");ButtonAt(p,"Open log folder",36,140,190,()=>Open("work-remix/logs"));ButtonAt(p,"Check setup",240,140,190,()=>VerifySetup());ButtonAt(p,"Read guide",444,140,190,()=>Open("README.md"));log.SetBounds(36,205,Math.Max(600,content.Width-72),Math.Max(280,content.Height-245));log.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;p.Controls.Add(log);}
+    void ShowSupport(){var p=Standard("Support","Support & activity","Local setup output. Your game and saves are never uploaded.");ButtonAt(p,"Open log folder",36,140,190,()=>Open("work-remix/logs"));ButtonAt(p,"Check setup",240,140,190,()=>VerifySetup());ButtonAt(p,"Read guide",444,140,190,()=>Open("README.md"));ButtonAt(p,"Report a problem",648,140,190,()=>ReportProblem());log.SetBounds(36,205,Math.Max(600,content.Width-72),Math.Max(280,content.Height-245));log.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;p.Controls.Add(log);}
     void ShowAbout(){var p=Standard("About","Midnight Club 3: ReDUB","A community edition of the original Xbox DUB Edition Remix.");var copy=LabelAt("Built on mcdub3-nx and xboxrecomp.\n\nNative Port Options, independent HUD quality, PC Music integration,\nand targeted controller, menu and GPU stability fixes.\n\nOriginal 30 FPS simulation\n\nNo game data is included. Use your own supported Xbox Remix disc.\nNot affiliated with Rockstar Games, Take-Two or Microsoft.\n\nLauncher design reference: SafeHouse by FridiNaTor1 and contributors.\nReDUB uses its own implementation and branding.",11,false);copy.SetBounds(38,150,790,330);p.Controls.Add(copy);ButtonAt(p,"Features & credits",36,510,230,()=>Open("README.md"));}
     string PathAt(string p){return Path.Combine(root,p.Replace('/',Path.DirectorySeparatorChar));}
     void UpdateStatus(){bool running=GameRunning(),hasDisc=File.Exists(PathAt("game-remix/default.xbe")),runtime=RuntimePresent(root);play.Enabled=job==null&&!working&&!running;play.Text=running?"Game is running":Ready()?"▶   Play":"Install";string active="OpenGL • Native";if(working){status.Text=importStatus.Length>0?importStatus:"Installing game files...";return;}status.Text=job!=null?"Working — setup progress is in Support.":running?"Game is running • Save and close before changing launcher settings or installing builds.":Ready()?"Ready to play • "+active+" • shared Career saves":!runtime?"Game runtime missing • use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.":hasDisc?"Game files found • choose Play to finish setup":"Not installed • choose Install to copy your own Xbox Remix disc.";}
@@ -751,9 +751,15 @@ public sealed class Launcher : Form {
         var psi=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"cmd.exe")){
             Arguments="/s /c \"\""+Path.Combine(dist,"mcdub3remix.exe")+"\" > \""+log+"\" 2>&1\"",
             WorkingDirectory=dist,UseShellExecute=false,CreateNoWindow=true};
-        Process.Start(psi);
+        var game=Process.Start(psi);
+        /* cmd passes the game's own exit code through, and that is the only
+         * signal a crash leaves: the log cannot say whether a run was cut
+         * short on purpose or died. The handler lives as long as this launcher
+         * does (Play keeps it open), which covers the case that matters. */
+        try{game.EnableRaisingEvents=true;game.Exited+=(s,e)=>{int code;try{code=game.ExitCode;}catch{return;}RecordExit(root,code);};}catch{}
     }
     static string RunLogPath(string root){string dir=Path.Combine(root,@"work-remix\logs");Directory.CreateDirectory(dir);return Path.Combine(dir,"latest.log");}
+
 
     /* Write MC3_GAME_DIR=<root>\game-remix into the settings file if it is not
      * there yet. A path the player set is kept as it is, even if it is wrong:
@@ -779,6 +785,79 @@ public sealed class Launcher : Form {
             File.WriteAllLines(tmp,lines,new UTF8Encoding(false));
             File.Replace(tmp,path,null);
         }catch{}
+    }
+
+    /* Crash reporting. mc3port's lesson, kept small: a report is worth having
+     * only if it arrives with the log of the run that failed, and asking the
+     * player to find that file is where reports die. The exit code of the last
+     * run is stamped on disk; a clean exit clears the stamp. The issue is
+     * prefilled, the zip is written here, and nothing is sent by itself. */
+    static string CrashMarker(string root){return Path.Combine(root,@"work-remix\logs\last-exit.txt");}
+    static void RecordExit(string root,int code){
+        try{
+            string m=CrashMarker(root);
+            if(code==0){if(File.Exists(m))File.Delete(m);return;}
+            File.WriteAllText(m,code.ToString()+"\t"+DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),new UTF8Encoding(false));
+        }catch{}
+    }
+    /* The description of an unacknowledged crash, or null. */
+    static string LastCrash(string root){
+        try{
+            string m=CrashMarker(root);if(!File.Exists(m))return null;
+            string[] f=File.ReadAllText(m).Split('\t');if(f.Length<2)return null;
+            return "exit "+f[0]+" at "+f[1];
+        }catch{return null;}
+    }
+    static string LauncherVersion(){try{return Assembly.GetExecutingAssembly().GetName().Version.ToString(3);}catch{return "unknown";}}
+    /* The last lines of a log that can be hundreds of megabytes: read a window
+     * from the end, drop the partial first line, keep the tail asked for. */
+    static string TailText(string path,int lines){
+        try{
+            using(var fs=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite)){
+                long n=Math.Min(fs.Length,131072);if(n<=0)return "";
+                fs.Seek(-n,SeekOrigin.End);var buf=new byte[(int)n];int read=0;
+                while(read<(int)n){int got=fs.Read(buf,read,(int)n-read);if(got<=0)break;read+=got;}
+                string t=new UTF8Encoding(false,false).GetString(buf,0,read);
+                int cut=t.IndexOf('\n');if(n<fs.Length&&cut>=0)t=t.Substring(cut+1);
+                string[] all=t.Replace("\r","").Split('\n');
+                int end=all.Length;if(end>0&&all[end-1].Length==0)end--;
+                int start=Math.Max(0,end-lines);
+                return string.Join("\n",all.Skip(start).Take(end-start));
+            }
+        }catch{return "";}
+    }
+    static string MakeCrashZip(string root){
+        string logs=Path.Combine(root,@"work-remix\logs");if(!Directory.Exists(logs))return null;
+        string zip=Path.Combine(root,"ReDUB-crash-report.zip");
+        try{if(File.Exists(zip))File.Delete(zip);}catch{}
+        try{
+            using(var z=new ZipArchive(new FileStream(zip,FileMode.Create),ZipArchiveMode.Create)){
+                foreach(string f in Directory.GetFiles(logs,"*.log*")){
+                    var e=z.CreateEntry(Path.GetFileName(f),CompressionLevel.Optimal);
+                    using(var s=e.Open())using(var i=new FileStream(f,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))i.CopyTo(s);
+                }
+            }
+        }catch{return null;}
+        return zip;
+    }
+    static string NewIssueUrl(string title,string body){
+        return "https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/issues/new?labels=crash&title="+Uri.EscapeDataString(title)+"&body="+Uri.EscapeDataString(body);
+    }
+    string ReportBody(string root,string crash){
+        string log=TailText(RunLogPath(root),40);
+        return "**What happened**\n\n(one line: what you were doing when it went wrong)\n\n**Build**\n\n- ReDUB launcher "+LauncherVersion()+"\n- Windows "+Environment.OSVersion.Version+" ("+(Environment.Is64BitOperatingSystem?"x64":"x86")+")\n- Source of this copy: "+(IsSourceRoot(root)?"git checkout":"release package")+"\n- Last run: "+crash+"\n\n**Last 40 log lines**\n\n```\n"+log+"\n```\n\nA `ReDUB-crash-report.zip` with the full logs was written next to the launcher; attach it here.\n";
+    }
+    void OpenUrl(string url){try{Process.Start(new ProcessStartInfo(url){UseShellExecute=true});}catch(Exception x){MessageBox.Show(this,"Could not open the browser: "+x.Message,"ReDUB");}}
+    void ReportCrash(string crash){
+        string zip=MakeCrashZip(root);
+        OpenUrl(NewIssueUrl("Crash: last run "+crash,ReportBody(root,crash)));
+        if(zip!=null){
+            try{Clipboard.SetText(zip);}catch{}
+            MessageBox.Show(this,"The report form is open in your browser.\n\nThe crash report was written to:\n"+zip+"\n\nThat path is on the clipboard. Attach the file to the issue.","ReDUB");
+        }else MessageBox.Show(this,"The report form is open in your browser.\n\nThe crash report could not be written; attach work-remix\\logs\\latest.log instead.","ReDUB");
+    }
+    void ReportProblem(){
+        OpenUrl(NewIssueUrl("ReDUB: ",ReportBody(root,"no crash recorded")));
     }
     public static bool IsSourceRoot(string path){return Directory.Exists(path)&&File.Exists(Path.Combine(path,@".portable\Build.ps1"))&&File.Exists(Path.Combine(path,"CMakeLists.txt"));}
     static void CliLog(string root,string message){try{string dir=Path.Combine(root,@"work-remix\logs");Directory.CreateDirectory(dir);File.AppendAllText(Path.Combine(dir,"launcher-cli.log"),DateTime.Now.ToString("s")+" "+message+Environment.NewLine,new UTF8Encoding(false));}catch{}}
