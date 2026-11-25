@@ -186,8 +186,36 @@ public sealed class Launcher : Form {
         y+=62;
     }
     string SettingsPath(){string dir=RendererDist(root),selected=Path.Combine(dir,"mcdub3remix_env.txt");if(!File.Exists(selected)){string example=Path.Combine(dir,"mcdub3remix_env.example.txt");if(File.Exists(example)){try{File.Copy(example,selected);}catch{}}}if(File.Exists(selected))return selected;return PathAt("work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt");}
-    public string ReadSetting(string key,string fallback){if(!File.Exists(SettingsPath()))return fallback;foreach(var raw in File.ReadAllLines(SettingsPath())){string line=raw.Trim();if(line.StartsWith(key+"=",StringComparison.Ordinal))return line.Substring(key.Length+1).Trim();}return fallback;}
-    public void SavePreference(string key,string value){string path=SettingsPath();if(!File.Exists(path))throw new IOException("Install the game before saving settings.");var edits=new Dictionary<string,string>();edits[key]=value;if(key=="MC3_GRAPHICS_PRESET"&&value!="0"){int n=int.Parse(value);edits["RECOMP_GL_SCALE"]=n==1?"1.5":n==3?"3":"2";edits["RECOMP_GL_FXAA"]="1";edits["RECOMP_GL_ANISO"]=n==1?"4":"16";edits["RECOMP_GL_SHARPEN"]=n==1?"0.25":"0.5";edits["RECOMP_GL_VSYNC"]=n==3?"1":"0";}else if(new[]{"RECOMP_GL_SCALE","RECOMP_GL_FXAA","RECOMP_GL_ANISO","RECOMP_GL_SHARPEN","RECOMP_GL_VSYNC"}.Contains(key))edits["MC3_GRAPHICS_PRESET"]="0";var lines=File.ReadAllLines(path).Where(line=>!edits.Keys.Any(k=>line.TrimStart().StartsWith(k+"=",StringComparison.Ordinal))).ToList();foreach(var e in edits)lines.Add(e.Key+"="+e.Value);string backup=path+".launcher-backup";if(!File.Exists(backup))File.Copy(path,backup);string tmp=path+".launcher-tmp";File.WriteAllLines(tmp,lines,new UTF8Encoding(false));File.Replace(tmp,path,null);Append("Saved "+key+". Applies next launch.");}
+    public string ReadSetting(string key,string fallback){
+        string value=ReadSettingFrom(SettingsPath(),key);
+        if(value!=null)return value;
+        value=ReadSettingFrom(Path.Combine(RendererDist(root),"mcdub3remix_defaults.txt"),key);
+        if(value!=null)return value;
+        return fallback;
+    }
+    /* One KEY = value per line, '#' comments, quotes around a value allowed,
+     * and the last match wins -- the game reads its own settings the same way
+     * (build defaults, then the env file), so the launcher shows what the game
+     * will use rather than the caller's guess. */
+    static string ReadSettingFrom(string path,string key){
+        if(!File.Exists(path))return null;
+        string found=null;
+        foreach(var raw in File.ReadAllLines(path)){
+            string name=SettingName(raw);
+            if(name==null||!string.Equals(name,key,StringComparison.Ordinal))continue;
+            string t=raw.Trim(),value=t.Substring(t.IndexOf('=')+1).Trim();
+            if(value.Length>=2&&value[0]=='"'&&value[value.Length-1]=='"')value=value.Substring(1,value.Length-2);
+            found=value;
+        }
+        return found;
+    }
+    static string SettingName(string line){
+        string t=line.Trim();
+        if(t.Length==0||t[0]=='#')return null;
+        int eq=t.IndexOf('=');
+        return eq<=0?null:t.Substring(0,eq).Trim();
+    }
+    public void SavePreference(string key,string value){string path=SettingsPath();if(!File.Exists(path))throw new IOException("Install the game before saving settings.");var edits=new Dictionary<string,string>();edits[key]=value;if(key=="MC3_GRAPHICS_PRESET"&&value!="0"){int n=int.Parse(value);edits["RECOMP_GL_SCALE"]=n==1?"1.5":n==3?"3":"2";edits["RECOMP_GL_FXAA"]="1";edits["RECOMP_GL_ANISO"]=n==1?"4":"16";edits["RECOMP_GL_SHARPEN"]=n==1?"0.25":"0.5";edits["RECOMP_GL_VSYNC"]=n==3?"1":"0";}else if(new[]{"RECOMP_GL_SCALE","RECOMP_GL_FXAA","RECOMP_GL_ANISO","RECOMP_GL_SHARPEN","RECOMP_GL_VSYNC"}.Contains(key))edits["MC3_GRAPHICS_PRESET"]="0";var lines=File.ReadAllLines(path).Where(line=>{string name=SettingName(line);return name==null||!edits.Keys.Any(k=>string.Equals(k,name,StringComparison.Ordinal));}).ToList();foreach(var e in edits)lines.Add(e.Key+"="+e.Value);string backup=path+".launcher-backup";if(!File.Exists(backup))File.Copy(path,backup);string tmp=path+".launcher-tmp";File.WriteAllLines(tmp,lines,new UTF8Encoding(false));File.Replace(tmp,path,null);Append("Saved "+key+". Applies next launch.");}
     /* ---- Online: the shared page, hosted in this window ----------------- */
     WebBrowser onlineView;
     OnlineShell onlineShell;
@@ -615,6 +643,11 @@ public sealed class Launcher : Form {
      * the in-house XDVDFS reader. Both land in a staging folder, the XBE is
      * verified, and only then is the old game-remix replaced. */
     public static string ImportGameFiles(string root,string source,bool replaceExisting,Action<long,long,string> progress,CancellationToken cancellationToken){
+        /* A running game holds the disc's files and its saves open; replacing
+         * them under it left a half-copied installation and, before the save
+         * carry-over existed, no career. Checked here rather than in the
+         * window so every caller gets it -- the CLI importer included. */
+        if(GameIsRunning())throw new IOException("The game is running. Save and close the game before adding or replacing game files.");
         string fullSource=Path.GetFullPath(source),game=Path.Combine(root,"game-remix"),staging=Path.Combine(root,"game-remix.importing");
         string sourcePrefix=fullSource.TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
         string rootPrefix=Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
@@ -634,6 +667,8 @@ public sealed class Launcher : Form {
             }else throw new IOException("The selected disc or folder does not exist.");
             cancellationToken.ThrowIfCancellationRequested();
             string edition=Xdvdfs.Verify(staging);
+            cancellationToken.ThrowIfCancellationRequested();
+            CarryPlayerState(game,staging,progress,cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             string old=null;
             if(Directory.Exists(game)){old=game+".old-"+DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");Directory.Move(game,old);}
@@ -661,6 +696,39 @@ public sealed class Launcher : Form {
         }
     }
     static void TryDelete(string path){try{if(Directory.Exists(path))Directory.Delete(path,true);}catch{}}
+
+    /* Whether the game is up, without holding on to its process handles. */
+    public static bool GameIsRunning(){
+        var all=Process.GetProcessesByName("mcdub3remix");
+        foreach(var p in all)p.Dispose();
+        return all.Length>0;
+    }
+
+    /* A player's career and title settings live inside the game folder, and
+     * importing a disc replaces that folder: without this, replacing the game
+     * files silently took the career with them (found by
+     * tools/windows/Test-Stability.ps1, 2026-11-25).
+     *
+     * UDATA (profiles, career, garage) and TDATA (title settings) come from
+     * the installation, never from the disc -- a disc that happens to carry
+     * them must not overwrite a player's own. The copy happens into the staged
+     * folder before anything is moved, so a save that cannot be read (the game
+     * is running, a backup tool holds it) aborts the import with the old
+     * installation still in place. Xbox names are matched without case: the
+     * title writes UDATA, the disc and older installs can hold uDaTa, and two
+     * folders differing only in case is how a save becomes invisible. */
+    static void CarryPlayerState(string oldGame,string staged,Action<long,long,string> progress,CancellationToken cancellationToken){
+        if(!Directory.Exists(oldGame))return;
+        foreach(string name in new[]{"UDATA","TDATA"}){
+            string from=null;
+            foreach(string dir in Directory.GetDirectories(oldGame))
+                if(string.Equals(Path.GetFileName(dir),name,StringComparison.OrdinalIgnoreCase)){from=dir;break;}
+            if(from==null)continue;
+            foreach(string dir in Directory.GetDirectories(staged))
+                if(string.Equals(Path.GetFileName(dir),name,StringComparison.OrdinalIgnoreCase)){Directory.Delete(dir,true);break;}
+            CopyFolder(from,Path.Combine(staged,name),progress,cancellationToken);
+        }
+    }
     public static ProcessStartInfo LaunchInfo(string root){
         
         string dist=RendererDist(root);
