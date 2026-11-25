@@ -20,7 +20,7 @@
     "args": ["--import", "{game}"],
     "label": "Copying your disc",
     "timeout": 1800,
-    "done": ["{install}/game-remix/default.xbe"]
+    "done": ["{install}/game-remix/default.xbe", "{install}/game-remix/assets_x.dat"]
   },
   "start": {
     "program": ["work-remix/build-windows-x86_64/dist/mcdub3remix.exe"],

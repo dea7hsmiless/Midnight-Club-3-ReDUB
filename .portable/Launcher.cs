@@ -962,6 +962,12 @@ public sealed class Launcher : Form {
                     try{Console.Out.WriteLine("progress "+fraction+" "+Path.GetFileName(name));Console.Out.Flush();}catch{}
                 };
                 string edition=ImportGameFiles(root,args[1],true,report,CancellationToken.None);
+                /* The copy is only half the promise: an import that verified
+                 * the XBE but left the data archives short installs a game
+                 * that crashes later (see Xdvdfs.CheckArchives). Say so here,
+                 * where the caller can still act, instead of at first Play. */
+                string incomplete=Xdvdfs.CheckArchives(Path.Combine(root,"game-remix"));
+                if(incomplete!=null){CliLog(root,"Imported, but the game data is incomplete ("+incomplete+").");return 1;}
                 CliLog(root,"Imported game files ("+edition+").");return 0;
             }
             if(command=="--play"){StartDirect(root);CliLog(root,"Started the game.");return 0;}
@@ -969,6 +975,15 @@ public sealed class Launcher : Form {
                 string[] problems=InstallationProblems(root);
                 if(problems.Length==0){CliLog(root,"Setup OK.");return 0;}
                 foreach(string problem in problems)CliLog(root,"FAIL: "+problem);return 1;
+            }
+            /* The disc data alone: what an installer can check before it hands
+             * the game over, without the runtime being present yet. RecompLauncher
+             * runs --import itself; this is for a launcher that wants to know
+             * whether what it just installed is usable. */
+            if(command=="--check-data"){
+                string incomplete=Xdvdfs.CheckArchives(Path.Combine(root,"game-remix"));
+                if(incomplete==null){CliLog(root,"Game data OK.");return 0;}
+                CliLog(root,"FAIL: game data is incomplete ("+incomplete+").");return 1;
             }
             if(command=="--build")return RunBuild(root);
         }catch(Exception ex){CliLog(root,command+" failed: "+ex.Message);return 1;}
@@ -1025,7 +1040,27 @@ public sealed class Launcher : Form {
         ExtractSource(here);
         return here;
     }
-    [STAThread] public static void Main(string[] args){string root;
+    [STAThread] public static void Main(string[] args){string root=AppDomain.CurrentDomain.BaseDirectory;
+        /* The commands a launcher calls (RecompLauncher's prepare, a script, CI)
+         * answer before anything else: they need no setup source, no window and
+         * no message box. Extracting a 21 MB bundle before printing one exit
+         * code made every one of them slow, and on a folder without the bundle
+         * ResolveRoot threw and the command ended in a dialog with no exit code
+         * at all -- which is what a bare install folder looks like. */
+        if(args.Length>0){
+            string early=args[0].ToLowerInvariant();
+            if(early=="--check"||early=="--check-data"){
+                if(early=="--check-data"){
+                    string why=Xdvdfs.CheckArchives(Path.Combine(root,"game-remix"));
+                    CliLog(root,why==null?"Game data OK.":"FAIL: game data is incomplete ("+why+").");
+                    Environment.Exit(why==null?0:1);
+                }
+                {   string[] problems=InstallationProblems(root);
+                    if(problems.Length==0){CliLog(root,"Setup OK.");Environment.Exit(0);}
+                    foreach(string problem in problems)CliLog(root,"FAIL: "+problem);
+                    Environment.Exit(1); }
+            }
+        }
         try{root=ResolveRoot();}catch(Exception ex){MessageBox.Show(ex.Message,"ReDUB setup");return;}
         if(args.Length>0&&args[0]=="--self-test"){
     if(Quote(@"D:\folder with spaces\")!="\"D:\\folder with spaces\\\\\"")Environment.Exit(2);
@@ -1037,7 +1072,7 @@ public sealed class Launcher : Form {
     Directory.CreateDirectory(Path.Combine(root,@"work-remix\logs"));
     File.WriteAllText(Path.Combine(root,@"work-remix\logs\launcher-self-test.log"),"PASS: project discovery, argument quoting, name parsing and validation");
     return;
-}        if(args.Length>0){string command=args[0].ToLowerInvariant();if(command=="--import"||command=="--play"||command=="--check"||command=="--build")Environment.Exit(RunCommand(root,command,args));}
+}        if(args.Length>0){string command=args[0].ToLowerInvariant();if(command=="--import"||command=="--play"||command=="--check"||command=="--check-data"||command=="--build")Environment.Exit(RunCommand(root,command,args));}
         RegisterInviteScheme();
         if(args.Length>0)InviteRoom=ParseInvite(args[0]);
         if(args.Length>0&&args[0].ToLowerInvariant()=="--online")ShowOnlinePage=true;
