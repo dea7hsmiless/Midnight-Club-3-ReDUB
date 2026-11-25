@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Midnight Club 3: DUB Edition (Xbox) -- recompiled game entry point
  *
  * Boot order (xboxrecomp's, the same on every host):
@@ -33,12 +33,13 @@
 #endif
 
 #ifdef _WIN32
+#include "windows_paths.h"
 /* The Windows C runtime has no setenv. */
 static int setenv(const char *name, const char *value, int overwrite)
 {
     if (!overwrite && getenv(name))
         return 0;
-    return _putenv_s(name, value);
+    return mc3_setenv_utf8(name, value);
 }
 #endif
 
@@ -531,7 +532,11 @@ static void perf_report_start(void)
 
 static void *load_file(const char *path, size_t *out_size)
 {
+#ifdef _WIN32
+    FILE *f = mc3_fopen_utf8(path, L"rb");
+#else
     FILE *f = fopen(path, "rb");
+#endif
     long size;
     void *data;
 
@@ -716,7 +721,12 @@ static int game_main(void)
     set_runtime_defaults();
     log_settings();
 
+#ifdef _WIN32
+    static char game_dir_utf8[32768 * 3];
+    game_dir = mc3_path_env(L"MC3_GAME_DIR", game_dir_utf8, sizeof game_dir_utf8);
+#else
     game_dir = getenv("MC3_GAME_DIR");
+#endif
     if (!game_dir || !game_dir[0]) {
         game_dir = MC3_DEFAULT_GAME_DIR;
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
@@ -842,7 +852,12 @@ static int game_main(void)
          * MC3_SAVE_DIR (tools/run_linux.sh: work/save) keeps the latter in
          * the repo instead of ~/.local/share; mcdub3_env.txt can set either
          * on the Switch, where the defaults are sdmc:/switch/mcdub3-nx/{game,save}. */
+#ifdef _WIN32
+        char save_dir_utf8[32768 * 3];
+        const char *save_dir = mc3_path_env(L"MC3_SAVE_DIR", save_dir_utf8, sizeof save_dir_utf8);
+#else
         const char *save_dir = getenv("MC3_SAVE_DIR");
+#endif
         xbox_path_init(game_dir, save_dir && save_dir[0] ? save_dir : MC3_DEFAULT_SAVE_DIR);
     }
     fprintf(stderr, "[BOOT] paths set\n");

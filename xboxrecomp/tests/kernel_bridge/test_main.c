@@ -1,4 +1,4 @@
-/*
+﻿/*
  * The kernel bridge.
  *
  * A title does not call the kernel by name. Its indirect calls land on a
@@ -34,8 +34,29 @@
  * static archive resolves only what gets pulled in. Nothing here calls a
  * guest function. */
 typedef void (*recomp_func_t)(void);
+extern RECOMP_TLS uint32_t g_eax, g_ecx, g_edx, g_esp;
+extern RECOMP_TLS RecompXmm g_xmm0;
+extern RECOMP_TLS double g_fp_stack[8];
+extern RECOMP_TLS int g_fp_top;
+extern ptrdiff_t g_xbox_mem_offset;
+static int apc_calls, apc_args_ok, apc_dispatcher;
+static void test_apc(void)
+{
+    uint32_t *args = (uint32_t *)(g_xbox_mem_offset + g_esp);
+    apc_calls++;
+    apc_args_ok = apc_dispatcher ?
+        args[1] == *(uint32_t *)(g_xbox_mem_offset + 0x30000u) && args[2] == 0 && args[3] == 0x30000u :
+        args[1] == 0x12345678u && args[2] == 0x30000u && args[3] == 0;
+    g_eax = 0xDEADBEEFu;
+    g_ecx = 0xCCCCCCCCu;
+    g_edx = 0xDDDDDDDDu;
+    g_xmm0.u[0] = 0xABCDu;
+    g_fp_stack[0] = -123.0;
+    g_fp_top = 7;
+    g_esp += 16; /* guest APC is stdcall: ret 12 */
+}
 recomp_func_t recomp_lookup(uint32_t xbox_va);
-recomp_func_t recomp_lookup(uint32_t xbox_va) { (void)xbox_va; return NULL; }
+recomp_func_t recomp_lookup(uint32_t xbox_va) { return xbox_va == 0x123400u ? test_apc : NULL; }
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va);
 recomp_func_t recomp_lookup_manual(uint32_t xbox_va) { (void)xbox_va; return NULL; }
 
@@ -58,6 +79,22 @@ int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
 
+    /* Assert the wire value, not the macro: the fallback once used 004D,
+     * STATUS_INCOMPATIBLE_FILE_MAP, and a symbolic-only test would miss it. */
+    HANDLE semaphore = NULL;
+    NTSTATUS semaphore_status = xbox_NtCreateSemaphore(&semaphore, NULL, 1, 1);
+    check(semaphore_status == 0 && semaphore != NULL, "create bounded semaphore", NULL);
+    if (semaphore) {
+        check((uint32_t)xbox_NtReleaseSemaphore(semaphore, 1, NULL) == 0xC0000047u,
+              "semaphore overflow returns NTSTATUS 0xC0000047", NULL);
+        check(WaitForSingleObject(semaphore, 0) == WAIT_OBJECT_0 &&
+              WaitForSingleObject(semaphore, 0) == WAIT_TIMEOUT,
+              "rejected release leaves semaphore count unchanged", NULL);
+        check(xbox_NtReleaseSemaphore(semaphore, 1, NULL) == 0,
+              "valid semaphore release still succeeds", NULL);
+        CloseHandle(semaphore);
+    }
+
     const uint32_t THUNK_VA = 0x10000, STACK_VA = 0x20000;
 
     uint8_t *mem = VirtualAlloc(NULL, 16 * 1024 * 1024,
@@ -71,7 +108,10 @@ int main(void)
 
     /* One import, in the form an XBE stores it: 0x80000000 | ordinal. */
     *(uint32_t *)(mem + THUNK_VA) = 0x80000000u | 173u;
-    xbox_kernel_set_thunk_address(THUNK_VA, 1);
+    *(uint32_t *)(mem + THUNK_VA + 4) = 0x80000000u | 219u;
+    *(uint32_t *)(mem + THUNK_VA + 8) = 0x80000000u | 236u;
+    *(uint32_t *)(mem + THUNK_VA + 12) = 0x80000000u | 232u;
+    xbox_kernel_set_thunk_address(THUNK_VA, 4);
     xbox_kernel_bridge_init();
 
     /* bridge_init rewrites the entry in place to a synthetic VA. */
@@ -101,6 +141,32 @@ int main(void)
                  g_esp, STACK_VA + 8);
         check(g_esp == STACK_VA + 8,
               "ordinal 173 pops its stdcall argument", detail);
+    }
+
+    for (int mode = 0; mode < 4; mode++) {
+        int write=mode&1;
+        apc_dispatcher=mode>=2;
+        uint32_t *sp = (uint32_t *)(mem + STACK_VA);
+        memset(sp, 0, 36);
+        sp[0] = 0xBEEF0001u;
+        sp[1] = 0xFFFFFFFFu; /* invalid file: completion must preserve the error */
+        sp[3] = apc_dispatcher ? *(uint32_t *)(mem + THUNK_VA + 12) : 0x123400u;
+        sp[4] = apc_dispatcher ? 0x123400u : 0x12345678u;
+        sp[5] = 0x30000u;
+        sp[6] = 0x31000u;
+        sp[7] = 1;
+        g_esp = STACK_VA;
+        g_ecx = 0x11223344u;
+        g_edx = 0x55667788u;
+        g_xmm0.u[0]=0x1234u;g_fp_stack[0]=3.5;g_fp_top=2;
+        apc_calls = apc_args_ok = 0;
+        fn = recomp_lookup_kernel(*(uint32_t *)(mem + THUNK_VA + (write ? 8 : 4)));
+        fn();
+        check(apc_calls == 1 && apc_args_ok, write ? "write APC receives completion arguments" : "read APC receives completion arguments", NULL);
+        check(g_esp == STACK_VA + 36, "file APC preserves caller stack position", NULL);
+        check(g_eax == *(uint32_t *)(mem + 0x30000), "file APC preserves I/O return status", NULL);
+        check(g_ecx == 0x11223344u && g_edx == 0x55667788u, "file APC restores interrupted guest registers", NULL);
+        check(g_xmm0.u[0]==0x1234u && g_fp_stack[0]==3.5 && g_fp_top==2, "file APC preserves floating point state", NULL);
     }
 
     VirtualFree(mem, 0, MEM_RELEASE);

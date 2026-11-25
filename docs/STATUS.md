@@ -1,6 +1,6 @@
 # ReDUB status
 
-_Updated 2026-11-19. This file is the single current state. Overwrite it; do not append._
+_Updated 2026-11-20. This file is the single current state. Overwrite it; do not append._
 
 ## Released
 
@@ -158,6 +158,38 @@ Still to do:
 Superseded notes on the old list: `AppRun` already answered an ISO with a clear
 message in 0.2.4a; the README platform split landed in 0.2.4a; the env file is
 no longer shipped; the Windows run log is written by the launcher.
+
+## Unreleased source fixes
+
+The source audit adds save preservation during Windows/Android disc replacement,
+Windows UTF-8/UTF-16 host-path handling, and corrected file-I/O APC stack/register
+restoration. Windows builds ship the commented settings example, preserve local
+player settings without failing a rebuild, and create player settings on the first
+launcher adjustment. CLI imports now refuse a running game. PNGs are excluded from
+the AppImage directory's text normalization rule.
+
+The semaphore-overflow fallback now returns the correct NTSTATUS `0xC0000047`
+(it previously used `0xC000004D`, an incompatible-file-map error). The native
+regression checks the numeric status and that a rejected release leaves the
+semaphore count unchanged; this does not repair an underlying over-release.
+
+The follow-up concurrency findings are fixed in source: POSIX file operations
+serialize seek/read/write and cursor updates per handle (including duplicates).
+Guest suspension now parks at execution-lock safe points, preserves nested and
+initial suspend counts, and defers parking across kernel callbacks. Both Nt and
+Ke suspend/resume routes use that mechanism. Windows and Linux regression jobs
+cover the reproduced lock freeze, queued/self suspension, and interleaved file
+reads/writes/position changes without disc data.
+
+Regression checks: `tools/windows/Test-Stability.ps1` (pass `-ClangPath` for the
+Unicode-path test), `tools/windows/Test-DiscSaveData.java`, and the native harness
+at `xboxrecomp/tests/stability`. CI runs these without disc data. No version, tag,
+release assets or published release is changed by this source work.
+
+The long-session invalid GPU jump warning still needs a captured gameplay trace.
+Synthetic command-stream tests are not a fix for that unresolved case. Full career,
+multiplayer, physical-controller and Android-device testing remain outstanding;
+the iOS source is still outside this repository.
 
 ## Open items
 

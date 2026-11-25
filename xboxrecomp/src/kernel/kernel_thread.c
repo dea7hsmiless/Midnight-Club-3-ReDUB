@@ -1,4 +1,4 @@
-/*
+﻿/*
  * kernel_thread.c - Xbox Threading Subsystem
  *
  * Implements Xbox thread creation, termination, delays, and priority
@@ -44,6 +44,7 @@ static DWORD WINAPI xbox_thread_wrapper(LPVOID lpParameter)
     xbox_log(XBOX_LOG_DEBUG, XBOX_LOG_THREAD, "Thread %u returned normally",
         GetCurrentThreadId());
 
+    xbox_kernel_guest_unregister();
     return 0;
 }
 
@@ -139,6 +140,7 @@ NTSTATUS __stdcall xbox_PsTerminateSystemThread(NTSTATUS ExitStatus)
         "PsTerminateSystemThread: thread %u exiting with status 0x%08X",
         GetCurrentThreadId(), ExitStatus);
 
+    xbox_kernel_guest_unregister();
     ExitThread((DWORD)ExitStatus);
 
     /* ExitThread never returns, but the compiler needs this */
@@ -348,50 +350,59 @@ NTSTATUS __stdcall xbox_NtDuplicateObject(
     return STATUS_SUCCESS;
 }
 
-/* Safe points for NtSuspendThread.
- *
- * On the Xbox a suspended thread stops in title code or in a kernel wait; the
- * kernel never leaves one frozen holding a kernel lock. Here a host
- * SuspendThread can land anywhere, including inside a bridge call holding a
- * bridge lock, the CRT's stderr lock or the heap lock -- and then every other
- * thread that needs that lock stops too. CRI's movie/stream scheduler suspends
- * and resumes its threads constantly, and this froze the game at boot and
- * mid-level.
- *
- * Each thread counts how deep it is in the kernel (kernel_thunk_dispatch), and
- * the host waits step out of the count while they block (they hold nothing).
- * NtSuspendThread suspends, waits for the suspension to take effect, and if
- * the thread is inside the kernel resumes it, yields and tries again, so it
- * returns with the thread stopped at a safe point, as on hardware.
- *
- * ponytail: a fixed table keyed by host thread id, linear probe; 256 threads
- * is far past what a title creates. Gives up after 100 ms and suspends anyway.
- */
-#define KBUSY_SLOTS 256
-typedef struct {
+/* Guest threads park cooperatively after releasing the execution lock.
+ * A native SuspendThread can freeze that lock or the scheduler/CRT locks;
+ * kernel busy depth alone cannot identify a safe instruction to freeze. */
+typedef struct KThreadSlot {
     volatile LONG tid;
     volatile LONG busy;          /* kernel depth + raised IRQL */
+    volatile LONG guest;         /* 0 host, 1 guest, 2 retired guest */
+    volatile LONG suspend_count;
+    LONG native_start;           /* the initial CREATE_SUSPENDED host gate */
+    struct KThreadSlot *next;
 } KThreadSlot;
-static KThreadSlot g_kbusy[KBUSY_SLOTS];
+static KThreadSlot *g_kbusy;
 static XBOX_THREAD_LOCAL KThreadSlot *t_kslot;
+static CRITICAL_SECTION s_suspend_lock;
+static CONDITION_VARIABLE s_suspend_cv;
+static volatile LONG s_suspend_init;
+extern volatile int g_gil_contended;
+extern int xbox_thread_holds_dispatch(void);
+extern int xbox_gil_suspend(void);
+extern void xbox_gil_resume(int depth);
+
+static void suspend_lock(void)
+{
+    if (InterlockedCompareExchange(&s_suspend_init, 1, 0) == 0) {
+        InitializeCriticalSection(&s_suspend_lock);
+        InitializeConditionVariable(&s_suspend_cv);
+        InterlockedExchange(&s_suspend_init, 2);
+    }
+    while (InterlockedCompareExchange(&s_suspend_init, 2, 2) != 2) Sleep(0);
+    EnterCriticalSection(&s_suspend_lock);
+}
 
 static KThreadSlot *kbusy_slot(DWORD tid, int create)
 {
-    unsigned i, h = (tid >> 2) % KBUSY_SLOTS;
-    for (i = 0; i < KBUSY_SLOTS; i++) {
-        unsigned s = (h + i) % KBUSY_SLOTS;
-        if ((DWORD)g_kbusy[s].tid == tid)
-            return &g_kbusy[s];
-        if (!g_kbusy[s].tid) {
-            if (!create)
-                return NULL;
-            if (InterlockedCompareExchange(&g_kbusy[s].tid, (LONG)tid, 0) == 0)
-                return &g_kbusy[s];
-            if ((DWORD)g_kbusy[s].tid == tid)
-                return &g_kbusy[s];
-        }
+    KThreadSlot *k;
+    if (!tid) return NULL;
+    suspend_lock();
+    for (k = g_kbusy; k; k = k->next) {
+        if ((DWORD)k->tid == tid) break;
     }
-    return NULL;
+    if (!k && create) {
+        k = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*k));
+        if (k) { k->next = g_kbusy; g_kbusy = k; }
+        if (k) k->tid = (LONG)tid;
+    }
+    /* A native ID cannot be reused until its old thread has exited. Keep
+     * retired entries so a guest is never natively frozen during teardown. */
+    if (k && create && k->guest == 2) {
+        k->guest = k->busy = k->suspend_count = 0;
+        k->native_start = 0;
+    }
+    LeaveCriticalSection(&s_suspend_lock);
+    return k;
 }
 
 void xbox_kernel_busy(int delta)
@@ -402,13 +413,85 @@ void xbox_kernel_busy(int delta)
         t_kslot->busy += delta;
 }
 
+BOOL xbox_kernel_guest_prepare(HANDLE thread)
+{
+    KThreadSlot *k = kbusy_slot(GetThreadId(thread), 1);
+    if (!k) return FALSE;
+    suspend_lock();
+    k->guest = 1;
+    k->native_start = 1;
+    LeaveCriticalSection(&s_suspend_lock);
+    return TRUE;
+}
+
+void xbox_kernel_guest_register(void)
+{
+    if (!t_kslot) t_kslot = kbusy_slot(GetCurrentThreadId(), 1);
+    if (t_kslot) InterlockedExchange(&t_kslot->guest, 1);
+}
+
+void xbox_kernel_guest_unregister(void)
+{
+    if (!t_kslot) return;
+    suspend_lock();
+    t_kslot->busy = t_kslot->suspend_count = 0;
+    t_kslot->native_start = 0;
+    t_kslot->guest = 2; /* retired; retain the native ID through host teardown */
+    t_kslot = NULL;
+    WakeAllConditionVariable(&s_suspend_cv);
+    LeaveCriticalSection(&s_suspend_lock);
+}
+
+int xbox_kernel_suspend_pending(void)
+{
+    return t_kslot && t_kslot->guest && t_kslot->busy <= 0 &&
+        InterlockedCompareExchange(&t_kslot->suspend_count, 0, 0) > 0 &&
+        !xbox_thread_holds_dispatch();
+}
+
+void xbox_kernel_suspend_checkpoint(void)
+{
+    if (!xbox_kernel_suspend_pending()) return;
+    suspend_lock();
+    while (t_kslot->suspend_count > 0)
+        SleepConditionVariableCS(&s_suspend_cv, &s_suspend_lock, INFINITE);
+    LeaveCriticalSection(&s_suspend_lock);
+}
+
 NTSTATUS __stdcall xbox_NtSuspendThread(
     HANDLE ThreadHandle,
     PULONG PreviousSuspendCount)
 {
-    DWORD prev, tid = GetThreadId(ThreadHandle);
-    KThreadSlot *k = tid != GetCurrentThreadId() ? kbusy_slot(tid, 0) : NULL;
-    ULONGLONG give_up = GetTickCount64() + 100;
+    DWORD prev, exit_status, tid = GetThreadId(ThreadHandle);
+    KThreadSlot *k = kbusy_slot(tid, 0);
+
+    suspend_lock();
+    if (k && (DWORD)k->tid == tid && k->guest &&
+        (k->guest == 2 || (GetExitCodeThread(ThreadHandle, &exit_status) &&
+                          exit_status != STILL_ACTIVE))) {
+        LeaveCriticalSection(&s_suspend_lock);
+        return (NTSTATUS)0xC000004Bu; /* STATUS_THREAD_IS_TERMINATING */
+    }
+    if (k && (DWORD)k->tid == tid && k->guest) {
+        prev = (DWORD)k->suspend_count + (DWORD)k->native_start;
+        if (prev >= 127) {
+            LeaveCriticalSection(&s_suspend_lock);
+            return (NTSTATUS)0xC000004Au; /* STATUS_SUSPEND_COUNT_EXCEEDED */
+        }
+        InterlockedIncrement(&k->suspend_count);
+        g_gil_contended = 1; /* request the next generated pre-emption point */
+        LeaveCriticalSection(&s_suspend_lock);
+        if (PreviousSuspendCount) *PreviousSuspendCount = prev;
+        if (tid == GetCurrentThreadId()) {
+            int depth = xbox_gil_suspend();
+            xbox_kernel_busy(-1);
+            xbox_kernel_suspend_checkpoint();
+            xbox_kernel_busy(1);
+            xbox_gil_resume(depth);
+        }
+        return STATUS_SUCCESS;
+    }
+    LeaveCriticalSection(&s_suspend_lock);
 
     /*
      * SuspendThread returns the previous suspend count, or (DWORD)-1 on
@@ -416,26 +499,13 @@ NTSTATUS __stdcall xbox_NtSuspendThread(
      * the two are not interchangeable: -1 must become an error status rather
      * than a suspend count of 0xFFFFFFFF.
      */
-    for (;;) {
-#ifdef _WIN32
-        CONTEXT c;
-#endif
-        prev = SuspendThread(ThreadHandle);
-        if (prev == (DWORD)-1) {
-            xbox_log(XBOX_LOG_ERROR, XBOX_LOG_THREAD,
-                "NtSuspendThread: SuspendThread failed (error %u)", GetLastError());
-            return STATUS_UNSUCCESSFUL;
-        }
-        if (prev || !k)
-            break;                      /* already stopped, or never in the kernel */
-#ifdef _WIN32
-        c.ContextFlags = CONTEXT_CONTROL;
-        GetThreadContext(ThreadHandle, &c);   /* returns once it has really stopped */
-#endif
-        if (k->busy <= 0 || GetTickCount64() > give_up)
-            break;
-        ResumeThread(ThreadHandle);
-        SwitchToThread();
+    /* Unregistered host threads still use the host API. Guest threads are
+     * registered before their initial host gate is opened. */
+    prev = SuspendThread(ThreadHandle);
+    if (prev == (DWORD)-1) {
+        xbox_log(XBOX_LOG_ERROR, XBOX_LOG_THREAD,
+            "NtSuspendThread: SuspendThread failed (error %u)", GetLastError());
+        return STATUS_UNSUCCESSFUL;
     }
 
     if (PreviousSuspendCount)
@@ -451,7 +521,33 @@ NTSTATUS __stdcall xbox_NtResumeThread(
     HANDLE ThreadHandle,
     PULONG PreviousSuspendCount)
 {
-    DWORD prev;
+    DWORD prev, exit_status;
+    DWORD tid = GetThreadId(ThreadHandle);
+    KThreadSlot *k = kbusy_slot(tid, 0);
+
+    suspend_lock();
+    if (k && (DWORD)k->tid == tid && k->guest &&
+        (k->guest == 2 || (GetExitCodeThread(ThreadHandle, &exit_status) &&
+                          exit_status != STILL_ACTIVE))) {
+        LeaveCriticalSection(&s_suspend_lock);
+        return (NTSTATUS)0xC000004Bu;
+    }
+    if (k && (DWORD)k->tid == tid && k->guest) {
+        prev = (DWORD)k->suspend_count + (DWORD)k->native_start;
+        if (k->suspend_count > 0) InterlockedDecrement(&k->suspend_count);
+        else if (k->native_start) {
+            if (ResumeThread(ThreadHandle) == (DWORD)-1) {
+                LeaveCriticalSection(&s_suspend_lock);
+                return STATUS_UNSUCCESSFUL;
+            }
+            k->native_start = 0;
+        }
+        WakeAllConditionVariable(&s_suspend_cv);
+        LeaveCriticalSection(&s_suspend_lock);
+        if (PreviousSuspendCount) *PreviousSuspendCount = prev;
+        return STATUS_SUCCESS;
+    }
+    LeaveCriticalSection(&s_suspend_lock);
 
     /* Mirror of NtSuspendThread: (DWORD)-1 is failure, not a count. */
     prev = ResumeThread(ThreadHandle);

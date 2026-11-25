@@ -64,15 +64,15 @@ static void save_unlock(void) { LeaveCriticalSection(&s_save_lock); }
 static int save_settings(const char **keys,const char **values,int count)
 {
     char path[2048],tmp[2064],line[4096],*slash;FILE *in,*out;int last='\n',unreadable=0;
-    GetModuleFileNameA(NULL,path,sizeof path);slash=strrchr(path,'\\');if(!slash)return 0;
+    if(!mc3_module_path(path,sizeof path))return 0;slash=strrchr(path,'\\');if(!slash)return 0;
     snprintf(slash+1,sizeof path-(slash+1-path),MC3_APP "_env.txt");
     /* A temp name per thread: even with the lock below, a save that dies
      * half-way must not leave a file another save then renames into place. */
     snprintf(tmp,sizeof tmp,"%s.%lu.tmp",path,(unsigned long)GetCurrentThreadId());
     save_lock();
-    out=fopen(tmp,"wb");if(!out){save_unlock();goto fail;}
-    in=fopen(path,"rb");
-    if(!in && GetFileAttributesA(path)!=INVALID_FILE_ATTRIBUTES)
+    out=mc3_fopen_utf8(tmp,L"wb");if(!out){save_unlock();goto fail;}
+    in=mc3_fopen_utf8(path,L"rb");
+    if(!in && mc3_attributes_utf8(path)!=INVALID_FILE_ATTRIBUTES)
         unreadable=1;      /* the file is there but locked: never rewrite it */
 
     if(in){while(fgets(line,sizeof line,in)){
@@ -85,9 +85,9 @@ static int save_settings(const char **keys,const char **values,int count)
      * Unconditional leading blank lines accumulated on every menu adjustment. */
     if(last!='\n')fputs("\r\n",out);
     for(int i=0;i<count;i++)fprintf(out,"%s=%s\r\n",keys[i],values[i]);
-    if(unreadable){fclose(out);DeleteFileA(tmp);save_unlock();goto fail;}
-    {int bad=ferror(out);if(fclose(out)!=0||bad){DeleteFileA(tmp);save_unlock();goto fail;}}
-    if(!MoveFileExA(tmp,path,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){DeleteFileA(tmp);save_unlock();goto fail;}
+    if(unreadable){fclose(out);mc3_delete_utf8(tmp);save_unlock();goto fail;}
+    {int bad=ferror(out);if(fclose(out)!=0||bad){mc3_delete_utf8(tmp);save_unlock();goto fail;}}
+    if(!mc3_replace_utf8(tmp,path)){mc3_delete_utf8(tmp);save_unlock();goto fail;}
     save_unlock();
     return 1;
 fail:

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * kernel_bridge.c - Bridge between translated game code and kernel functions
  *
  * Problem:
@@ -796,12 +796,27 @@ static void gil_unlock(void)
     LeaveCriticalSection(&s_gil_cs);
 }
 
+/* A suspend can arrive while this thread waits for its ticket. Recheck after
+ * acquiring, release the ticket, and only then park without runtime locks. */
+static void gil_lock_cooperative(void)
+{
+    for (;;) {
+        xbox_kernel_suspend_checkpoint();
+        gil_lock();
+        if (!xbox_kernel_suspend_pending()) return;
+        gil_unlock();
+    }
+}
+
 void xbox_gil_enter(void)
 {
-    if (!gil_enabled())
+    xbox_kernel_guest_register();
+    if (!gil_enabled()) {
+        xbox_kernel_suspend_checkpoint();
         return;
+    }
     if (t_gil_depth++ == 0)
-        gil_lock();
+        gil_lock_cooperative();
 }
 
 void xbox_gil_leave(void)
@@ -836,8 +851,9 @@ int xbox_gil_suspend(void)
 
 void xbox_gil_resume(int depth)
 {
+    xbox_kernel_suspend_checkpoint();
     if (depth > 0 && gil_enabled()) {
-        gil_lock();
+        gil_lock_cooperative();
         t_gil_depth = depth;
     }
 }
@@ -903,8 +919,12 @@ void recomp_spin_yield(void)
  * traffic collisions). */
 void recomp_preempt(void)
 {
-    if (t_gil_depth <= 0 || t_gil_nopreempt || xbox_thread_holds_dispatch())
+    if (t_gil_nopreempt || xbox_thread_holds_dispatch())
         return;
+    if (t_gil_depth <= 0) {
+        xbox_kernel_suspend_checkpoint();
+        return;
+    }
     recomp_spin_yield();
 }
 
@@ -984,6 +1004,7 @@ static DWORD WINAPI bridge_thread_main(LPVOID param)
     guest_thread_forget();
     xbox_FreeThreadStack(g_thread_stack_top);
     g_thread_stack_top = 0;
+    xbox_kernel_guest_unregister();
     return 0;
 }
 
@@ -1023,7 +1044,7 @@ static void pending_start_flush(DWORD creator)
             continue;
         if (creator ? g_pending_start[i].creator == creator
                     : now - g_pending_start[i].t >= 5) {
-            ResumeThread(g_pending_start[i].th);
+            xbox_NtResumeThread(g_pending_start[i].th, NULL);
             g_pending_start[i].th = NULL;
             InterlockedDecrement(&g_pending_count);
         }
@@ -1044,6 +1065,11 @@ static HANDLE bridge_spawn_thread(recomp_func_t fn, uint32_t ctx1,
     s->tib = xbox_AllocThreadTib();
 
     th = CreateThread(NULL, 0, bridge_thread_main, s, CREATE_SUSPENDED, NULL);
+    if (th && !xbox_kernel_guest_prepare(th)) {
+        TerminateThread(th, STATUS_INSUFFICIENT_RESOURCES);
+        CloseHandle(th);
+        th = NULL;
+    }
     /* Registered now, not when it first runs: the creator sets its priority
      * (ObReferenceObjectByHandle -> KTHREAD) before starting it, and used to
      * wait up to 200 ms per call for a thread that could not start until the
@@ -1077,7 +1103,7 @@ static HANDLE bridge_spawn_thread(recomp_func_t fn, uint32_t ctx1,
         }
         ReleaseSRWLockExclusive(&g_pending_lock);
         if (i == PENDING_START_MAX)
-            ResumeThread(th);          /* list full: start it now */
+            xbox_NtResumeThread(th, NULL); /* list full: start it now */
     }
     if (!th) free(s);
     /* Record the game thread so a host-tick-driven title's watchdog can sample
@@ -2754,6 +2780,7 @@ static void bridge_PsTerminateSystemThread(void)
         guest_thread_forget();
         xbox_FreeThreadStack(g_thread_stack_top);
         g_thread_stack_top = 0;
+        xbox_kernel_guest_unregister();
         ExitThread(exit_status);
     }
 }
@@ -4166,6 +4193,11 @@ recomp_func_t recomp_lookup_kernel(uint32_t xbox_va);
 static void deliver_one_apc(uint32_t apc_routine, uint32_t apc_context,
                             uint32_t iostatus)
 {
+    extern RECOMP_TLS RecompXmm g_xmm0,g_xmm1,g_xmm2,g_xmm3,g_xmm4,g_xmm5,g_xmm6,g_xmm7;
+    extern RECOMP_TLS RecompMmx g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7;
+    extern RECOMP_TLS double g_fp_stack[8];
+    extern RECOMP_TLS int g_fp_top,g_fp_cmp,g_df;
+    extern RECOMP_TLS uint16_t g_fp_control_word,g_fp_cc;
     /* The APC can be game code or a kernel export. Halo's XAPI passes the
      * latter -- 0xFE0000FC, one of our own synthetic thunk VAs -- so the recomp
      * dispatch correctly fails to find it and the kernel fallback is the one
@@ -4174,13 +4206,27 @@ static void deliver_one_apc(uint32_t apc_routine, uint32_t apc_context,
     if (!fn) fn = recomp_lookup_manual(apc_routine);
     if (!fn) fn = recomp_lookup_kernel(apc_routine);
     if (fn) {
+        /* APC delivery interrupts a kernel request, rather than being its
+         * return value. Preserve the interrupted CPU state, including the I/O
+         * status in EAX and the argument frame used by the outer bridge.
+         * The callback's stdcall ret already consumes its three arguments. */
+        uint32_t regs[]={g_eax,g_ecx,g_edx,g_ebx,g_esi,g_edi,g_ebp,g_esp,g_seh_ebp};
+        RecompXmm xs[]={g_xmm0,g_xmm1,g_xmm2,g_xmm3,g_xmm4,g_xmm5,g_xmm6,g_xmm7};
+        RecompMmx ms[]={g_mm0,g_mm1,g_mm2,g_mm3,g_mm4,g_mm5,g_mm6,g_mm7};
+        double fp[8];memcpy(fp,g_fp_stack,sizeof fp);
+        int top=g_fp_top,cmp=g_fp_cmp,df=g_df;
+        uint16_t control=g_fp_control_word,cc=g_fp_cc;
         /* VOID ApcRoutine(PVOID ApcContext, PIO_STATUS_BLOCK, ULONG) */
         g_esp -= 4; BRIDGE_MEM32(g_esp) = 0;
         g_esp -= 4; BRIDGE_MEM32(g_esp) = iostatus;
         g_esp -= 4; BRIDGE_MEM32(g_esp) = apc_context;
         g_esp -= 4; BRIDGE_MEM32(g_esp) = 0;   /* dummy return address */
         GUEST_CALL(fn);
-        g_esp += 12;
+        g_eax=regs[0];g_ecx=regs[1];g_edx=regs[2];g_ebx=regs[3];g_esi=regs[4];g_edi=regs[5];
+        g_ebp=regs[6];g_esp=regs[7];g_seh_ebp=regs[8];
+        g_xmm0=xs[0];g_xmm1=xs[1];g_xmm2=xs[2];g_xmm3=xs[3];g_xmm4=xs[4];g_xmm5=xs[5];g_xmm6=xs[6];g_xmm7=xs[7];
+        g_mm0=ms[0];g_mm1=ms[1];g_mm2=ms[2];g_mm3=ms[3];g_mm4=ms[4];g_mm5=ms[5];g_mm6=ms[6];g_mm7=ms[7];
+        memcpy(g_fp_stack,fp,sizeof fp);g_fp_top=top;g_fp_cmp=cmp;g_df=df;g_fp_control_word=control;g_fp_cc=cc;
     } else {
         uint32_t ord = 0;
         if (apc_routine >= KERNEL_VA_BASE && apc_routine < KERNEL_VA_END) {
@@ -8122,8 +8168,11 @@ static void bridge_KeResumeThread(void)
     if (!hThread)
         hThread = XBOX_TO_NATIVE(STACK_ARG(0));
 
-    if (hThread)
-        g_eax = (uint32_t)ResumeThread(hThread);
+    if (hThread) {
+        ULONG previous = 0;
+        NTSTATUS status = xbox_NtResumeThread(hThread, &previous);
+        g_eax = status == STATUS_SUCCESS ? previous : UINT32_MAX;
+    }
     else
         g_eax = 0;
 }
@@ -8135,8 +8184,11 @@ static void bridge_KeSuspendThread(void)
     if (!hThread)
         hThread = XBOX_TO_NATIVE(STACK_ARG(0));
 
-    if (hThread)
-        g_eax = (uint32_t)SuspendThread(hThread);
+    if (hThread) {
+        ULONG previous = 0;
+        NTSTATUS status = xbox_NtSuspendThread(hThread, &previous);
+        g_eax = status == STATUS_SUCCESS ? previous : UINT32_MAX;
+    }
     else
         g_eax = 0;
 }
