@@ -3,8 +3,10 @@
 A relay server lets two players in different houses play together. Without one, free roam
 only links players on the same LAN.
 
-This is the 0.2.6 server (`tools/mc3relay.py`). It is **not** part of 0.2.5 and 0.2.5 does not
-mention it.
+This is the server that ships with 0.2.5: `tools/mc3relay.py` (with `tools/mc3hub.py`) is the
+source, and the release page carries the same files packaged as
+`ReDUB-relay-server-0.2.5.zip`. You do not need it to play — the game already points at a
+running server — but this page is how you run your own.
 
 ---
 

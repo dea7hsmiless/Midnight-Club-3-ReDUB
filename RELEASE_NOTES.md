@@ -77,10 +77,14 @@ a datagram forwarded by the relay counts as the hub being alive. A four-minute i
 the player in the census, and a synthetic player's 24-byte System Link broadcast reaches the
 game (`[XNET] rx ... 01 37 18 00`).
 
-The relay's own source ships on the release page as **`ReDUB-relay-server-0.2.5.zip`**. The
+The relay's own source is in the repository under `tools/` (`mc3relay.py`, `mc3hub.py`), and
+the release page carries the same files packaged as **`ReDUB-relay-server-0.2.5.zip`**. The
 game does not need it — it already uses a running server — but anyone who would rather host a
-room server can: the folder has the two Python scripts, a Dockerfile, a systemd unit and
+room server can: the package has the two Python scripts, a Dockerfile, a systemd unit and
 start scripts, and needs nothing outside Python 3.8.
+
+**Online Race was played across two machines on this build**: one machine created the match,
+the other joined it, and both cars raced in the same event.
 
 ### Your name, without editing files
 
@@ -96,6 +100,8 @@ field and one stalled frame cost less. 60 fps is still a setting the phone has t
 scale (2X by default) and anti-aliasing are the biggest levers. Adaptive resolution is
 scheduled for 0.2.6.
 
+Both mobile packages were installed on a device and boot into the game from these builds.
+
 ### Known issues
 
 - **Start-up time is intermittent on the machine used for testing.** Runs reached the title
@@ -110,9 +116,6 @@ scheduled for 0.2.6.
   career race was completed at 60 FPS, past RESULTS and back into the cruise. If you can
   reproduce it, please say which platform and package you used and attach
   `work-remix/logs/latest.log`.
-- **Online Race has its transport verified, not a two-device pass.** A loopback relay and a
-  synthetic player proved System Link packets reach the game; Create Match on one machine and
-  Join Game on the other on the release build is still to be done.
 
 ### Not in this release
 
