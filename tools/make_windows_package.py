@@ -42,6 +42,11 @@ LAUNCHER = ("ReDUB Launcher.exe", "recomplauncher.json", "launcher-source.zip")
 
 # dist/ is the build output (DLLs, the exe, its data); these are not part of it.
 SKIP_SUFFIX = (".bak", ".log", "_env.txt")
+# The launcher renames a settings file it is about to rewrite to
+# "<name>.launcher-backup". It is the same player state as _env.txt -- it was in
+# the dist once and would otherwise have shipped inside a release zip, carrying
+# one machine's settings into everyone's install.
+SKIP_MARKERS = (".launcher-backup",)
 SKIP_PREFIX = ("progcache",)
 
 
@@ -58,6 +63,8 @@ def wanted(p: Path) -> bool:
     if name.endswith(SKIP_SUFFIX):
         return False
     if name.startswith(SKIP_PREFIX):
+        return False
+    if any(marker in name for marker in SKIP_MARKERS):
         return False
     return True
 

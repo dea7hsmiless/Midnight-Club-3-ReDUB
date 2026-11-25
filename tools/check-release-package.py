@@ -66,6 +66,13 @@ def _scan(rel: str, data: bytes | None, findings: list[str]) -> None:
         findings.append(f"player settings file shipped: {rel}")
         return
 
+    # The launcher's own backup of the settings file it is rewriting. Same
+    # player state as above, and it is not covered by the _env.txt test because
+    # the name ends with .launcher-backup.
+    if ".launcher-backup" in base:
+        findings.append(f"player settings backup shipped: {rel}")
+        return
+
     if data is None:
         return
 
