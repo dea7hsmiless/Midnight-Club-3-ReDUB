@@ -7646,9 +7646,49 @@ static void gl_blit(const Nv2aBlit *b)
 
 #include "port_overlay.h"
 
+/* ---- pause when the window loses focus (RECOMP_PAUSE_ON_FOCUS) --------
+ *
+ * Opens the title's own pause menu with a synthetic START, so an alt-tab
+ * leaves the race where the player left it instead of running on. Off by
+ * default: pausing yourself because another window took the keyboard is a
+ * surprise unless asked for.
+ *
+ * The press is held past 150 ms and 3 game frames, which is what the menus
+ * need to notice it (autostart.c learned the same the hard way). It goes in
+ * through the USB pad, which is merged into a real controller's report rather
+ * than replacing it. iOS already blocks at a frame boundary when backgrounded;
+ * this is the same idea for a window that lost the focus but is still visible. */
+static int s_pause_frames, s_pause_on = -1;
+
+static void pause_on_focus(void)
+{
+    if (s_pause_on < 0) {
+        const char *e = getenv("RECOMP_PAUSE_ON_FOCUS");
+        s_pause_on = e && *e == '1';
+    }
+    if (!s_pause_on || s_pause_frames > 0)
+        return;
+    s_pause_frames = 8;
+    fprintf(stderr, "  [GL] window lost focus: pausing\n");
+}
+
+static void pause_tick(void)
+{
+    extern void usb_gamepad_set_held(int dev, uint8_t digital, uint8_t analog);
+    if (s_pause_frames <= 0)
+        return;
+    s_pause_frames--;
+    usb_gamepad_set_held(0, s_pause_frames ? 0x10u : 0u, 0u);   /* digital START, then release */
+}
+
 static void gl_flip(void)
 {
     state_dirty();
+    pause_tick();
+    {   /* lets the kernel tell a parked thread from a frozen game */
+        extern void xbox_kernel_frame_heartbeat(long);
+        xbox_kernel_frame_heartbeat((long)s_frame);
+    }
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
     {
         extern int ios_scene_is_active(void);
@@ -8148,6 +8188,8 @@ swap:
                 exit(0);
             }
             if(xbox_text_input_event(&e))continue;
+            if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+                pause_on_focus();               /* RECOMP_PAUSE_ON_FOCUS */
             if(e.type==SDL_KEYDOWN && e.key.repeat==0 && e.key.keysym.sym==SDLK_F11) {
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
                 extern void windows_port_setting_change(int);

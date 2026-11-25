@@ -71,6 +71,10 @@
 # Windowed, borderless fullscreen, or exclusive fullscreen (restart).
 #MC3_FULLSCREEN=0
 
+# Open the game's own pause menu when the window loses the focus, so a race
+# does not run on while you are in another window.
+#RECOMP_PAUSE_ON_FOCUS=0
+
 # A fixed window size, or auto for the desktop's own.
 #MC3_RESOLUTION=auto
 
