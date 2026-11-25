@@ -1420,6 +1420,34 @@ static uint32_t heartbeat_ms(void)
 }
 
 extern void sub_0001735C_gen(void);
+/* ── A minimum time on screen (RECOMP_LOADING_MIN_MS) ──
+ *
+ * The loading screen's own loop advances a Flash movie and presents a frame
+ * every 32 ms (above), then sleeps what the title asked for. On a fast machine
+ * a small load can finish between two of those frames, so the screen never
+ * appears at all. This keeps the first turn of a load on screen for a minimum
+ * time by stretching that turn's sleep -- the movie keeps advancing, so it
+ * still animates rather than freezing -- and only for the first turn, so a
+ * long load is never made longer.
+ *
+ * The title's request is left alone when it already exceeds the minimum, and
+ * 0 (the default) changes nothing at all. Negative values are ignored: the
+ * sleep argument is unsigned on the console and a negative here would have
+ * meant "forever" to Sleep. */
+static unsigned loading_min_ms(void)
+{
+    static int asked = -1;
+    if (asked < 0) {
+        const char *e = getenv("RECOMP_LOADING_MIN_MS");
+        long v = e && *e ? atol(e) : 0;
+        asked = v > 0 && v <= 5000 ? (int)v : 0;
+        if (asked)
+            fprintf(stderr, "[LS] loading screens stay at least %d ms (RECOMP_LOADING_MIN_MS)\n",
+                    asked);
+    }
+    return (unsigned)asked;
+}
+
 void sub_0001735C(void)
 {
     if (MEM32(g_esp) == 0x001B1654u && MEM32(g_esp + 4) == 0) {   /* the heartbeat's Sleep(0) */
@@ -1429,6 +1457,15 @@ void sub_0001735C(void)
             const char *l = xbox_gil_my_label();
             fprintf(stderr, "[MC3] heartbeat thread (%s): Sleep(0) -> Sleep(%u) (MC3_HEARTBEAT_MS)\n",
                     l ? l : "?", heartbeat_ms());
+        }
+    } else if (t_ls_thread) {
+        unsigned minimum = loading_min_ms();
+        uint32_t want = MEM32(g_esp + 4);
+        static int stretched;
+        if (minimum && want < minimum && !stretched) {
+            stretched = 1;                 /* the first turn of this load only */
+            MEM32(g_esp + 4) = minimum;
+            fprintf(stderr, "[LS] first frame held for %u ms (was %u)\n", minimum, want);
         }
     }
     ls_call(sub_0001735C_gen, "sleep", 0);

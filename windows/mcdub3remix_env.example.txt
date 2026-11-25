@@ -75,6 +75,13 @@
 # does not run on while you are in another window.
 #RECOMP_PAUSE_ON_FOCUS=0
 
+# Keep a loading screen on screen for at least this many milliseconds (0, the
+# default, changes nothing). A small load on a fast machine can finish between
+# two of the screen's own frames, so it is never seen at all. Only the first
+# frame of a load is held, and the movie keeps animating while it waits, so a
+# long load is never made longer. Up to 5000.
+#RECOMP_LOADING_MIN_MS=0
+
 # A fixed window size, or auto for the desktop's own.
 #MC3_RESOLUTION=auto
 
