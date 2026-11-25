@@ -52,8 +52,14 @@ int xbox_log_quiet(void)
 {
     static int quiet = -1;
     if (quiet < 0) {
+        /* Quiet by default: the per-read trace (one line and an fflush for
+         * every 8 KB the title reads), the two-second kernel summaries and the
+         * pushbuffer trace are diagnostics, not a release log. They cost a
+         * synchronous write per read -- a stalled disk or a virus scanner made
+         * that a boot freeze -- and they buried the lines that matter.
+         * RECOMP_QUIET=0 turns them back on for a bug report. */
         const char *e = getenv("RECOMP_QUIET");
-        quiet = e && *e == '1';
+        quiet = !(e && e[0] == '0');
     }
     return quiet;
 }

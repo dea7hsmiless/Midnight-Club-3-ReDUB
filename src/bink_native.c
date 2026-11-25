@@ -33,6 +33,7 @@
  */
 #include <math.h>
 #include <stdint.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -481,6 +482,34 @@ void mc3_bink_native_open(uint32_t hbink, const char *xbox_name)
 
     if (!hbink || !mc3_bink_native_enabled())
         return;
+    {
+        /* Guard: if the title reopens a handle whose movie was never closed,
+         * the decode context and its frame buffers would be orphaned with no
+         * slot pointing at them, and no close would ever free them. It has not
+         * been observed (16 opens / 3 genuine closes in a menu soak, every
+         * open on a free slot), so this is insurance, not a fix for a seen
+         * leak. Released before the new context is allocated, so the same slot
+         * is reused. */
+        Movie *again = find(hbink);
+        if (again) {
+            static unsigned n;
+            if (n++ < 8)
+                fprintf(stderr, "[BINK] native: HBINK %08X opened again without"
+                                " a close; releasing the old one\n", hbink);
+            release(again);
+        }
+    }
+    {
+        /* FFmpeg's default log level writes to stderr for every odd packet;
+         * during a boot movie that is more synchronous I/O on the thread that
+         * must present frames. Errors still print. */
+        static int level_set;
+        if (!level_set) {
+            const char *lv = getenv("MC3_BINK_LOG");
+            level_set = 1;
+            av_log_set_level(lv && *lv ? atoi(lv) : AV_LOG_ERROR);
+        }
+    }
     for (i = 0; i < MAX_MOVIES && !m; i++)
         if (!s_movies[i].hbink) m = &s_movies[i];
     if (!m) {
@@ -491,9 +520,17 @@ void mc3_bink_native_open(uint32_t hbink, const char *xbox_name)
         fprintf(stderr, "[BINK] native: cannot locate %s; lifted decoder\n", xbox_name);
         return;
     }
-    if (avformat_open_input(&m->fmt, path, NULL, NULL) < 0
-            || avformat_find_stream_info(m->fmt, NULL) < 0) {
+    /* Progress markers: a stall at boot is inside one of these host calls, and
+     * a log that stops between two of them names the one to look at. */
+    fprintf(stderr, "[BINK] open: %s\n", path);
+    if (avformat_open_input(&m->fmt, path, NULL, NULL) < 0) {
         fprintf(stderr, "[BINK] native: FFmpeg cannot open %s; lifted decoder\n", path);
+        release(m);
+        return;
+    }
+    fprintf(stderr, "[BINK] open: streams\n");
+    if (avformat_find_stream_info(m->fmt, NULL) < 0) {
+        fprintf(stderr, "[BINK] native: FFmpeg cannot read the streams of %s; lifted decoder\n", path);
         release(m);
         return;
     }
@@ -507,6 +544,7 @@ void mc3_bink_native_open(uint32_t hbink, const char *xbox_name)
     m->dec = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(m->dec, m->fmt->streams[m->stream]->codecpar);
     m->dec->thread_count = 1;     /* the game thread waits on this anyway */
+    fprintf(stderr, "[BINK] open: decoder\n");
     if (avcodec_open2(m->dec, codec, NULL) < 0) {
         release(m);
         return;
@@ -521,6 +559,7 @@ void mc3_bink_native_open(uint32_t hbink, const char *xbox_name)
     }
     if (audio_enabled()) {
         AVRational fr = m->fmt->streams[m->stream]->avg_frame_rate;
+        fprintf(stderr, "[BINK] open: audio\n");
         m->audio = audio_open(path, fr.den ? av_q2d(fr) : 0);
         if (m->audio)
             fprintf(stderr, "[BINK] native sound: %d Hz, %d ch, mixer voice %d\n",

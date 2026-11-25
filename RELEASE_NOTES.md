@@ -48,6 +48,11 @@ checked on screen.
 - **Closing cannot hang.** A watchdog arms on every quit; if teardown has not finished six
   seconds later it dumps each thread's stack and leaves. Windows used to show "stopped
   interacting with Windows" and close the game instead.
+- **The logo screen can no longer freeze.** An intermittent stall inside the native movie
+  open (one boot in ten in a soak) held the front end on `rockstar.bik`. The per-read and
+  kernel-summary traces are off by default now (`RECOMP_QUIET=0` restores them): one
+  synchronous log write per 8 KB read was stalling the boot thread on I/O. The hang watch
+  also reports a first-screen stall instead of ignoring it.
 
 ### No settings file in the package
 
@@ -85,9 +90,9 @@ scheduled for 0.2.6.
 - **Start-up time is intermittent on the machine used for testing.** Runs reached the title
   in 11.4-11.6 s, while a few sat on a frozen frame for minutes. Three separate freezes were
   found and all three are addressed: two in the GPU command walker, and one where the movie
-  layer waited for ever on a thread that stopped signalling. The last is bounded now — an
-  infinite wait times out after 2 seconds so the game continues. `MC3_MOVIE_WAIT_MS=0` turns
-  that protection off if it ever causes trouble. If you still get a freeze,
+  layer waited for ever on a thread that stopped signalling. The last is bounded now — Bink's
+  two-object wait times out after two seconds so the game continues. `MC3_MOVIE_WAIT_MS=0`
+  turns that protection off if it ever causes trouble. If you still get a freeze,
   `work-remix/logs/latest.log` says which one: the walker ones log `[PB] decode abort` or
   `[PB] bad target`.
 - The **0.2.4a report of "does not get past the first race" did not reproduce** here: a

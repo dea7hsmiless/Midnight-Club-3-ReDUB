@@ -209,6 +209,84 @@ static NTSTATUS xbox_wait_result_to_ntstatus(DWORD result, ULONG count)
     }
 }
 
+/*
+ * The INFINITE-wait ceiling for the Bink 2-object wait.
+ *
+ * Bink fetches a frame through sub_003ADBA0, which waits on two of its own
+ * handles with an INFINITE timeout. If one never signals, that guest thread is
+ * gone and the port can never reach it: a permanent freeze on the logo. That
+ * wait is therefore bounded (MC3_MOVIE_WAIT_MS, 2 s by default) so the caller
+ * gets STATUS_TIMEOUT and can decide.
+ *
+ * Some callers cannot: they wait again, which turns the bounded wait into a
+ * loop with no frames. The guard detects three capped waits in a row that time
+ * out while no new frame was presented, and reports the objects signalled once.
+ *
+ * Only the multi-object wait is bounded. Capping *single*-object INFINITE
+ * waits was tried and reverted: a caller that legitimately waits longer than
+ * the ceiling proceeded early with half-initialised state and the game died of
+ * an integer divide by zero about two minutes later (2026-11-24, A/B tested).
+ * MC3_MOVIE_WAIT_MS=0 disables the ceiling; MC3_WAIT_GUARD=0 the guard.
+ */
+extern uint32_t nv2a_gl_frame_count(void) __attribute__((weak));
+
+static DWORD wait_ceiling(DWORD ms, ULONG count)
+{
+    static long cap = -2;
+    if (ms != INFINITE)
+        return ms;
+    if (cap == -2) {
+        const char *e = getenv("MC3_MOVIE_WAIT_MS");
+        cap = e && *e ? atol(e) : 2000;
+        if (cap > 0)
+            fprintf(stderr, "[SYNC] INFINITE %lu-object waits capped at %ld ms"
+                            " (MC3_MOVIE_WAIT_MS=0 disables)\n", (unsigned long)count, cap);
+        else
+            fprintf(stderr, "[SYNC] INFINITE %lu-object waits uncapped"
+                            " (MC3_MOVIE_WAIT_MS=0)\n", (unsigned long)count);
+    }
+    return cap > 0 ? (DWORD)cap : ms;
+}
+
+static int wait_guard_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("MC3_WAIT_GUARD");
+        on = !(e && *e && e[0] == '0');
+    }
+    return on;
+}
+
+static unsigned s_guard_stuck;
+static uint32_t s_guard_frame;
+
+/* 1 when a capped wait has timed out often enough, with no frame in between,
+ * that the guest is stuck rather than slow. Says so once. */
+static int wait_guard_stuck(ULONG count)
+{
+    uint32_t f;
+    if (!wait_guard_on())
+        return 0;
+    f = nv2a_gl_frame_count ? nv2a_gl_frame_count() : 0;
+    if (f != s_guard_frame) {           /* the renderer is moving: not a stall */
+        s_guard_frame = f;
+        s_guard_stuck = 0;
+    }
+    if (++s_guard_stuck < 3)
+        return 0;
+    s_guard_stuck = 0;
+    fprintf(stderr, "[SYNC] %lu-object wait timed out 3 times with no new frame:"
+                    " reporting it signalled so boot continues"
+                    " (MC3_WAIT_GUARD=0 disables)\n", (unsigned long)count);
+    return 1;
+}
+
+static void wait_guard_ok(void)
+{
+    s_guard_stuck = 0;
+}
+
 NTSTATUS __stdcall xbox_NtWaitForSingleObject(
     HANDLE Handle,
     BOOLEAN Alertable,
@@ -267,38 +345,21 @@ NTSTATUS __stdcall xbox_NtWaitForMultipleObjectsEx(
      * cannot help there: the guest is inside a host wait, so the port's
      * wrappers are never called again.
      *
-     * Default 2 s. A wait that legitimately completes does so long before
-     * that (a normal boot crosses this three times with no delay), and a wait
-     * that cannot complete now returns WAIT_TIMEOUT so the caller's own loop
-     * decides what to do, instead of the process stopping for ever.
-     * MC3_MOVIE_WAIT_MS=0 turns it off; a positive value sets the ceiling. */
-    if (ms == INFINITE) {
-        static long cap = -2;
-        if (cap == -2) {
-            const char *e = getenv("MC3_MOVIE_WAIT_MS");
-            cap = e && *e ? atol(e) : 2000;
-            if (cap > 0)
-                fprintf(stderr, "[SYNC] INFINITE %lu-object waits capped at %ld ms"
-                                " (MC3_MOVIE_WAIT_MS=0 disables)\n", (unsigned long)Count, cap);
-            else
-                fprintf(stderr, "[SYNC] INFINITE %lu-object waits uncapped"
-                                " (MC3_MOVIE_WAIT_MS=0)\n", (unsigned long)Count);
-        }
-        if (cap > 0) {
-            static unsigned n;
-            if (n++ < 8)
-                fprintf(stderr, "[SYNC] INFINITE wait on %lu object(s) -> %ld ms\n",
-                        (unsigned long)Count, cap);
-            ms = (DWORD)cap;
-        }
-    }
+     * The ceiling is in wait_ceiling(): 2 s by default. A caller that only
+     * waits again on the timeout is caught by wait_guard_stuck(), which then
+     * reports the wait signalled once the renderer has stopped too. */
+    DWORD capped = wait_ceiling(ms, Count);
 
     /* WaitType: 0 = WaitAll, 1 = WaitAny (matches NT definitions) */
     bWaitAll = (WaitType == 0) ? TRUE : FALSE;
 
     xbox_kernel_busy(-1);   /* blocked in a wait: a safe point */
-    result = WaitForMultipleObjectsEx(Count, Handles, bWaitAll, ms, Alertable);
+    result = WaitForMultipleObjectsEx(Count, Handles, bWaitAll, capped, Alertable);
     xbox_kernel_busy(1);
+    if (capped != ms && result == WAIT_TIMEOUT && wait_guard_stuck(Count))
+        result = WAIT_OBJECT_0;
+    else if (result != WAIT_TIMEOUT)
+        wait_guard_ok();
     return xbox_wait_result_to_ntstatus(result, Count);
 }
 

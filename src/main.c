@@ -464,9 +464,22 @@ static void *hang_thread(void *arg)
 #endif
     for (;;) {
         uint32_t now;
+        static unsigned boot;
         sleep(1);
         now = nv2a_gl_frame_count();
-        if (now != last || now == 0) {      /* 0: not drawing yet (boot) */
+        /* 0 means the game has not drawn yet. That used to disable the watch
+         * for ever, which is exactly the boot-logo freeze: no frame is
+         * presented, so nothing ever reports it. Give the first frames 30 s,
+         * then treat a still-zero counter as a stall like any other. */
+        if (now == 0 && boot < 30) {
+            boot++;
+            last = 0;
+            still = 0;
+            reported = 0;
+            continue;
+        }
+        boot = 30;
+        if (now != last) {                  /* a new frame: alive */
             last = now;
             still = 0;
             reported = 0;
