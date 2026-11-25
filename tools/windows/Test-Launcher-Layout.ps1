@@ -142,7 +142,7 @@ public class LayoutProbe {
             Panel card = FindCard(app, cat);
             if (card == null) { Check(cat + ": page built", false, "no card"); continue; }
 
-            int measured = 0, skewed = 0, shortGlyph = 0, outside = 0, bottom = 0, worst = 0;
+            int measured = 0, skewed = 0, shortGlyph = 0, outside = 0, bottom = 0, worst = 0, overlapped = 0;
             int scrollMax = Math.Max(0, card.AutoScrollMinSize.Height - card.ClientSize.Height);
 
             // Top, then the bottom of the page: rows below the fold are only in
@@ -180,6 +180,23 @@ public class LayoutProbe {
                     if (value == null || left == null || right == null) continue;
                     measured++;
 
+                    // No part of a row may sit on top of another. This is the
+                    // failure that shipped once: the name label was 372 px wide
+                    // and the left arrow started at 335, so the label drew over
+                    // the button and it disappeared.
+                    Control[] parts = new Control[] { name, left, value, right };
+                    Array.Sort(parts, delegate(Control p1, Control p2) { return p1.Left.CompareTo(p2.Left); });
+                    for (int k = 1; k < parts.Length; k++) {
+                        if (parts[k].Left < parts[k - 1].Right) {
+                            overlapped++;
+                            if (overlapped <= 3)
+                                Console.WriteLine("      overlap: " + Short(parts[k - 1].Text) + " (" + parts[k - 1].Left
+                                                  + ".." + parts[k - 1].Right + ") over " + Short(parts[k].Text)
+                                                  + " (" + parts[k].Left + ".." + parts[k].Right + ")");
+                            break;
+                        }
+                    }
+
                     int at, ab, vt, vb, lt, lb, rt, rb;
                     Ink(bmp, new Rectangle(name.Left, top, name.Width, name.Height), out at, out ab);
                     Ink(bmp, new Rectangle(value.Left, top, value.Width, value.Height), out vt, out vb);
@@ -215,6 +232,27 @@ public class LayoutProbe {
                   skewed == 0 ? "within 2 px" : skewed + " rows off, worst " + worst + " px");
             Check(cat + ": arrow glyphs are legible", shortGlyph == 0, shortGlyph + " rows under 8 px");
             Check(cat + ": nothing wider than the card", outside == 0, outside + " rows overflow");
+            Check(cat + ": no part of a row overlaps another", overlapped == 0, overlapped + " rows overlap");
+
+            // And nothing else may overlap a row either. Scrolling once pulled
+            // the rows back to their unscrolled positions while the hint text
+            // and the Advanced button stayed put, so the rows were drawn on top
+            // of them. Checked at the bottom of the page, where that happened.
+            card.AutoScrollPosition = new Point(0, Math.Max(0, scrollMax));
+            Application.DoEvents();
+            int shiftNow = card.AutoScrollPosition.Y;
+            System.Collections.Generic.List<Rectangle> boxes = new System.Collections.Generic.List<Rectangle>();
+            foreach (Control c in card.Controls) {
+                int t = c.Top;
+                if (t < 0 || t + c.Height > card.ClientSize.Height) continue;   // not fully visible
+                boxes.Add(new Rectangle(c.Left, t, c.Width, c.Height));
+            }
+            int clashes = 0;
+            for (int i = 0; i < boxes.Count; i++)
+                for (int j = i + 1; j < boxes.Count; j++)
+                    if (boxes[i].IntersectsWith(boxes[j])) { clashes++; }
+            Check(cat + ": nothing overlaps when scrolled to the bottom", clashes == 0,
+                  clashes + " overlapping pairs of " + boxes.Count + " visible controls");
             Check(cat + ": scroll reaches the last row", scrollMax == 0 || scrollMax + card.ClientSize.Height >= bottom - 2,
                   "content " + bottom + " px, scroll " + scrollMax + " px, visible " + card.ClientSize.Height + " px");
 
@@ -269,6 +307,7 @@ public class LayoutProbe {
 finally {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 }
+
 
 
 

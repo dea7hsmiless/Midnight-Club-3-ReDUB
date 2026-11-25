@@ -52,10 +52,12 @@ public class ScrollPanel : Panel {
 
     public ScrollPanel(){
         AutoScroll=true;
+        /* DoubleBuffered only. UserPaint on a container that holds child
+         * controls lets the panel paint over them: with it set, the left arrow
+         * buttons of every settings row disappeared and the value text was
+         * clipped. The bar is painted in OnPaint, which runs below the child
+         * windows anyway, so it does not need UserPaint. */
         DoubleBuffered=true;
-        /* Children are moved by the panel, and the bar is drawn by us, so the
-         * panel must repaint while scrolled. */
-        SetStyle(ControlStyles.OptimizedDoubleBuffer|ControlStyles.AllPaintingInWmPaint|ControlStyles.UserPaint,true);
     }
 
     void HideBars(){
@@ -82,6 +84,37 @@ public class ScrollPanel : Panel {
     protected override void OnHandleCreated(EventArgs e){
         base.OnHandleCreated(e);
         HideBars();
+    }
+
+    /* Dragging the bar, so the panel is not wheel-only. Windows would have
+     * given this for free with its own scrollbar; since that one is hidden, the
+     * thumb has to accept the drag itself. */
+    bool dragging;
+    void ScrollTo(int y){
+        int total=VerticalScroll.Maximum-VerticalScroll.Minimum+1;
+        int visible=ClientSize.Height;
+        if(total<=visible)return;
+        int size=Math.Max(28,visible*visible/total);
+        int travel=Math.Max(1,visible-size);
+        int at=Math.Max(0,Math.Min(travel,y-size/2));
+        int offset=(int)((long)at*(total-visible)/travel);
+        AutoScrollPosition=new Point(0,offset);
+        Invalidate();
+    }
+    protected override void OnMouseDown(MouseEventArgs e){
+        base.OnMouseDown(e);
+        if(e.X<ClientSize.Width-12)return;
+        dragging=true;
+        Capture=true;
+        ScrollTo(e.Y);
+    }
+    protected override void OnMouseMove(MouseEventArgs e){
+        base.OnMouseMove(e);
+        if(dragging)ScrollTo(e.Y);
+    }
+    protected override void OnMouseUp(MouseEventArgs e){
+        base.OnMouseUp(e);
+        if(dragging){dragging=false;Capture=false;}
     }
 
     /* Thumb rectangle for a bar of `span` pixels showing `visible` of `total`. */
@@ -161,7 +194,7 @@ public class BrandPanel : Panel {
     protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);var g=e.Graphics;g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;g.SmoothingMode=SmoothingMode.AntiAlias;using(var bg=new LinearGradientBrush(ClientRectangle,Color.FromArgb(31,21,38),Color.FromArgb(8,13,26),75))g.FillRectangle(bg,ClientRectangle);if(hero!=null){float zoom=Math.Max((float)Width/hero.Width,(float)Height/hero.Height);float w=hero.Width*zoom,h=hero.Height*zoom;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.DrawImage(hero,(Width-w)/2,(Height-h)/2,w,h);using(var wash=new LinearGradientBrush(ClientRectangle,Color.FromArgb(80,8,13,26),Color.FromArgb(225,8,13,26),90))g.FillRectangle(wash,ClientRectangle);}var ellipse=new Rectangle(Width/2-300,Height/2-140,600,280);using(var p=new GraphicsPath()){p.AddEllipse(ellipse);using(var glow=new PathGradientBrush(p)){glow.CenterColor=Color.FromArgb(135,93,27,51);glow.SurroundColors=new[]{Color.FromArgb(0,8,13,26)};g.FillPath(glow,p);}}if(logo!=null){float zoom=Math.Min((float)Width*.78f/logo.Width,(float)Height*.65f/logo.Height);float w=logo.Width*zoom,h=logo.Height*zoom;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.DrawImage(logo,(Width-w)/2,(Height-h)/2,w,h);return;}float size=Math.Min(132,Width/5.5f);using(var f=new Font("Segoe UI",size,FontStyle.Bold|FontStyle.Italic)){var measured=g.MeasureString("ReDUB",f);float x=(Width-measured.Width)/2;float y=(Height-measured.Height)/2+8;using(var shadow=new SolidBrush(Color.FromArgb(120,0,0,0)))g.DrawString("ReDUB",f,shadow,x+4,y+6);using(var ink=new SolidBrush(Color.FromArgb(244,246,252)))g.DrawString("ReDUB",f,ink,x,y);using(var red=new SolidBrush(Color.FromArgb(242,65,84)))g.FillRectangle(red,x+16,y+measured.Height-20,measured.Width-20,4);using(var sub=new Font("Segoe UI",12,FontStyle.Bold))using(var ink=new SolidBrush(Color.FromArgb(188,196,213)))g.DrawString("M I D N I G H T   C L U B   3",sub,ink,(Width-280)/2,y-4);}}
 }
 public sealed class Launcher : Form {
-    readonly string root;readonly Label status=new Label();readonly TextBox source=new TextBox();readonly RichTextBox log=new RichTextBox();readonly RedubButton play=new RedubButton {Primary=true};readonly ProgressBar progress=new ProgressBar();readonly System.Windows.Forms.Timer refresh=new System.Windows.Forms.Timer();readonly Panel content=new Panel();readonly List<RedubButton> navigation=new List<RedubButton>();Process job;string page="Game";string category="Display";bool advancedWheelSettings,advancedGraphicsSettings;volatile bool working;string importStatus="";CancellationTokenSource importCancellation;RedubButton cancelImport,importAction;bool closeAfterImport;readonly ToolTip tips=new ToolTip{AutoPopDelay=20000,InitialDelay=450,ReshowDelay=150,ShowAlways=true};
+    readonly string root;readonly Label status=new Label();readonly TextBox source=new TextBox();readonly RichTextBox log=new RichTextBox();readonly RedubButton play=new RedubButton {Primary=true};readonly ProgressBar progress=new ProgressBar();readonly System.Windows.Forms.Timer refresh=new System.Windows.Forms.Timer();readonly Panel content=new Panel();readonly List<RedubButton> navigation=new List<RedubButton>();Process job;string page="Game";string category="Display";bool advancedWheelSettings,advancedGraphicsSettings;volatile bool working;string importStatus="";CancellationTokenSource importCancellation;RedubButton cancelImport,importAction;bool closeAfterImport;readonly System.Collections.Generic.List<Action> rowLayouts=new System.Collections.Generic.List<Action>();readonly ToolTip tips=new ToolTip{AutoPopDelay=20000,InitialDelay=450,ReshowDelay=150,ShowAlways=true};
     static readonly Color Bg=Color.FromArgb(8,13,26),Rail=Color.FromArgb(5,9,18),Card=Color.FromArgb(15,23,42),Muted=Color.FromArgb(153,165,188);
     public Launcher(string directory){root=directory;try{var iconPath=Path.Combine(root,"launcher","art","redub.ico");this.Icon=File.Exists(iconPath)?new Icon(iconPath):System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);}catch{}Text="Midnight Club 3: ReDUB";Size=new Size(1200,800);MinimumSize=new Size(1000,700);StartPosition=FormStartPosition.CenterScreen;BackColor=Bg;ForeColor=Color.FromArgb(235,239,247);Font=new Font("Segoe UI",10);AutoScaleMode=AutoScaleMode.Dpi;KeyPreview=true;KeyDown+=(s,e)=>{if(working&&e.KeyCode==Keys.Escape){CancelImport();e.Handled=true;}};
         var shell=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=2,RowCount=2,Margin=Padding.Empty,Padding=Padding.Empty};shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,220));shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));shell.RowStyles.Add(new RowStyle(SizeType.Percent,100));shell.RowStyles.Add(new RowStyle(SizeType.Absolute,38));Controls.Add(shell);
@@ -213,7 +246,7 @@ public sealed class Launcher : Form {
         var note=LabelAt("Files are copied into game-remix beside this launcher. No compiler, MSYS2 or download is used.\nUse a writable folder. Save and close the game first.",10,false);note.ForeColor=Muted;note.SetBounds(38,504,800,70);p.Controls.Add(note);
         ButtonAt(p,"Check game files",36,600,210,()=>VerifySetup());
     }
-    void ShowSettings(string cat){category=cat;var p=Standard("Settings","Settings",cat=="Startup"?"Startup options apply the next time you open ReDUB.":"Changes are saved for the next launch. Close the game before changing game settings here.");var categories=new[]{"Display","Graphics","Controls","Music","Mods","Advanced"};for(int i=0;i<categories.Length;i++){string c=categories[i];var b=ButtonAt(p,c,36,145+i*54,160,()=>ShowSettings(c));b.Selected=c==cat;}
+    void ShowSettings(string cat){category=cat;rowLayouts.Clear();var p=Standard("Settings","Settings",cat=="Startup"?"Startup options apply the next time you open ReDUB.":"Changes are saved for the next launch. Close the game before changing game settings here.");var categories=new[]{"Display","Graphics","Controls","Music","Mods","Advanced"};for(int i=0;i<categories.Length;i++){string c=categories[i];var b=ButtonAt(p,c,36,145+i*54,160,()=>ShowSettings(c));b.Selected=c==cat;}
         var card=new ScrollPanel {BackColor=Card,Location=new Point(220,145),Size=new Size(Math.Max(320,content.ClientSize.Width-256),Math.Max(320,content.ClientSize.Height-185)),Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right};p.Controls.Add(card);var heading=LabelAt(cat,17,true);heading.SetBounds(24,20,480,38);card.Controls.Add(heading);int y=84;
         if(cat=="Display"){Choice(card,ref y,"Window mode","MC3_FULLSCREEN",new[]{"Windowed","Borderless fullscreen","Exclusive fullscreen"},new[]{"0","1","2"},"0","Borderless gives the game the whole screen while keeping instant alt-tab.");Choice(card,ref y,"Resolution","MC3_RESOLUTION",new[]{"Automatic (desktop)","1280 × 720","1600 × 900","1920 × 1080","2560 × 1440","3840 × 2160"},new[]{"auto","1280x720","1600x900","1920x1080","2560x1440","3840x2160"},"auto","The window or fullscreen size. Automatic follows the desktop.");Choice(card,ref y,"Aspect ratio (restart)","RECOMP_GL_ASPECT",new[]{"Auto (16:9)","4:3","Stretch"},new[]{"auto","4:3","fill"},"auto","Auto shows a widescreen game at 16:9. 4:3 keeps the original shape with bars at the sides. Stretch fills the window.");Choice(card,ref y,"VSync","RECOMP_GL_VSYNC",new[]{"Off","On","Adaptive"},new[]{"0","1","-1"},"0","Waits for the screen between frames to stop tearing. Off can feel quicker and may tear.");Choice(card,ref y,"Gamma","MC3_GAMMA",new[]{"0.8","0.9","1.0","1.1","1.2","1.3","1.4"},new[]{"0.8","0.9","1","1.1","1.2","1.3","1.4"},"1","Mid-tone brightness. Raise it to see more in dark scenes without washing out the highlights.");Choice(card,ref y,"Brightness","MC3_BRIGHTNESS",new[]{"80%","85%","90%","95%","100%","105%","110%","115%","120%"},new[]{"0.8","0.85","0.9","0.95","1","1.05","1.1","1.15","1.2"},"1","Overall output level, applied after gamma.");Choice(card,ref y,"Pause when the window loses focus","RECOMP_PAUSE_ON_FOCUS",new[]{"Off","On"},new[]{"0","1"},"0","Opens the game's own pause menu when you switch to another window, so a race does not run on.");Choice(card,ref y,"Loading screen minimum","RECOMP_LOADING_MIN_MS",new[]{"As the game decides","0.5 s","1 s","1.5 s","2 s","3 s"},new[]{"0","500","1000","1500","2000","3000"},"0","Keeps a fast load's screen on screen for at least this long. The movie keeps animating while it waits.");}
         
@@ -276,6 +309,9 @@ public sealed class Launcher : Form {
             var rebuildHint=LabelAt("Use Install for normal setup. Game files and saves are kept.",9,false);rebuildHint.ForeColor=Muted;rebuildHint.SetBounds(24,y,Math.Max(400,card.Width-48),26);rebuildHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(rebuildHint);
         }
         card.AutoScrollMinSize=new Size(0,y+40);
+        /* Rows follow the card: one handler, run once here and on every
+         * resize, so no part of a row can drift away from another. */
+        card.SizeChanged+=(s,e)=>{foreach(Action fix in rowLayouts)fix();};
 
     }
     /* ---- keyboard rebinding ---------------------------------------------
@@ -347,17 +383,57 @@ public sealed class Launcher : Form {
         f.ShowDialog(this);
     }
     void Choice(Control host,ref int y,string name,string key,string[] labels,string[] vals,string fallback,string help=null){
-        /* The name column takes whatever room is left before the value: a fixed
-         * 220 px wrapped "Pause when the window loses focus" onto two lines,
-         * which pushed its second line into the gap under the row. */
-        int x=Math.Max(245,host.Width-270);
-        var title=LabelAt(name,10,false);title.TextAlign=ContentAlignment.MiddleLeft;title.SetBounds(24,y,Math.Max(180,x-48),42);host.Controls.Add(title);
+        var title=LabelAt(name,10,false);host.Controls.Add(title);
+        var label=LabelAt("",10,true);host.Controls.Add(label);
+        var left=ButtonAt(host,"\u276E",0,y,38,()=>{});
+        var right=ButtonAt(host,"\u276F",0,y,38,()=>{});
+        title.TextAlign=ContentAlignment.MiddleLeft;
+        label.TextAlign=ContentAlignment.MiddleCenter;
+        left.AccessibleName="Decrease "+name;
+        right.AccessibleName="Increase "+name;
+
         string value=ReadSetting(key,fallback);int ix=Array.IndexOf(vals,value);
         if(ix<0){double target;if(double.TryParse(value,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out target))for(int i=0;i<vals.Length;i++){double v;if(double.TryParse(vals[i],System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out v)&&Math.Abs(v-target)<.001)ix=i;}}if(ix<0)ix=0;
-        var label=LabelAt(labels[ix],10,true);label.SetBounds(x+42,y,160,42);label.TextAlign=ContentAlignment.MiddleCenter;label.Anchor=AnchorStyles.Right|AnchorStyles.Top;host.Controls.Add(label);
+        label.Text=labels[ix];
+
         Action<int> change=delta=>{try{if(GameRunning()){MessageBox.Show(this,"Save and close the game first. In-game Port Options can apply live changes.","Game is running");return;}int next=(ix+delta+vals.Length)%vals.Length;SavePreference(key,vals[next]);ix=next;label.Text=labels[ix];if(key=="MC3_GRAPHICS_PRESET")ShowSettings(category);else if(key=="MC3_WHEEL")ShowSettings("Controls");}catch(Exception ex){MessageBox.Show(this,ex.Message,"Could not save settings",MessageBoxButtons.OK,MessageBoxIcon.Error);}};
-        var left=ButtonAt(host,"❮",x,y,38,()=>change(-1));left.Anchor=AnchorStyles.Right|AnchorStyles.Top;left.AccessibleName="Decrease "+name;
-        var right=ButtonAt(host,"❯",x+206,y,38,()=>change(1));right.Anchor=AnchorStyles.Right|AnchorStyles.Top;right.AccessibleName="Increase "+name;
+        left.Click+=(s,e)=>{try{change(-1);}catch(Exception ex){MessageBox.Show(this,ex.Message,"ReDUB",MessageBoxButtons.OK,MessageBoxIcon.Error);}};
+        right.Click+=(s,e)=>{try{change(1);}catch(Exception ex){MessageBox.Show(this,ex.Message,"ReDUB",MessageBoxButtons.OK,MessageBoxIcon.Error);}};
+
+        /* One layout for the whole row, run now and again on every resize.
+         *
+         * These four controls used to be placed once from host.Width and then
+         * had Anchor=Right, so when the card grew the arrows moved right while
+         * the name label kept the width it was given -- and drew on top of the
+         * left arrow, hiding it. Measured before the fix: the name spanned
+         * x=24..396 and the button sat at x=335..373. Anchoring one part of a
+         * hand-placed row and not the other cannot work; nothing is anchored
+         * now and every part is recomputed together. */
+        int rowTop=y;   /* a lambda cannot capture the ref parameter itself */
+        Action layout=()=>{
+            /* Measured from the right edge inward, so the row still fits when
+             * the card is narrow: from the left, a fixed 206 px offset between
+             * the arrows overflows a DPI-scaled window (the card can be as
+             * narrow as ~520 px). Bounds are clamped so no part can ever land
+             * on top of another, whatever the card's width. */
+            int wide=Math.Max(380,host.ClientSize.Width);
+            /* Vertical position follows the scroll. A scrolled AutoScroll panel
+             * has already moved its children up, so writing the unscrolled
+             * rowTop would pull the rows back down, on top of the hint text and
+             * the Advanced button. */
+            ScrollableControl scrolled=host as ScrollableControl;
+            int top=rowTop+(scrolled==null?0:scrolled.AutoScrollPosition.Y);
+            int rightX=wide-8-38;
+            int leftX=rightX-206;
+            int labelX=leftX+42;
+            title.SetBounds(24,top,Math.Max(120,leftX-16-24),42);
+            label.SetBounds(labelX,top,Math.Max(70,rightX-4-labelX),42);
+            left.SetBounds(leftX,top,38,42);
+            right.SetBounds(rightX,top,38,42);
+        };
+        rowLayouts.Add(layout);
+        layout();
+
         /* The explanation is a tooltip, not page text. As page text it sat under
          * every row and made a long page longer -- twelve rows of grey prose
          * between the values, which read as clutter rather than help. A tooltip
@@ -366,6 +442,7 @@ public sealed class Launcher : Form {
         if(help!=null){tips.SetToolTip(title,help);tips.SetToolTip(label,help);tips.SetToolTip(left,help);tips.SetToolTip(right,help);}
         y+=62;
     }
+
     string SettingsPath(){string dir=RendererDist(root),selected=Path.Combine(dir,"mcdub3remix_env.txt");if(!File.Exists(selected)){string example=Path.Combine(dir,"mcdub3remix_env.example.txt");if(File.Exists(example)){try{File.Copy(example,selected);}catch{}}}if(File.Exists(selected))return selected;return PathAt("work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt");}
     public string ReadSetting(string key,string fallback){
         string value=ReadSettingFrom(SettingsPath(),key);
