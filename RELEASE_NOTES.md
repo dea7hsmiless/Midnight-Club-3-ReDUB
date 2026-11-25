@@ -77,6 +77,11 @@ a datagram forwarded by the relay counts as the hub being alive. A four-minute i
 the player in the census, and a synthetic player's 24-byte System Link broadcast reaches the
 game (`[XNET] rx ... 01 37 18 00`).
 
+The relay's own source ships on the release page as **`ReDUB-relay-server-0.2.5.zip`**. The
+game does not need it — it already uses a running server — but anyone who would rather host a
+room server can: the folder has the two Python scripts, a Dockerfile, a systemd unit and
+start scripts, and needs nothing outside Python 3.8.
+
 ### Your name, without editing files
 
 The launcher's **Online** page has **Your name** on Windows, Android and iOS. It follows the
