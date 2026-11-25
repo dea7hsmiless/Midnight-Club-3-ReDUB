@@ -740,8 +740,8 @@ public sealed class Launcher : Form {
             CarryPlayerState(game,staging,progress,cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             string old=null;
-            if(Directory.Exists(game)){old=game+".old-"+DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");Directory.Move(game,old);}
-            try{Directory.Move(staging,game);}
+            if(Directory.Exists(game)){old=game+".old-"+DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");MoveDirectory(game,old);}
+            try{MoveDirectory(staging,game);}
             catch{if(old!=null){try{Directory.Move(old,game);}catch{}}throw;}
             if(old!=null)try{Directory.Delete(old,true);}catch{}
             return edition;
@@ -765,6 +765,21 @@ public sealed class Launcher : Form {
         }
     }
     static void TryDelete(string path){try{if(Directory.Exists(path))Directory.Delete(path,true);}catch{}}
+
+    /* A directory a just-finished child process, a virus scanner or a backup
+     * tool still holds open cannot be moved or deleted for a moment; the retry
+     * is for that, not for a genuine failure, which is still reported. A
+     * test that fails once and passes on a rerun is how a real regression gets
+     * ignored. */
+    static void MoveDirectory(string from,string to){
+        for(int attempt=0;;attempt++){
+            try{Directory.Move(from,to);return;}
+            catch(Exception x){
+                if(attempt>=8||!(x is IOException||x is UnauthorizedAccessException))throw;
+                Thread.Sleep(150);
+            }
+        }
+    }
 
     /* Whether the game is up, without holding on to its process handles. */
     public static bool GameIsRunning(){
