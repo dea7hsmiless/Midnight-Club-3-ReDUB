@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -13,6 +13,9 @@ void nv2a_pb_exec_method(uint32_t channel,uint32_t method,uint32_t value)
     if(calls<4){methods[calls]=method;values[calls]=value;}calls++;
 }
 void nv2a_pb_exec_report(void) {}
+/* This branch's scanner counts desyncs; the counter lives on the exec side,
+ * which this unit test replaces with stubs. */
+void nv2a_pb_note_desync(void) {}
 uint32_t nv2a_pb_scan(uint32_t put);
 void nv2a_pb_resync(uint32_t get);
 #define RAM(at) (*(uint32_t *)(memory+0x80000000u+(at)))
