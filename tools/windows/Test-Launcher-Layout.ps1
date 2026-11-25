@@ -104,6 +104,18 @@ public class LayoutProbe {
         return top < 0 ? 0 : bottom - top + 1;
     }
 
+    // Top of the custom scrollbar's thumb: the first light pixel in the strip
+    // the panel paints over, from the top of the card.
+    static int ThumbTop(Bitmap b, Panel card) {
+        int col = card.ClientSize.Width - 5;
+        for (int y = 0; y < b.Height; y++) {
+            if (col < 0 || col >= b.Width) continue;
+            Color p = b.GetPixel(col, y);
+            if ((p.R + p.G + p.B) / 3 > 55) return y;
+        }
+        return -1;
+    }
+
     static string Short(string s) { return s.Length > 26 ? s.Substring(0, 26) : s; }
 
     [STAThread]
@@ -156,7 +168,10 @@ public class LayoutProbe {
                     foreach (Control o in card.Controls) {
                         if (Math.Abs(o.Top - name.Top) > 8) continue;   // same row band
                         Label v = o as Label;
-                        if (v != null && v != name && v.Left > name.Left + name.Width - 20) value = v;
+                        // The value sits right of the name in the same band. Test the
+                        // left edge, not the name's right edge: the name label is wide
+                        // enough to overlap the value in pre-layout coordinates.
+                        if (v != null && v != name && v.Left > name.Left + 120) value = v;
                         else if (!(o is Label) && !(o is Panel)) {
                             if (left == null || o.Left < left.Left) left = o;
                             if (right == null || o.Left > right.Left) right = o;
@@ -202,6 +217,36 @@ public class LayoutProbe {
             Check(cat + ": nothing wider than the card", outside == 0, outside + " rows overflow");
             Check(cat + ": scroll reaches the last row", scrollMax == 0 || scrollMax + card.ClientSize.Height >= bottom - 2,
                   "content " + bottom + " px, scroll " + scrollMax + " px, visible " + card.ClientSize.Height + " px");
+
+            // The bar itself. The native one is drawn in the system colour --
+            // a white strip on this dark card -- and Windows 26H2 will not
+            // theme it, so ScrollPanel paints its own. Two things to hold: no
+            // bright strip where the native bar would be, and a thumb that
+            // moves when the page does.
+            Bitmap full = new Bitmap(card.Width, card.Height);
+            card.AutoScrollPosition = new Point(0, 0);
+            Application.DoEvents();
+            card.DrawToBitmap(full, new Rectangle(0, 0, card.Width, card.Height));
+            int bright = 0;
+            for (int x = Math.Max(0, card.ClientSize.Width - 22); x < full.Width; x++)
+                for (int y = 40; y < full.Height - 40; y++) {
+                    Color p = full.GetPixel(x, y);
+                    if ((p.R + p.G + p.B) / 3 > 170) bright++;
+                }
+            Check(cat + ": no bright native scrollbar", bright < 40, bright + " light pixels in the bar strip");
+
+            int thumbTop = ThumbTop(full, card);
+            card.AutoScrollPosition = new Point(0, Math.Max(0, scrollMax));
+            Application.DoEvents();
+            Bitmap scrolled = new Bitmap(card.Width, card.Height);
+            card.DrawToBitmap(scrolled, new Rectangle(0, 0, card.Width, card.Height));
+            int thumbBottom = ThumbTop(scrolled, card);
+            if (scrollMax > 40) {
+                Check(cat + ": the scrollbar thumb moves with the page", thumbTop >= 0 && thumbBottom > thumbTop,
+                      "thumb from y=" + thumbTop + " to y=" + thumbBottom);
+            }
+            full.Dispose();
+            scrolled.Dispose();
         }
 
         app.Dispose();
@@ -224,6 +269,7 @@ public class LayoutProbe {
 finally {
     Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 }
+
 
 
 

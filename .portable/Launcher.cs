@@ -20,6 +20,108 @@ using System.IO.Compression;
 [assembly: AssemblyVersion("0.2.5.0")]
 [assembly: AssemblyFileVersion("0.2.5.0")]
 namespace ReDUB {
+/* A scrolling panel that draws its own scrollbar.
+ *
+ * The native WS_VSCROLL/WS_H_SCROLL bars are painted in the system colour: a
+ * bright white strip on this window's dark card, which reads as a broken
+ * control rather than a scrollbar. Windows 26H2 will not theme them -- 
+ * SetPreferredAppMode, AllowDarkModeForWindow and DwmSetWindowAttribute all
+ * report or return success without changing a pixel (measured: the strip stays
+ * 255/255 before and after). So the style is removed and the bar is painted
+ * here, in the card's own colours.
+ *
+ * WinForms still scrolls the panel when the style is gone: the wheel message
+ * still moves AutoScrollPosition (verified), and only the drawing was missing.
+ */
+public class ScrollPanel : Panel {
+    /* The native scrollbar is drawn in the system colour: a bright white strip
+     * on this window's dark card, which reads as a broken control. Windows 26H2
+     * will not theme it -- SetPreferredAppMode, AllowDarkModeForWindow and
+     * DwmSetWindowAttribute all report or return success without changing a
+     * pixel (measured: the strip stays 255/255) -- and removing the window
+     * style is not enough either, because WinForms shows the bar with
+     * ShowScrollBar on every layout.
+     *
+     * So AutoScroll stays on (WinForms keeps the scroll position and moves the
+     * children, which is the part that actually works), and the bar is hidden
+     * again after each layout and painted here in the card's own colours.
+     */
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool ShowScrollBar(IntPtr h, int bar, bool show);
+    const int SB_HORZ = 0, SB_VERT = 1;
+
+    public ScrollPanel(){
+        AutoScroll=true;
+        DoubleBuffered=true;
+        /* Children are moved by the panel, and the bar is drawn by us, so the
+         * panel must repaint while scrolled. */
+        SetStyle(ControlStyles.OptimizedDoubleBuffer|ControlStyles.AllPaintingInWmPaint|ControlStyles.UserPaint,true);
+    }
+
+    void HideBars(){
+        if(IsHandleCreated){
+            ShowScrollBar(Handle,SB_VERT,false);
+            ShowScrollBar(Handle,SB_HORZ,false);
+        }
+    }
+
+    protected override void OnLayout(LayoutEventArgs e){
+        base.OnLayout(e);
+        HideBars();
+    }
+    protected override void OnScroll(ScrollEventArgs se){
+        base.OnScroll(se);
+        HideBars();
+        Invalidate();
+    }
+    protected override void OnMouseWheel(MouseEventArgs e){
+        base.OnMouseWheel(e);
+        HideBars();
+        Invalidate();
+    }
+    protected override void OnHandleCreated(EventArgs e){
+        base.OnHandleCreated(e);
+        HideBars();
+    }
+
+    /* Thumb rectangle for a bar of `span` pixels showing `visible` of `total`. */
+    static Rectangle Thumb(int span,int visible,int total,int offset){
+        if(total<=visible)return Rectangle.Empty;
+        int size=Math.Max(28,span*visible/total);
+        int travel=span-size;
+        int at=travel<=0?0:offset*travel/(total-visible);
+        return new Rectangle(0,at,0,size);
+    }
+
+    protected override void OnPaint(PaintEventArgs e){
+        base.OnPaint(e);
+        VerticalBar(e.Graphics);
+        HorizontalBar(e.Graphics);
+    }
+
+    void VerticalBar(Graphics g){
+        int total=VerticalScroll.Maximum-VerticalScroll.Minimum+1;
+        if(total<=ClientSize.Height)return;
+        Rectangle t=Thumb(ClientSize.Height,ClientSize.Height,total,-AutoScrollPosition.Y);
+        if(t.IsEmpty)return;
+        var track=new Rectangle(ClientSize.Width-9,0,8,ClientSize.Height);
+        var thumb=new Rectangle(track.X+1,track.Y+t.Y,track.Width-2,Math.Max(20,t.Height));
+        using(var back=new SolidBrush(Color.FromArgb(28,38,60)))g.FillRectangle(back,track);
+        using(var grip=new SolidBrush(Color.FromArgb(74,92,124)))g.FillRectangle(grip,thumb);
+    }
+
+    void HorizontalBar(Graphics g){
+        int total=HorizontalScroll.Maximum-HorizontalScroll.Minimum+1;
+        if(total<=ClientSize.Width)return;
+        Rectangle t=Thumb(ClientSize.Width,ClientSize.Width,total,-AutoScrollPosition.X);
+        if(t.IsEmpty)return;
+        var track=new Rectangle(0,ClientSize.Height-9,ClientSize.Width,8);
+        var thumb=new Rectangle(track.X+t.Y,track.Y+1,Math.Max(20,t.Height),track.Height-2);
+        using(var back=new SolidBrush(Color.FromArgb(28,38,60)))g.FillRectangle(back,track);
+        using(var grip=new SolidBrush(Color.FromArgb(74,92,124)))g.FillRectangle(grip,thumb);
+    }
+}
+
 public class RedubButton : Control, IButtonControl {
     public bool Primary, Selected;
     sealed class ButtonAccessibility : ControlAccessibleObject {
@@ -83,7 +185,7 @@ public sealed class Launcher : Form {
     void Nav(Control host,string title,int x,int y,Action action){var b=new RedubButton {Text=title,Tag=title,BackColor=Rail};b.SetBounds(x,y,188,52);b.Click+=(s,e)=>action();host.Controls.Add(b);navigation.Add(b);}
     void Page(string name){page=name;if(play.Parent!=null)play.Parent.Controls.Remove(play);if(source.Parent!=null)source.Parent.Controls.Remove(source);if(log.Parent!=null)log.Parent.Controls.Remove(log);foreach(Control old in content.Controls.Cast<Control>().ToArray())old.Dispose();content.Controls.Clear();foreach(var b in navigation){b.Selected=(string)b.Tag==name;b.Invalidate();}}
     RedubButton ButtonAt(Control parent,string text,int x,int y,int width,Action action,bool primary=false){var b=new RedubButton {Text=text,Primary=primary};b.SetBounds(x,y,width,42);b.Click+=(s,e)=>{try{action();}catch(Exception ex){MessageBox.Show(this,ex.Message,"ReDUB",MessageBoxButtons.OK,MessageBoxIcon.Error);}};parent.Controls.Add(b);return b;}
-    Panel Standard(string name,string title,string help){Page(name);var p=new Panel {Dock=DockStyle.Fill,Padding=new Padding(36),AutoScroll=true};content.Controls.Add(p);var h=LabelAt(title,24,true);h.SetBounds(36,30,800,48);p.Controls.Add(h);var d=LabelAt(help,10,false);d.ForeColor=Muted;d.SetBounds(38,83,790,48);d.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;p.Controls.Add(d);return p;}
+    Panel Standard(string name,string title,string help){Page(name);var p=new ScrollPanel {Dock=DockStyle.Fill,Padding=new Padding(36)};content.Controls.Add(p);/* Sized from the page, not fixed: an 800 px heading inside a narrower page is what put a horizontal scrollbar across the bottom of Settings (a scaled display makes 1166 px of window into ~930 px of client, which is exactly where the fixed widths started to overflow). */int wide=Math.Max(240,content.ClientSize.Width-72);var h=LabelAt(title,24,true);h.SetBounds(36,30,wide,48);h.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;p.Controls.Add(h);var d=LabelAt(help,10,false);d.ForeColor=Muted;d.SetBounds(38,83,Math.Max(200,wide-2),48);d.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;p.Controls.Add(d);return p;}
     bool Ready(){return InstallationReady(root);}
     bool GameRunning(){var all=Process.GetProcessesByName("mcdub3remix");bool found=all.Length>0;foreach(var p in all)p.Dispose();return found;}
     void ShowHome(){Page("Game");bool ready=Ready(),runtime=RuntimePresent(root);var grid=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Padding=Padding.Empty,Margin=Padding.Empty};grid.RowStyles.Add(new RowStyle(SizeType.Percent,100));grid.RowStyles.Add(new RowStyle(SizeType.Absolute,240));content.Controls.Add(grid);grid.Controls.Add(new BrandPanel {Dock=DockStyle.Fill,Margin=Padding.Empty},0,0);
@@ -112,7 +214,7 @@ public sealed class Launcher : Form {
         ButtonAt(p,"Check game files",36,600,210,()=>VerifySetup());
     }
     void ShowSettings(string cat){category=cat;var p=Standard("Settings","Settings",cat=="Startup"?"Startup options apply the next time you open ReDUB.":"Changes are saved for the next launch. Close the game before changing game settings here.");var categories=new[]{"Display","Graphics","Controls","Music","Mods","Advanced"};for(int i=0;i<categories.Length;i++){string c=categories[i];var b=ButtonAt(p,c,36,145+i*54,160,()=>ShowSettings(c));b.Selected=c==cat;}
-        var card=new Panel {BackColor=Card,Location=new Point(220,145),Size=new Size(Math.Max(510,content.Width-256),Math.Max(420,content.Height-185)),Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right,AutoScroll=true};p.Controls.Add(card);var heading=LabelAt(cat,17,true);heading.SetBounds(24,20,480,38);card.Controls.Add(heading);int y=84;
+        var card=new ScrollPanel {BackColor=Card,Location=new Point(220,145),Size=new Size(Math.Max(320,content.ClientSize.Width-256),Math.Max(320,content.ClientSize.Height-185)),Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right};p.Controls.Add(card);var heading=LabelAt(cat,17,true);heading.SetBounds(24,20,480,38);card.Controls.Add(heading);int y=84;
         if(cat=="Display"){Choice(card,ref y,"Window mode","MC3_FULLSCREEN",new[]{"Windowed","Borderless fullscreen","Exclusive fullscreen"},new[]{"0","1","2"},"0","Borderless gives the game the whole screen while keeping instant alt-tab.");Choice(card,ref y,"Resolution","MC3_RESOLUTION",new[]{"Automatic (desktop)","1280 × 720","1600 × 900","1920 × 1080","2560 × 1440","3840 × 2160"},new[]{"auto","1280x720","1600x900","1920x1080","2560x1440","3840x2160"},"auto","The window or fullscreen size. Automatic follows the desktop.");Choice(card,ref y,"Aspect ratio (restart)","RECOMP_GL_ASPECT",new[]{"Auto (16:9)","4:3","Stretch"},new[]{"auto","4:3","fill"},"auto","Auto shows a widescreen game at 16:9. 4:3 keeps the original shape with bars at the sides. Stretch fills the window.");Choice(card,ref y,"VSync","RECOMP_GL_VSYNC",new[]{"Off","On","Adaptive"},new[]{"0","1","-1"},"0","Waits for the screen between frames to stop tearing. Off can feel quicker and may tear.");Choice(card,ref y,"Gamma","MC3_GAMMA",new[]{"0.8","0.9","1.0","1.1","1.2","1.3","1.4"},new[]{"0.8","0.9","1","1.1","1.2","1.3","1.4"},"1","Mid-tone brightness. Raise it to see more in dark scenes without washing out the highlights.");Choice(card,ref y,"Brightness","MC3_BRIGHTNESS",new[]{"80%","85%","90%","95%","100%","105%","110%","115%","120%"},new[]{"0.8","0.85","0.9","0.95","1","1.05","1.1","1.15","1.2"},"1","Overall output level, applied after gamma.");Choice(card,ref y,"Pause when the window loses focus","RECOMP_PAUSE_ON_FOCUS",new[]{"Off","On"},new[]{"0","1"},"0","Opens the game's own pause menu when you switch to another window, so a race does not run on.");Choice(card,ref y,"Loading screen minimum","RECOMP_LOADING_MIN_MS",new[]{"As the game decides","0.5 s","1 s","1.5 s","2 s","3 s"},new[]{"0","500","1000","1500","2000","3000"},"0","Keeps a fast load's screen on screen for at least this long. The movie keeps animating while it waits.");}
         
         if(cat=="Graphics"){Choice(card,ref y,"Preset","MC3_GRAPHICS_PRESET",new[]{"Custom","Performance","Balanced","Quality"},new[]{"0","1","2","3"},"0","One choice for the whole look. Custom appears once you change a setting below.");Choice(card,ref y,"Internal resolution","RECOMP_GL_SCALE",new[]{"1× native (720 × 480)","1.5× native (1080 × 720)","2× native (1440 × 960)","3× native (2160 × 1440)","5× native (3600 × 2400)"},new[]{"1","1.5","2","3","5"},"2","Renders the game larger, then shows it at your window's size: the biggest lever on sharpness and the biggest cost.");Choice(card,ref y,"Frame generation","RECOMP_FG",new[]{"Off","Crossfade","Motion-compensated"},new[]{"0","1","2"},"0","Adds a frame between real ones so motion looks smoother. No simulation cost; can smear on fast turns.");Choice(card,ref y,"Frame rate","MC3_FRAME_RATE",new[]{"30 FPS (Xbox)","60 FPS","120 FPS (needs a 120 Hz display)"},new[]{"30","60","120"},"30","30 is the console's own rate. Above it the game runs faster than the Xbox version; pick what your machine holds.");Choice(card,ref y,"HUD texture quality","RECOMP_GL_UI_SCALE",new[]{"1×","2×","3×","5×"},new[]{"1","2","3","5"},"2","Upscales the game's HUD art. Higher is sharper and costs a little graphics memory.");Choice(card,ref y,"Anti-aliasing","RECOMP_GL_FXAA",new[]{"Off","FXAA Low","FXAA","FXAA High"},new[]{"0","2","1","3"},"1","Smooths jagged edges. Higher levels smooth more and soften fine detail faster.");Choice(card,ref y,"Texture filtering","RECOMP_GL_ANISO",new[]{"1×","4×","16×"},new[]{"1","4","16"},"16","Keeps textures sharp when the road is seen at a shallow angle. Almost free.");Choice(card,ref y,"Sharpening","RECOMP_GL_SHARPEN",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0.5","Crisps edges after anti-aliasing. Too much shows as a bright rim around objects.");Choice(card,ref y,"Glow (restart)","RECOMP_GL_GLOW",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0","Bright things bleed light: streetlights, neon, headlights. Dark areas are left alone.");Choice(card,ref y,"Vignette (restart)","RECOMP_GL_VIGNETTE",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0","Darkens the corners of the picture, brightest in the middle.");Choice(card,ref y,"Colour (restart)","RECOMP_GL_COLOUR",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0","More colour and a warm tint, without changing how bright the scene is.");Choice(card,ref y,"Ambient occlusion (restart)","RECOMP_GL_AO",new[]{"Off","25%","50%","75%","100%"},new[]{"0","0.25","0.5","0.75","1"},"0","Soft shadows where surfaces meet: under the car, along kerbs, in corners.");var scaleHint=LabelAt("Internal resolution multiplies the game's 720 × 480 surface. 3× is 2160 × 1440, 5× is 3600 × 2400 (4K-class detail).",9,false);scaleHint.ForeColor=Muted;scaleHint.SetBounds(24,y+8,Math.Max(400,card.Width-48),40);scaleHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(scaleHint);y+=56;}
