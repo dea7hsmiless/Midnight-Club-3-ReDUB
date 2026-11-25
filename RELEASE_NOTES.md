@@ -53,6 +53,12 @@ checked on screen.
   kernel-summary traces are off by default now (`RECOMP_QUIET=0` restores them): one
   synchronous log write per 8 KB read was stalling the boot thread on I/O. The hang watch
   also reports a first-screen stall instead of ignoring it.
+- **Saves complete reliably.** The title's saves finish through an APC, and delivering one
+  used to clobber the interrupted CPU state, including the I/O status the write reports.
+  The APC now runs with the guest's registers, FPU state and argument frame preserved.
+- **Non-ASCII install paths.** The Windows host, the settings writer and the run log use
+  wide-character paths, so a disc folder such as `C:\Jeux\Édition` works for the disc,
+  the saves and the log.
 
 ### No settings file in the package
 
