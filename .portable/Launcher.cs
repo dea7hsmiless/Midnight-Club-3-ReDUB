@@ -669,6 +669,11 @@ public sealed class Launcher : Form {
     static void StartDirect(string root){
         var running=Process.GetProcessesByName("mcdub3remix");bool active=running.Length>0;foreach(var p in running)p.Dispose();if(active)return;
         if(!InstallationReady(root)){string[] problems=InstallationProblems(root);throw new IOException(problems.Length>0?problems[0]:"The game is not ready. Choose Install.");}
+        /* The game looks for game/default.xbe beside its exe unless it is told
+         * where the disc is, and Install puts the disc in <root>\game-remix.
+         * Without this line a fresh installation found nothing to load. Written
+         * once, and left alone if the player set their own. */
+        EnsureGameDir(root);
         /* The game is a window program: started on its own its output goes
          * nowhere, so a crash report sent from RecompLauncher arrives with no
          * log. cmd holds the redirect to work-remix/logs/latest.log, and stays
@@ -681,6 +686,32 @@ public sealed class Launcher : Form {
         Process.Start(psi);
     }
     static string RunLogPath(string root){string dir=Path.Combine(root,@"work-remix\logs");Directory.CreateDirectory(dir);return Path.Combine(dir,"latest.log");}
+
+    /* Write MC3_GAME_DIR=<root>\game-remix into the settings file if it is not
+     * there yet. A path the player set is kept as it is, even if it is wrong:
+     * silently rewriting it would hide a moved installation instead of saying
+     * so. */
+    static void EnsureGameDir(string root){
+        try{
+            string dir=RendererDist(root),path=Path.Combine(dir,"mcdub3remix_env.txt");
+            if(!Directory.Exists(dir))return;
+            if(!File.Exists(path)){
+                string example=Path.Combine(dir,"mcdub3remix_env.example.txt");
+                if(File.Exists(example))File.Copy(example,path);
+            }
+            if(!File.Exists(path))return;
+            foreach(var raw in File.ReadAllLines(path)){
+                string line=raw.Trim();
+                if(line.StartsWith("MC3_GAME_DIR=",StringComparison.Ordinal)&&line.Length>13)
+                    return;
+            }
+            var lines=new List<string>(File.ReadAllLines(path));
+            lines.Add("MC3_GAME_DIR="+Path.Combine(root,"game-remix"));
+            string tmp=path+".launcher-tmp";
+            File.WriteAllLines(tmp,lines,new UTF8Encoding(false));
+            File.Replace(tmp,path,null);
+        }catch{}
+    }
     public static bool IsSourceRoot(string path){return Directory.Exists(path)&&File.Exists(Path.Combine(path,@".portable\Build.ps1"))&&File.Exists(Path.Combine(path,"CMakeLists.txt"));}
     static void CliLog(string root,string message){try{string dir=Path.Combine(root,@"work-remix\logs");Directory.CreateDirectory(dir);File.AppendAllText(Path.Combine(dir,"launcher-cli.log"),DateTime.Now.ToString("s")+" "+message+Environment.NewLine,new UTF8Encoding(false));}catch{}}
     static int RunCommand(string root,string command,string[] args){
