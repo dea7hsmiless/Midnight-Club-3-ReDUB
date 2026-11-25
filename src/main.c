@@ -248,8 +248,231 @@ static void install_crash_reporter(void)
     sigaction(SIGFPE, &sa, NULL);
     signal(SIGUSR1, snapshot_signal);
 }
+#elif defined(_WIN32)
+/* ---- Windows crash reporting -------------------------------------------
+ *
+ * The POSIX side has had this for a while; Windows, the platform most players
+ * use, had an empty stub, so a crash there left a truncated log and nothing
+ * else. Two files are written on the way out:
+ *
+ *   crash-<time>.txt   the exception, the guest's registers and the Xbox
+ *                      return addresses and indirect calls, as plain text --
+ *                      readable in a message, no tools needed
+ *   build.txt          version, edition, OS and the settings that matter, so a
+ *                      report says what it is even when the log was lost
+ *
+ * A minidump was here first and was removed: MiniDumpWriteDump refuses with
+ * 0x80070066 unless the process holds SeDebugPrivilege, which a normal user's
+ * game session does not (verified on this machine, twice). The text report is
+ * what the POSIX handler provides anyway, and for a crash inside lifted code it
+ * is the more useful half: the host stack names a recomp_00xx.c line, the guest
+ * stack names the Xbox chain.
+ *
+ * A vector handler takes first-chance faults and the unhandled filter takes
+ * whatever gets past it. Both write and then let the exception continue:
+ * swallowing it would leave a game running on a corrupted heap, which is a
+ * worse bug later. */
+#include "windows_paths.h"
+
+static LONG WINAPI crash_filter(EXCEPTION_POINTERS *info);
+static LONG WINAPI crash_first_chance(EXCEPTION_POINTERS *info);
+
+static int      s_crash_busy;                 /* re-entry guard */
+static char     s_crash_txt[1024];
+static LONG     s_crash_listed;               /* first-chance chatter limit */
+
+static void crash_dir(char *out, size_t size)
+{
+    char exe[1024];
+    DWORD n = GetModuleFileNameA(NULL, exe, sizeof exe);
+
+    out[0] = 0;
+    if (n > 0 && n < sizeof exe) {
+        char *slash = strrchr(exe, '\\');
+        if (slash) {
+            /* ...\build-windows-x86_64\dist\mcdub3remix.exe -> ...\logs, which
+             * is where the launcher keeps the run log it asks players for. */
+            *slash = 0;
+            slash = strrchr(exe, '\\');
+            if (slash) {
+                *slash = 0;
+                slash = strrchr(exe, '\\');
+                if (slash) {
+                    DWORD attr;
+                    snprintf(out, size, "%.*s\\logs", (int)(slash - exe), exe);
+                    attr = GetFileAttributesA(out);
+                    if (attr == INVALID_FILE_ATTRIBUTES)
+                        CreateDirectoryA(out, NULL);      /* a fresh install has none yet */
+                    attr = GetFileAttributesA(out);
+                    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
+                        return;
+                }
+            }
+        }
+    }
+    GetCurrentDirectoryA((DWORD)size, out);      /* last resort: where it started */
+}
+
+/* The same facts the POSIX handler prints, into a file as well as the log. */
+static void crash_write_text(FILE *f, EXCEPTION_POINTERS *info, const char *what)
+{
+    EXCEPTION_RECORD *e = info->ExceptionRecord;
+    CONTEXT *c = info->ContextRecord;
+    unsigned k;
+
+    fprintf(f, "ReDUB crash report\n");
+    fprintf(f, "==================\n");
+    fprintf(f, "what      : %s\n", what);
+    fprintf(f, "exception : 0x%08lX at %p\n", (unsigned long)e->ExceptionCode,
+            e->ExceptionAddress);
+    if (e->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && e->NumberParameters >= 2) {
+        unsigned long long addr = (unsigned long long)e->ExceptionInformation[1];
+        const char *how = e->ExceptionInformation[0] == 1 ? "write"
+                        : e->ExceptionInformation[0] == 8 ? "execute" : "read";
+        fprintf(f, "fault     : %s of 0x%llX", how, addr);
+        if (g_xbox_mem_offset && addr >= g_xbox_mem_offset)
+            fprintf(f, " (guest VA 0x%08X)", (uint32_t)(addr - g_xbox_mem_offset));
+        fprintf(f, "\n");
+    }
+    fprintf(f, "version   : %s (%s)\n", MC3_VERSION, MC3_BUILD_ID);
+    fprintf(f, "edition   : %s\n", MC3_EDITION);
+    {
+        char exe[1024];
+        DWORD n = GetModuleFileNameA(NULL, exe, sizeof exe);
+        if (n > 0 && n < sizeof exe) fprintf(f, "module    : %s\n", exe);
+    }
+    fprintf(f, "\nhost registers\n--------------\n");
+    fprintf(f, "rip=%016llX rsp=%016llX rbp=%016llX\n",
+            (unsigned long long)c->Rip, (unsigned long long)c->Rsp,
+            (unsigned long long)c->Rbp);
+    fprintf(f, "rax=%016llX rbx=%016llX rcx=%016llX rdx=%016llX\n",
+            (unsigned long long)c->Rax, (unsigned long long)c->Rbx,
+            (unsigned long long)c->Rcx, (unsigned long long)c->Rdx);
+    fprintf(f, "rsi=%016llX rdi=%016llX r8 =%016llX r9 =%016llX\n",
+            (unsigned long long)c->Rsi, (unsigned long long)c->Rdi,
+            (unsigned long long)c->R8, (unsigned long long)c->R9);
+
+    /* The guest's view: registers, the return addresses still on the Xbox
+     * stack, the last indirect calls. This is the part that says which
+     * recompiled function was running and who called it. */
+    fprintf(f, "\nguest registers\n---------------\n");
+    fprintf(f, "thread    : %lu%s\n", (unsigned long)GetCurrentThreadId(),
+            g_esp ? "" : "  (not a guest thread: no Xbox context on this thread,"
+                         " so the registers below are empty by nature)");
+    fprintf(f, "eax=%08X ecx=%08X edx=%08X ebx=%08X\n", g_eax, g_ecx, g_edx, g_ebx);
+    fprintf(f, "esi=%08X edi=%08X esp=%08X\n", g_esi, g_edi, g_esp);
+    if (g_xbox_mem_offset && g_esp >= XBOX_STACK_BASE
+            && g_esp < XBOX_STACK_BASE + XBOX_STACK_SIZE) {
+        const uint32_t *sp = (const uint32_t *)((uintptr_t)g_xbox_mem_offset + g_esp);
+        int shown = 0, i;
+        fprintf(f, "\nguest stack (return addresses, innermost first)\n");
+        fprintf(f, "----------------------------------------------\n");
+        for (i = 0; i < 512 && shown < 32; i++) {
+            if (g_esp + (uint32_t)i * 4u >= XBOX_STACK_BASE + XBOX_STACK_SIZE)
+                break;
+            if (sp[i] > g_xbox_code_lo && sp[i] < g_xbox_code_hi) {
+                fprintf(f, "  [esp+%-4d] 0x%08X\n", i * 4, sp[i]);
+                shown++;
+            }
+        }
+    }
+    fprintf(f, "\nrecent ICALL targets:");
+    for (k = 0; k < 16; k++)
+        fprintf(f, " %08X", g_icall_trace[(g_icall_trace_idx + k) & 15]);
+    fprintf(f, "\n");
+    fflush(f);
+}
+
+static void crash_write_build(void)
+{
+    char dir[1024], path[1200];
+    FILE *f;
+    const char *keys[] = {
+        "MC3_FRAME_RATE", "RECOMP_GL_SCALE", "RECOMP_GL_FXAA", "RECOMP_GL_ANISO",
+        "RECOMP_GL_ASPECT", "RECOMP_GL_VSYNC", "RECOMP_GL_GLOW", "RECOMP_GL_AO",
+        "RECOMP_GL_VIGNETTE", "RECOMP_GL_COLOUR", "MC3_FULLSCREEN", "MC3_RESOLUTION",
+        "RECOMP_PAUSE_ON_FOCUS", "MC3_PLAYERS", "MC3_ROAM", "MC3_NETPLAY"
+    };
+    size_t i;
+
+    crash_dir(dir, sizeof dir);
+    snprintf(path, sizeof path, "%s\\build.txt", dir);
+    f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "version = %s\n", MC3_VERSION);
+    fprintf(f, "build   = %s\n", MC3_BUILD_ID);
+    fprintf(f, "edition = %s\n", MC3_EDITION);
+    fprintf(f, "os      = Windows %lu.%lu\n",
+            (unsigned long)(GetVersion() & 0xFF),
+            (unsigned long)((GetVersion() >> 8) & 0xFF));
+    for (i = 0; i < sizeof keys / sizeof keys[0]; i++) {
+        const char *v = getenv(keys[i]);
+        if (v && *v) fprintf(f, "%s = %s\n", keys[i], v);
+    }
+    fclose(f);
+}
+
+static LONG WINAPI crash_filter(EXCEPTION_POINTERS *info)
+{
+    static int handled;
+    char dir[1024], path[1200];
+    FILE *f;
+
+    if (handled || s_crash_busy) {
+        fprintf(stderr, "[CRASH] re-entered the crash handler; leaving\n");
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    handled = 1;
+    s_crash_busy = 1;
+
+    crash_dir(dir, sizeof dir);
+    snprintf(path, sizeof path, "%s\\crash-%s.txt", dir, s_crash_txt);
+    f = fopen(path, "w");
+    fprintf(stderr, "[CRASH] writing %s\n", path);
+    if (f) {
+        crash_write_text(f, info, "unhandled exception");
+        fclose(f);
+    }
+    /* The settings the run actually used, rewritten here rather than at
+     * startup only: a stale file next to a crash report is worse than none. */
+    crash_write_build();
+    fflush(stderr);
+    fprintf(stderr, "[CRASH] report written: %s\n", path);
+
+    s_crash_busy = 0;
+    return EXCEPTION_CONTINUE_SEARCH;   /* not swallowed */
+}
+
+/* First chance: log once per site, so a fault the runtime recovers from still
+ * leaves a trace, and a loop of them cannot fill the disk. */
+static LONG WINAPI crash_first_chance(EXCEPTION_POINTERS *info)
+{
+    DWORD code = info->ExceptionRecord->ExceptionCode;
+    if (code == 0xE06D7363) return EXCEPTION_CONTINUE_SEARCH;   /* C++ throw */
+    if (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_ILLEGAL_INSTRUCTION
+        || code == EXCEPTION_STACK_OVERFLOW || code == EXCEPTION_INT_DIVIDE_BY_ZERO) {
+        if (InterlockedIncrement(&s_crash_listed) <= 8)
+            fprintf(stderr, "  [CRASH] first chance 0x%08lX at %p\n",
+                    (unsigned long)code, info->ExceptionRecord->ExceptionAddress);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void install_crash_reporter(void)
+{
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    snprintf(s_crash_txt, sizeof s_crash_txt, "%04d%02d%02d-%02d%02d%02d",
+             now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+    SetUnhandledExceptionFilter(crash_filter);
+    AddVectoredExceptionHandler(1 /* first */, crash_first_chance);
+    {
+        char dir[1024];
+        crash_dir(dir, sizeof dir);
+        crash_write_build();
+    }
+}
 #else
-static void install_crash_reporter(void) {}
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -998,3 +1221,5 @@ int main(int argc, char **argv)
     return xbox_host_main_run(game_main_args, argc, argv);
 }
 #endif
+
+
