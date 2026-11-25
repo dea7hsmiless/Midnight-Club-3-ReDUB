@@ -26,6 +26,11 @@ Never modify `game-remix/` — it is the user's own disc data.
   the same `APP_VERSION`; CI fails otherwise (`Tests → Version and release notes`).
 - **Never move a published tag.** If a release is broken, bump the patch and publish a new
   one. `gh release create --verify-tag` prevents publishing a tag that did not exist.
+- **Commit as the repository identity.** Author and committer are
+  `Dea7hsmiles <188018312+dea7hsmiless@users.noreply.github.com>`; `git config user.name` and
+  `user.email` already say so, and `git -c user.email=...` must not override them. Placeholder
+  identities (`redub@local`, `redub@localhost`) are mapped by `.mailmap` and are not rewritten:
+  rewriting them would move the `v0.2.5` tag, which the rule above forbids.
 - **Source files are UTF-8 with BOM.** Never rewrite them with PowerShell
   `Get-Content`/`Set-Content`; that produced a double-encoded launcher once. Use an editor or
   `[IO.File]::ReadAllText/WriteAllText` with an explicit `UTF8Encoding`.
