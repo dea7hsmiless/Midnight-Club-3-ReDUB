@@ -6530,8 +6530,10 @@ void nv2a_gl_fill_hold(int delta)
 static GLint  s_fx_rcp, s_fx_max, s_fx_sharp, s_fx_full, s_fx_crop, s_fx_band, s_fx_fill;
 static GLint  s_fx_steady, s_fx_gamma, s_fx_brightness, s_fx_aa;
 static GLint  s_fx_glow, s_fx_vig, s_fx_colour, s_fx_play;
+static GLint  s_fx_ao, s_fx_ao_radius, s_fx_drcp, s_fx_depth;
 static float  s_fx_sharpness = -1.0f;
 static float  s_fx_glow_k, s_fx_vig_k, s_fx_colour_k;   /* 0..1, from the env file */
+static float  s_fx_ao_k, s_fx_ao_radius_k;
 static int    s_fx_on = -1;
 
 /* A 0..1 presentation setting from the env file; anything unparsable keeps the
@@ -6543,6 +6545,57 @@ static float env01(const char *name, float fallback)
     if (!e || !*e) return fallback;
     float v = (float)atof(e);
     return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v;
+}
+
+/* ---- ambient occlusion (RECOMP_GL_AO) --------------------------------
+ *
+ * Sampled from the scene's own depth, as mc3port does: a pixel that sits
+ * behind the mean of two opposite neighbours is in a crease, and the picture
+ * is multiplied darker there. No normals, no noise, no blur pass.
+ *
+ * The depth lives in a renderbuffer on the surface's framebuffer, which cannot
+ * be sampled, so each presented frame copies it into a depth texture first:
+ * one full-surface blit per frame while the effect is on, and nothing while it
+ * is off. */
+static GLuint   s_ao_tex, s_ao_fbo;
+static uint32_t s_ao_w, s_ao_h;
+
+static int ao_depth_texture(GlSurf *s)
+{
+    if (!s || !s->ds)
+        return 0;
+    if (!s_ao_tex) {
+        glGenTextures(1, &s_ao_tex);
+        glBindTexture(GL_TEXTURE_2D, s_ao_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        tex_param_forget(s_ao_tex);
+        glGenFramebuffers(1, &s_ao_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, s_ao_fbo);
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+        s_ao_w = s_ao_h = 0;
+    }
+    if (s->pw != s_ao_w || s->ph != s_ao_h) {
+        glBindTexture(GL_TEXTURE_2D, s_ao_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8,
+                     (GLsizei)s->pw, (GLsizei)s->ph, 0,
+                     GL_DEPTH_STENCIL, 0x84FAu /* GL_UNSIGNED_INT_24_8 */, NULL);
+        glBindFramebuffer(GL_FRAMEBUFFER, s_ao_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                               GL_TEXTURE_2D, s_ao_tex, 0);
+        s_ao_w = s->pw;
+        s_ao_h = s->ph;
+        tex_bind_forget();
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, s->fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s_ao_fbo);
+    glBlitFramebuffer(0, 0, (GLint)s->pw, (GLint)s->ph,
+                      0, 0, (GLint)s->pw, (GLint)s->ph,
+                      GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    return 1;
 }
 
 static int fxaa_init(void)
@@ -6577,6 +6630,9 @@ static int fxaa_init(void)
         "float LA(vec2 p) { return L(S(p)); }\n"
         "uniform float u_glow, u_vignette, u_colour;\n"
         "uniform int u_play;           /* gameplay only: menus keep their text */\n"
+        "uniform sampler2D u_depth;\n"
+        "uniform vec2 u_drcp;          /* one depth texel */\n"
+        "uniform float u_ao, u_ao_radius;  /* strength 0..1, radius in texels */\n"
         "/* Glow: one ring of 8 taps around the pixel, weighted by brightness above\n"
         " * a threshold, added back before grading. Deliberately one radius: a\n"
         " * second, wider ring costs 8 more samples for a halo the eye does not\n"
@@ -6607,8 +6663,33 @@ static int fxaa_init(void)
         "    float d = dot(q, q) * 2.0;               /* ~0 centre, ~1 corner */\n"
         "    return mix(1.0, clamp(1.3 - 0.5 * d, 0.0, 1.0), u_vignette);\n"
         "}\n"
+        "/* Ambient occlusion from depth alone: 1 - depth is proportional to 1/z, so\n"
+        " * on a plane the pixel matches the mean of two opposite neighbours and in\n"
+        " * a crease it sits behind them. A large difference is an outline in front,\n"
+        " * not a crease, and is left out of both the sum and the count -- counting\n"
+        " * it as open lit a halo around pedestrians and lamp posts. The twelve\n"
+        " * angles are fixed per screen position: rotating them per pixel left a\n"
+        " * grain that showed through the neon. */\n"
+        "float aoAt(vec2 uv) {\n"
+        "    float centre = 1.0 - texture(u_depth, uv).r;\n"
+        "    if (centre <= 1e-5) return 1.0;              /* cleared far plane: sky */\n"
+        "    float occ = 0.0, counted = 0.0;\n"
+        "    for (int i = 0; i < 12; i++) {\n"
+        "        float a = float(i) * 0.2617994;           /* 15 degrees apart */\n"
+        "        float r = u_ao_radius * (0.35 + 0.65 * float((i * 5 + 3) % 12) / 11.0);\n"
+        "        vec2 o = vec2(cos(a), sin(a)) * r * u_drcp;\n"
+        "        float one = 1.0 - texture(u_depth, clamp(uv + o, vec2(0.0), vec2(1.0))).r;\n"
+        "        float two = 1.0 - texture(u_depth, clamp(uv - o, vec2(0.0), vec2(1.0))).r;\n"
+        "        float crease = ((one + two) * 0.5 - centre) / centre;\n"
+        "        float weight = 1.0 - smoothstep(0.15, 0.4, crease);\n"
+        "        occ += clamp(crease * 40.0, 0.0, 1.0) * weight;\n"
+        "        counted += weight;\n"
+        "    }\n"
+        "    return 1.0 - u_ao * occ / max(counted, 3.0);\n"
+        "}\n"
         "vec3 graded(vec2 uv, vec3 c) {\n"
         "    if (u_play == 0) return c;\n"
+        "    if (u_ao > 0.0) c *= aoAt(uv);\n"
         "    if (u_glow > 0.0) c = min(c + glowAt(uv, u_rcp) * (1.5 * u_glow), vec3(1.0));\n"
         "    if (u_colour > 0.0) c = mix(c, colourAt(c), u_colour);\n"
         "    return c;\n"
@@ -6735,12 +6816,26 @@ static int fxaa_init(void)
     s_fx_vig = glGetUniformLocation(s_fx_prog, "u_vignette");
     s_fx_colour = glGetUniformLocation(s_fx_prog, "u_colour");
     s_fx_play = glGetUniformLocation(s_fx_prog, "u_play");
+    s_fx_ao = glGetUniformLocation(s_fx_prog, "u_ao");
+    s_fx_ao_radius = glGetUniformLocation(s_fx_prog, "u_ao_radius");
+    s_fx_drcp = glGetUniformLocation(s_fx_prog, "u_drcp");
+    s_fx_depth = glGetUniformLocation(s_fx_prog, "u_depth");
     s_fx_glow_k = env01("RECOMP_GL_GLOW", 0.0f);
     s_fx_vig_k = env01("RECOMP_GL_VIGNETTE", 0.0f);
     s_fx_colour_k = env01("RECOMP_GL_COLOUR", 0.0f);
+    s_fx_ao_k = env01("RECOMP_GL_AO", 0.0f);
+    {
+        /* Radius as a multiple of the 14 texels mc3port uses at 1x. */
+        const char *e = getenv("RECOMP_GL_AO_RADIUS");
+        float r = e && *e ? (float)atof(e) : 1.0f;
+        s_fx_ao_radius_k = r < 0.2f ? 0.2f : r > 4.0f ? 4.0f : r;
+    }
     if (s_fx_glow_k > 0.0f || s_fx_vig_k > 0.0f || s_fx_colour_k > 0.0f)
         fprintf(stderr, "  [GL] post: glow %g, vignette %g, colour %g\n",
                 s_fx_glow_k, s_fx_vig_k, s_fx_colour_k);
+    if (s_fx_ao_k > 0.0f)
+        fprintf(stderr, "  [GL] ambient occlusion %g, radius %gx\n",
+                s_fx_ao_k, s_fx_ao_radius_k);
     {
         /* RECOMP_GL_SHARPEN: 0..1 (default 0.5, 0 = off), AMD CAS's
          * "sharpness": the negative lobe -1/mix(8, 5, k). */
@@ -6754,6 +6849,7 @@ static int fxaa_init(void)
     glUseProgram(s_fx_prog);
     glUniform1i(glGetUniformLocation(s_fx_prog, "u_tex"), 0);
     glUniform1i(glGetUniformLocation(s_fx_prog, "u_state"), 1);
+    glUniform1i(glGetUniformLocation(s_fx_prog, "u_depth"), 2);
     s_cur_prog = s_fx_prog;
     glGenVertexArrays(1, &s_fx_vao);
     return 1;
@@ -7357,11 +7453,13 @@ static int  fg_second(void) { return 0; }
 
 static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
 {
-    float rcp[2], mx[2], full[4], crop[4], band[2];
+    float rcp[2], mx[2], full[4], crop[4], band[2], drcp[2];
     uint32_t vw = present_width(s);
     int fill = 0, held43 = 0;
     if (!fxaa_init())
         return 0;
+    /* This frame's depth as a texture, for the occlusion. Off: no blit at all. */
+    int ao_on = s_fx_ao_k > 0.0f && ao_depth_texture(s);
     /* Held (nv2a_gl_fill_hold: MC3's boot movies): a 4:3 picture the title
      * centred in a widescreen frame is shown at its own 4:3 shape -- the
      * middle 640 columns in a 4:3 rectangle -- not stretched with the
@@ -7385,6 +7483,7 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
     glUseProgram(s_fx_prog);
     s_cur_prog = s_fx_prog;
     rcp[0] = 1.0f / (float)s->pw;            rcp[1] = 1.0f / (float)s->ph;
+    drcp[0] = rcp[0];                        drcp[1] = rcp[1];
     /* texture u of title column c is c / w (stored columns scale alike) */
     full[0] = 0.0f; full[1] = (float)vw / (float)s->w; full[2] = 0.0f; full[3] = 1.0f;
     if (held43) {
@@ -7435,6 +7534,10 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
     glUniform1f(s_fx_glow, s_fx_glow_k);
     glUniform1f(s_fx_vig, s_fx_vig_k);
     glUniform1f(s_fx_colour, s_fx_colour_k);
+    glUniform1f(s_fx_ao, ao_on ? s_fx_ao_k : 0.0f);
+    glUniform1f(s_fx_ao_radius, 14.0f * s_fx_ao_radius_k *
+                ((float)s->pw / (float)(s->w ? s->w : 1)));
+    glUniform2fv(s_fx_drcp, 1, drcp);
     int aa_mode=s_fx_on;
     int play_mode=1;                 /* menus keep their text; see graded() */
 #if defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
@@ -7475,6 +7578,9 @@ static int present_fxaa(GlSurf *s, GLint sw, int dx, int dy, int dw, int dh)
     }
     active_unit(0);
     bind_tex(s->tex);
+    active_unit(2);
+    bind_tex(ao_on ? s_ao_tex : 0);
+    active_unit(0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

@@ -190,6 +190,8 @@ typedef struct __GLsync *GLsync;
     X(void, glFramebufferRenderbuffer, (GLenum, GLenum, GLenum, GLuint)) \
     X(GLenum, glCheckFramebufferStatus, (GLenum)) \
     X(void, glBlitFramebuffer, (GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum)) \
+    X(void, glDrawBuffer, (GLenum)) \
+    X(void, glReadBuffer, (GLenum)) \
     X(void, glCopyTexSubImage2D, (GLenum, GLint, GLint, GLint, GLint, GLint, GLsizei, GLsizei)) \
     X(void, glGenRenderbuffers, (GLsizei, GLuint *)) \
     X(void, glDeleteRenderbuffers, (GLsizei, const GLuint *)) \
@@ -327,6 +329,8 @@ int nv2a_gl_load(void *(*getproc)(const char *name));
 #define glFramebufferRenderbuffer p_glFramebufferRenderbuffer
 #define glCheckFramebufferStatus p_glCheckFramebufferStatus
 #define glBlitFramebuffer        p_glBlitFramebuffer
+#define glDrawBuffer             p_glDrawBuffer
+#define glReadBuffer             p_glReadBuffer
 #define glCopyTexSubImage2D      p_glCopyTexSubImage2D
 #define glGenRenderbuffers       p_glGenRenderbuffers
 #define glDeleteRenderbuffers    p_glDeleteRenderbuffers

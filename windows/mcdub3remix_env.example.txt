@@ -55,6 +55,11 @@
 #RECOMP_GL_VIGNETTE=0
 # Colour: a little more contrast and saturation, and a warm highlight.
 #RECOMP_GL_COLOUR=0
+# Ambient occlusion: creases, contacts and the inside of corners darkened from
+# the scene's own depth, like a soft shadow. The radius is a multiple of the
+# default (0.2 .. 4).
+#RECOMP_GL_AO=0
+#RECOMP_GL_AO_RADIUS=1
 
 # Vertical sync: 0 off, 1 on, -1 adaptive.
 #RECOMP_GL_VSYNC=0
