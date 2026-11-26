@@ -109,6 +109,14 @@ and the title's own settings with it. The import now stages the copy, verifies i
 player's UDATA/TDATA across, and only then swaps the folder in. It also refuses while the game
 is running, since a running game holds those files open.
 
+### Android and iOS rebuilt
+
+Both mobile builds are now made from the same tree as everything else, on a Windows PC: the
+APK through the Android SDK and NDK, the IPA through clang and the iPhoneOS SDK with no Mac.
+The APK carries arm64, armv7 and x86_64; the IPA is arm64 and unsigned, for Sideloadly or
+AltStore to sign with your own certificate (it asks for the increased memory limit the game
+needs).
+
 ### Known issues
 
 - **Crashes inside guest code still produce no report on Windows** if the fault is a hang
@@ -117,7 +125,9 @@ is running, since a running game holds those files open.
   corrupted pointer pointing at" often is not.
 - **The pause-on-focus menu** was verified as a hook firing; the menu appearing was not
   recorded on screen.
-- **Controller and phone builds are unchanged** from 0.2.5.
+- **The Android APK is signed with a new key.** The 0.2.5 release key was lost with
+  the build kit, so this APK cannot install over a 0.2.5 install: Android rejects an
+  update signed with a different key. Uninstall the old app first, or keep 0.2.5.
 
 ### Not in this release
 
