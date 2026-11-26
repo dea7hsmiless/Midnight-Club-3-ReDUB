@@ -143,7 +143,7 @@ So this release carries two builds of the same game, same version, same key:
 | File | What it declares | Use it when |
 |---|---|---|
 | `ReDUB-0.2.6-android.apk` | notification listener + all-files access | you can install it, and want the now-playing radio and a disc from anywhere on the phone |
-| `ReDUB-0.2.6-android-nomusic.apk` | neither | Android refuses the first one |
+| `ReDUB-0.2.6-android-lite.apk` | neither | Android refuses the first one |
 
 The second build is the same game. It loses the phone-music bridge and the ability to read a disc
 from a folder outside the app's own, and nothing else. It installs like any normal APK, because

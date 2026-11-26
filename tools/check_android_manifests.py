@@ -4,7 +4,7 @@
 The release ships two APKs from one source tree:
 
   src/main/AndroidManifest.xml     the normal build (music, all-files access)
-  src/nomusic/AndroidManifest.xml  -PMC3_MUSIC=0, the one Play Protect installs
+  src/lite/AndroidManifest.xml  -PMC3_MUSIC=0, the one Play Protect installs
                                    from a browser where enhanced fraud
                                    protection runs
 
@@ -15,8 +15,8 @@ of one document drift; this refuses the drift instead of trusting the comment.
 
 Exactly two differences are allowed, and nothing else:
 
-  1. `android.permission.MANAGE_EXTERNAL_STORAGE` is absent from nomusic.
-  2. the `.MediaSessionListener` service is absent from nomusic
+  1. `android.permission.MANAGE_EXTERNAL_STORAGE` is absent from lite.
+  2. the `.MediaSessionListener` service is absent from lite
      (that declaration is what becomes BIND_NOTIFICATION_LISTENER_SERVICE).
 
     python tools/check_android_manifests.py [--repo DIR]
@@ -102,7 +102,7 @@ def main(argv=None):
 
     root = Path(args.repo)
     full_path = root / "android/app/src/main/AndroidManifest.xml"
-    no_path = root / "android/app/src/nomusic/AndroidManifest.xml"
+    no_path = root / "android/app/src/lite/AndroidManifest.xml"
     for p in (full_path, no_path):
         if not p.exists():
             raise SystemExit(f"missing manifest: {p}")
@@ -117,23 +117,23 @@ def main(argv=None):
         if full[key] != nomu[key]:
             only_full = full[key] - nomu[key] if isinstance(full[key], set) else None
             only_nomu = nomu[key] - full[key] if isinstance(nomu[key], set) else None
-            problems.append(f"{key} differs (only in main: {only_full}; only in nomusic: {only_nomu})")
+            problems.append(f"{key} differs (only in main: {only_full}; only in lite: {only_nomu})")
 
     # permissions: exactly one removed
     dropped = full["permissions"] - nomu["permissions"]
     added = nomu["permissions"] - full["permissions"]
     if dropped != {DROP_PERMISSION}:
-        problems.append(f"nomusic must drop exactly {DROP_PERMISSION}; it drops {sorted(dropped)}")
+        problems.append(f"lite must drop exactly {DROP_PERMISSION}; it drops {sorted(dropped)}")
     if added:
-        problems.append(f"nomusic declares permissions main does not: {sorted(added)}")
+        problems.append(f"lite declares permissions main does not: {sorted(added)}")
 
     # services: exactly one removed, by name
     s_dropped = set(full["services"]) - set(nomu["services"])
     s_added = set(nomu["services"]) - set(full["services"])
     if s_dropped != {DROP_SERVICE}:
-        problems.append(f"nomusic must drop exactly {DROP_SERVICE}; it drops {sorted(s_dropped)}")
+        problems.append(f"lite must drop exactly {DROP_SERVICE}; it drops {sorted(s_dropped)}")
     if s_added:
-        problems.append(f"nomusic declares services main does not: {sorted(s_added)}")
+        problems.append(f"lite declares services main does not: {sorted(s_added)}")
     # A service kept in main under the same name must be identical there.
     for name in set(full["services"]) & set(nomu["services"]):
         if full["services"][name] != nomu["services"][name]:
@@ -144,14 +144,14 @@ def main(argv=None):
     # remain, however it got there.
     banned = nomu["permissions"] & BANNED_PERMISSIONS
     if banned:
-        problems.append(f"nomusic still declares sensitive permission(s): {sorted(banned)}")
+        problems.append(f"lite still declares sensitive permission(s): {sorted(banned)}")
     for name, (_attrs, perm) in nomu["services"].items():
         if perm in BANNED_SERVICE_PERMISSIONS:
-            problems.append(f"nomusic still declares service {name} with {perm}")
+            problems.append(f"lite still declares service {name} with {perm}")
     # If main stops carrying the permission this build exists to remove, the
     # two manifests no longer need to differ: say so instead of passing quietly.
     if DROP_PERMISSION not in full["permissions"]:
-        problems.append(f"main no longer declares {DROP_PERMISSION}: the nomusic build is redundant, update this checker")
+        problems.append(f"main no longer declares {DROP_PERMISSION}: the lite build is redundant, update this checker")
 
     if problems:
         print("check_android_manifests: FAIL")
@@ -161,7 +161,7 @@ def main(argv=None):
 
     print(f"check_android_manifests: PASS ({len(full['permissions'])} permissions, "
           f"{len(full['activities'])} activities, {len(full['services'])} service(s); "
-          f"nomusic drops {DROP_PERMISSION} and {DROP_SERVICE})")
+          f"lite drops {DROP_PERMISSION} and {DROP_SERVICE})")
     return 0
 
 

@@ -138,7 +138,7 @@ android {
             // all-files access. A whole file, not an overlay, because the
             // merger cannot remove the service's permission attribute cleanly.
             if (!musicEnabled)
-                manifest.srcFile 'src/nomusic/AndroidManifest.xml'
+                manifest.srcFile 'src/lite/AndroidManifest.xml'
         }
     }
     signingConfigs {
@@ -161,13 +161,13 @@ android {
         }
     }
     // <app>-<version>.apk (mcdub3-0.1.0.apk, a beta mcdub3-0.1.0-beta.3.apk);
-    // debug builds -debug.apk. The -PMC3_MUSIC=0 build is -nomusic, so the two
+    // debug builds -debug.apk. The -PMC3_MUSIC=0 build is -lite, so the two
     // never overwrite each other in the output folder.
     applicationVariants.all { variant ->
         variant.outputs.all {
             def abiTag = abis.size() > 1 ? '-universal'
                          : abis[0] == 'arm64-v8a' ? '' : "-${abis[0]}"
-            outputFileName = "${app}-${versionLabel}${abiTag}${musicEnabled ? '' : '-nomusic'}${variant.buildType.name == 'release' ? '' : '-debug'}.apk"
+            outputFileName = "${app}-${versionLabel}${abiTag}${musicEnabled ? '' : '-lite'}${variant.buildType.name == 'release' ? '' : '-debug'}.apk"
         }
     }
     packagingOptions {
