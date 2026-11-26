@@ -115,7 +115,7 @@ else
   fi
 fi
 
-# 8. The two Android manifests stay in step (docs/ANDROID-INSTALL.md).
+# 8. The two Android manifests stay in step.
 # The no-music APK exists so Play Protect will install it; if the two manifests
 # drift it could ship with the permission it was built to remove, so compare them.
 if [ -f android/app/src/compat/AndroidManifest.xml ]; then

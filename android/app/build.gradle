@@ -57,7 +57,7 @@ def genDir = System.getenv('MC3_WORK') ? new File(System.getenv('MC3_WORK'), 'ge
 
 // -PMC3_MUSIC=0 builds the APK that asks for no sensitive permission, which is
 // the only variant Google Play Protect will install from a browser in the
-// regions where its enhanced fraud protection runs (docs/ANDROID-INSTALL.md).
+// regions where its enhanced fraud protection runs.
 // It swaps in a second manifest rather than using a product flavour, so the
 // task names stay assembleDebug / assembleRelease for both builds.
 def musicEnabled = !(project.hasProperty('MC3_MUSIC') && project.MC3_MUSIC.toString() == '0')

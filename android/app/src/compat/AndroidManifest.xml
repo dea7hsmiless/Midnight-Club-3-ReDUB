@@ -4,7 +4,7 @@
      This is the -PMC3_MUSIC=0 build. It is the same game as
      src/main/AndroidManifest.xml with two declarations removed, because
      Google Play Protect refuses to install an internet-sideloaded APK that
-     asks for either of them (see docs/ANDROID-INSTALL.md):
+     asks for either of them:
 
        - the notification listener (BIND_NOTIFICATION_LISTENER_SERVICE),
          which only exists so the in-game radio can read the phone's current
