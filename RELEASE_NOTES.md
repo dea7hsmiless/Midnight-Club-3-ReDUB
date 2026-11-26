@@ -163,6 +163,26 @@ If you would rather keep the full build: `adb install` is not one of the checked
 installs without the block and Play Protect stays on. On a Samsung phone, turn off Auto Blocker
 first, since it blocks USB installs as well.
 
+### Upgrading from 0.2.5 on Android: back up first
+
+0.2.6 is signed with a new key, so Android refuses it as an update over 0.2.5 and it has to be
+uninstalled first. **Uninstalling deletes the app's own folder, and that is where the disc copy
+and the saves usually live** — the career is `save/` inside the game folder. Copy the folder out
+before you uninstall, then point the new install at it.
+
+- **Full APK:** copy the game folder to somewhere else first, such as `Download/ReDUB` or an SD
+  card. Uninstall, install 0.2.6, and choose that folder on the start screen. Nothing is lost.
+- **Compat APK:** it has no all-files access, so it cannot read a disc from elsewhere on the
+  phone. Copy the folder back over `adb` instead — `adb` can read `Android/data`, Android's own
+  file managers cannot:
+
+```
+adb pull /sdcard/Android/data/io.github.laureladastra.mcdub3remix/files redub-backup
+adb uninstall io.github.laureladastra.mcdub3remix
+adb install ReDUB-0.2.6-android-compat.apk
+adb push redub-backup/files /sdcard/Android/data/io.github.laureladastra.mcdub3remix/
+```
+
 ### Known issues
 
 - **Crashes inside guest code still produce no report on Windows** if the fault is a hang
@@ -171,9 +191,10 @@ first, since it blocks USB installs as well.
   corrupted pointer pointing at" often is not.
 - **The pause-on-focus menu** was verified as a hook firing; the menu appearing was not
   recorded on screen.
-- **The Android APK is signed with a new key.** The 0.2.5 release key was lost with
-  the build kit, so this APK cannot install over a 0.2.5 install: Android rejects an
-  update signed with a different key. Uninstall the old app first, or keep 0.2.5.
+- **Android has to be uninstalled before 0.2.6, and that deletes your game folder** — disc copy
+  and career alike. This build is signed with a new key (the 0.2.5 one was lost with the build
+  kit), so Android will not install it over 0.2.5. Copy the folder out first, as described under
+  *Upgrading from 0.2.5 on Android*. Staying on 0.2.5 is also fine.
 
 ### Not in this release
 
