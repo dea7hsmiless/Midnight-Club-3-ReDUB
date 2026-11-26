@@ -253,6 +253,27 @@ public class LayoutProbe {
                     if (boxes[i].IntersectsWith(boxes[j])) { clashes++; }
             Check(cat + ": nothing overlaps when scrolled to the bottom", clashes == 0,
                   clashes + " overlapping pairs of " + boxes.Count + " visible controls");
+            // Every row must explain itself on hover. The descriptions are a
+            // table keyed by setting name, so a row added without one is a row
+            // that says nothing.
+            FieldInfo tipsField2 = type.GetField("tips", BindingFlags.NonPublic | BindingFlags.Instance);
+            ToolTip tips2 = (ToolTip)tipsField2.GetValue(app);
+            int rowsSeen = 0, rowsWithTip = 0;
+            foreach (Control c in card.Controls) {
+                Label n = c as Label;
+                if (n == null || n.Height != 42 || n.Width < 180) continue;
+                bool peer = false;
+                foreach (Control o in card.Controls)
+                    if (o != n && Math.Abs(o.Top - n.Top) < 8 && o.Left > n.Left + 120) peer = true;
+                if (!peer) continue;
+                rowsSeen++;
+                string tip = tips2.GetToolTip(n);
+                if (tip != null && tip.Length > 15) rowsWithTip++;
+                else Console.WriteLine("      no tooltip: " + cat + " / " + n.Text);
+            }
+            Check(cat + ": every row explains itself on hover", rowsSeen > 0 && rowsWithTip == rowsSeen,
+                  rowsWithTip + " of " + rowsSeen + " rows");
+
             Check(cat + ": scroll reaches the last row", scrollMax == 0 || scrollMax + card.ClientSize.Height >= bottom - 2,
                   "content " + bottom + " px, scroll " + scrollMax + " px, visible " + card.ClientSize.Height + " px");
 

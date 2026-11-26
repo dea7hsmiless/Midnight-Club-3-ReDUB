@@ -59,7 +59,7 @@ public class BrandPanel : Panel {
     protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);var g=e.Graphics;g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;g.SmoothingMode=SmoothingMode.AntiAlias;using(var bg=new LinearGradientBrush(ClientRectangle,Color.FromArgb(31,21,38),Color.FromArgb(8,13,26),75))g.FillRectangle(bg,ClientRectangle);if(hero!=null){float zoom=Math.Max((float)Width/hero.Width,(float)Height/hero.Height);float w=hero.Width*zoom,h=hero.Height*zoom;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.DrawImage(hero,(Width-w)/2,(Height-h)/2,w,h);using(var wash=new LinearGradientBrush(ClientRectangle,Color.FromArgb(80,8,13,26),Color.FromArgb(225,8,13,26),90))g.FillRectangle(wash,ClientRectangle);}var ellipse=new Rectangle(Width/2-300,Height/2-140,600,280);using(var p=new GraphicsPath()){p.AddEllipse(ellipse);using(var glow=new PathGradientBrush(p)){glow.CenterColor=Color.FromArgb(135,93,27,51);glow.SurroundColors=new[]{Color.FromArgb(0,8,13,26)};g.FillPath(glow,p);}}if(logo!=null){float zoom=Math.Min((float)Width*.78f/logo.Width,(float)Height*.65f/logo.Height);float w=logo.Width*zoom,h=logo.Height*zoom;g.InterpolationMode=InterpolationMode.HighQualityBicubic;g.DrawImage(logo,(Width-w)/2,(Height-h)/2,w,h);return;}float size=Math.Min(132,Width/5.5f);using(var f=new Font("Segoe UI",size,FontStyle.Bold|FontStyle.Italic)){var measured=g.MeasureString("ReDUB",f);float x=(Width-measured.Width)/2;float y=(Height-measured.Height)/2+8;using(var shadow=new SolidBrush(Color.FromArgb(120,0,0,0)))g.DrawString("ReDUB",f,shadow,x+4,y+6);using(var ink=new SolidBrush(Color.FromArgb(244,246,252)))g.DrawString("ReDUB",f,ink,x,y);using(var red=new SolidBrush(Color.FromArgb(242,65,84)))g.FillRectangle(red,x+16,y+measured.Height-20,measured.Width-20,4);using(var sub=new Font("Segoe UI",12,FontStyle.Bold))using(var ink=new SolidBrush(Color.FromArgb(188,196,213)))g.DrawString("M I D N I G H T   C L U B   3",sub,ink,(Width-280)/2,y-4);}}
 }
 public sealed class Launcher : Form {
-    readonly string root;readonly Label status=new Label();readonly TextBox source=new TextBox();readonly RichTextBox log=new RichTextBox();readonly RedubButton play=new RedubButton {Primary=true};readonly ProgressBar progress=new ProgressBar();readonly System.Windows.Forms.Timer refresh=new System.Windows.Forms.Timer();readonly Panel content=new Panel();readonly List<RedubButton> navigation=new List<RedubButton>();Process job;string page="Game";string category="Display";bool advancedWheelSettings,advancedGraphicsSettings;System.Collections.Generic.List<Action> cardRows=new System.Collections.Generic.List<Action>();Control settingsCard;volatile bool working;string importStatus="";CancellationTokenSource importCancellation;RedubButton cancelImport,importAction;bool closeAfterImport;
+    readonly string root;readonly Label status=new Label();readonly TextBox source=new TextBox();readonly RichTextBox log=new RichTextBox();readonly ToolTip tips=new ToolTip{AutoPopDelay=25000,InitialDelay=400,ReshowDelay=120,ShowAlways=true};readonly RedubButton play=new RedubButton {Primary=true};readonly ProgressBar progress=new ProgressBar();readonly System.Windows.Forms.Timer refresh=new System.Windows.Forms.Timer();readonly Panel content=new Panel();readonly List<RedubButton> navigation=new List<RedubButton>();Process job;string page="Game";string category="Display";bool advancedWheelSettings,advancedGraphicsSettings;System.Collections.Generic.List<Action> cardRows=new System.Collections.Generic.List<Action>();Control settingsCard;volatile bool working;string importStatus="";CancellationTokenSource importCancellation;RedubButton cancelImport,importAction;bool closeAfterImport;
     static readonly Color Bg=Color.FromArgb(8,13,26),Rail=Color.FromArgb(5,9,18),Card=Color.FromArgb(15,23,42),Muted=Color.FromArgb(153,165,188);
     public Launcher(string directory){root=directory;try{var iconPath=Path.Combine(root,"launcher","art","redub.ico");this.Icon=File.Exists(iconPath)?new Icon(iconPath):System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);}catch{}Text="Midnight Club 3: ReDUB";Size=new Size(1200,800);MinimumSize=new Size(1000,700);StartPosition=FormStartPosition.CenterScreen;BackColor=Bg;ForeColor=Color.FromArgb(235,239,247);Font=new Font("Segoe UI",10);AutoScaleMode=AutoScaleMode.Dpi;KeyPreview=true;KeyDown+=(s,e)=>{if(working&&e.KeyCode==Keys.Escape){CancelImport();e.Handled=true;}};
         var shell=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=2,RowCount=2,Margin=Padding.Empty,Padding=Padding.Empty};shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,220));shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));shell.RowStyles.Add(new RowStyle(SizeType.Percent,100));shell.RowStyles.Add(new RowStyle(SizeType.Absolute,38));Controls.Add(shell);
@@ -143,15 +143,15 @@ public sealed class Launcher : Form {
         }
         if(cat=="Music"){Choice(card,ref y,"PC Music while driving","MC3_PC_MUSIC",new[]{"Off","On"},new[]{"0","1"},"0");Choice(card,ref y,"Song display","MC3_PC_MUSIC_HUD",new[]{"Overlay","Radio + fallback"},new[]{"0","1"},"1");Choice(card,ref y,"Player volume","MC3_PC_MUSIC_VOLUME",new[]{"Mute","10%","20%","30%","40%","50%","60%","70%","80%","90%","100%"},new[]{"0","10","20","30","40","50","60","70","80","90","100"},"100");var info=LabelAt("Uses built-in Windows media controls with supported players/services\nsuch as YouTube Music, Spotify and Pandora. No login is needed in ReDUB.\nMusic plays directly from your PC; ReDUB reads track info and controls\nsupported players. D-pad left/right requests track changes while driving.",10,false);info.ForeColor=Muted;info.SetBounds(24,y+10,Math.Max(400,card.Width-48),130);info.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(info);}
         if(cat=="Mods"){
-            var modsLabel=LabelAt("Unlock everything (restart)",10,false);modsLabel.SetBounds(24,y,300,38);card.Controls.Add(modsLabel);
-            var modsToggle=ButtonAt(card,ReadSetting("MC3_UNLOCK_ALL","0")=="1"?"On":"Off",Math.Max(245,card.Width-270),y-4,244,()=>{});modsToggle.Anchor=AnchorStyles.Right|AnchorStyles.Top;
+            var modsLabel=LabelAt("Unlock everything (restart)",10,false);modsLabel.TextAlign=ContentAlignment.MiddleLeft;modsLabel.SetBounds(24,y,300,42);card.Controls.Add(modsLabel);
+            var modsToggle=ButtonAt(card,ReadSetting("MC3_UNLOCK_ALL","0")=="1"?"On":"Off",Math.Max(245,card.Width-270),y,244,()=>{});modsToggle.Anchor=AnchorStyles.Right|AnchorStyles.Top;
+            tips.SetToolTip(modsLabel,SettingHelp["MC3_UNLOCK_ALL"]);tips.SetToolTip(modsToggle,SettingHelp["MC3_UNLOCK_ALL"]);
             modsToggle.Click+=(sender,e)=>{try{if(GameRunning()){MessageBox.Show(this,"Save and close the game first.","Game is running");return;}string next=ReadSetting("MC3_UNLOCK_ALL","0")=="1"?"0":"1";SavePreference("MC3_UNLOCK_ALL",next);modsToggle.Text=next=="1"?"On":"Off";}catch(Exception ex){MessageBox.Show(this,ex.Message,"Could not save settings",MessageBoxButtons.OK,MessageBoxIcon.Error);}};
             y+=62;
             var modsHint=LabelAt("Every car, part, rim, paint and driving ability is available, and every race and city is open. Your career save and money are untouched. Applies on the next launch; a car picks up an unlocked ability at its next build (a cruise load or a garage visit).",10,false);modsHint.ForeColor=Muted;modsHint.SetBounds(24,y,Math.Max(400,card.Width-48),110);modsHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(modsHint);y+=118;
             var modsWhat=LabelAt("A mod changes what the game does: its rules, progression or content. Presentation, performance and startup options live under Settings. More mods will appear here, each off by default and restarting to apply.",10,false);modsWhat.ForeColor=Muted;modsWhat.SetBounds(24,y,Math.Max(400,card.Width-48),92);modsWhat.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(modsWhat);
         }
         if(cat=="Advanced"){
-
             var diagHead=LabelAt("Diagnostics",14,true);diagHead.SetBounds(24,y,Math.Max(300,card.Width-48),30);card.Controls.Add(diagHead);y+=34;
             Choice(card,ref y,"FPS / frame time","MC3_FPS_OVERLAY",new[]{"Off","On"},new[]{"0","1"},"0");
             ButtonAt(card,"Open logs",24,y,150,()=>Open("work-remix/logs"));
@@ -160,11 +160,12 @@ public sealed class Launcher : Form {
 
             var startupHead=LabelAt("Startup",14,true);startupHead.SetBounds(24,y,Math.Max(300,card.Width-48),30);card.Controls.Add(startupHead);y+=34;
             Choice(card,ref y,"Skip intro movies (restart)","MC3_SKIP_MOVIES",new[]{"Off","On"},new[]{"0","1"},"0");
-            var label=LabelAt("Skip launcher on startup",10,false);label.SetBounds(24,y,270,38);card.Controls.Add(label);
-            var toggle=ButtonAt(card,BypassEnabled(root)?"On":"Off",Math.Max(245,card.Width-270),y-4,244,()=>{});toggle.Anchor=AnchorStyles.Right|AnchorStyles.Top;
+            var label=LabelAt("Skip launcher on startup",10,false);label.TextAlign=ContentAlignment.MiddleLeft;label.SetBounds(24,y,270,42);card.Controls.Add(label);
+            var toggle=ButtonAt(card,BypassEnabled(root)?"On":"Off",Math.Max(245,card.Width-270),y,244,()=>{});toggle.Anchor=AnchorStyles.Right|AnchorStyles.Top;
+            tips.SetToolTip(label,"Start ReDUB without this launcher next time. Hold Shift while it starts to come back here.");tips.SetToolTip(toggle,"Start ReDUB without this launcher next time. Hold Shift while it starts to come back here.");
             toggle.Click+=(sender,e)=>{try{SetBypass(root,!BypassEnabled(root));toggle.Text=BypassEnabled(root)?"On":"Off";}catch(Exception ex){MessageBox.Show(this,ex.Message,"Could not save launcher setting");}};
             y+=52;
-            var startupHint=LabelAt("Cruise enters Arcade on its own; any input stops it. Skipping the intro presses through the boot movies. Hold Shift to return to this launcher.",9,false);startupHint.ForeColor=Muted;startupHint.SetBounds(24,y,Math.Max(400,card.Width-48),26);startupHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(startupHint);y+=40;
+            var startupHint=LabelAt("Skipping the intro presses through the boot movies. Hold Shift to return to this launcher.",9,false);startupHint.ForeColor=Muted;startupHint.SetBounds(24,y,Math.Max(400,card.Width-48),26);startupHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(startupHint);y+=40;
 
             var rebuildHead=LabelAt("Repair and rebuild",14,true);rebuildHead.SetBounds(24,y,Math.Max(300,card.Width-48),30);card.Controls.Add(rebuildHead);y+=34;
             var warning=LabelAt("Rebuilding compiles the game port on this PC. It needs MSYS2, about 10 GB of free space and 20+ minutes.",9,false);warning.ForeColor=Color.FromArgb(245,180,120);warning.SetBounds(24,y,Math.Max(400,card.Width-48),44);warning.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;card.Controls.Add(warning);y+=50;
@@ -248,15 +249,75 @@ public sealed class Launcher : Form {
         ButtonAt(bar,"Done",286,8,200,()=>f.Close());
         f.ShowDialog(this);
     }
-        void Choice(Control host,ref int y,string name,string key,string[] labels,string[] vals,string fallback){
+        /* What each setting does, for the row's tooltip. Keyed by the setting name
+     * the game reads, so the text lives in one place and a row cannot be added
+     * without one: the layout test asserts every row resolves a description. */
+    static readonly Dictionary<string,string> SettingHelp=new Dictionary<string,string>{
+        /* Display */
+        {"MC3_FULLSCREEN","How the game fills the screen. Borderless gives it the whole screen and still alt-tabs instantly; exclusive can be smoother but takes longer to switch away from."},
+        {"MC3_RESOLUTION","The window or fullscreen size. Automatic follows your desktop, which is right for most screens."},
+        {"RECOMP_GL_ASPECT","Auto shows the game at 16:9. 4:3 keeps the original shape with bars at the sides. Stretch fills the window and distorts the picture."},
+        {"RECOMP_GL_VSYNC","Waits for the screen before showing a new frame, which stops tearing. Off can feel quicker but may tear. Adaptive tears only when the rate drops."},
+        {"MC3_GAMMA","Mid-tone brightness. Raise it to see more in dark scenes without washing out the highlights."},
+        {"MC3_BRIGHTNESS","Overall output level, applied after gamma."},
+        {"RECOMP_PAUSE_ON_FOCUS","Opens the game's own pause menu when you switch to another window, so a race does not run on while you are away."},
+        {"RECOMP_LOADING_MIN_MS","Keeps a fast load's screen visible for at least this long. The loading movie keeps animating while it waits, and only the first frame of a load is held."},
+
+        /* Graphics */
+        {"MC3_GRAPHICS_PRESET","One choice for the whole look. Custom appears once you change a setting below."},
+        {"RECOMP_GL_SCALE","Renders the game larger, then shows it at your window's size. The biggest lever on sharpness and the biggest cost."},
+        {"RECOMP_FG","Adds a frame between real ones so motion looks smoother. No cost to the simulation; can smear on fast turns."},
+        {"MC3_FRAME_RATE","30 is the console's own rate. Above it the game runs faster than the Xbox version; pick what your machine holds steadily."},
+        {"RECOMP_GL_UI_SCALE","Upscales the game's HUD art. Higher is sharper and costs a little graphics memory."},
+        {"RECOMP_GL_FXAA","Smooths jagged edges. Higher levels smooth more and soften fine detail faster."},
+        {"RECOMP_GL_ANISO","Keeps textures sharp when the road is seen at a shallow angle. Almost free."},
+        {"RECOMP_GL_SHARPEN","Crisps edges after anti-aliasing. Too much shows as a bright rim around objects."},
+        {"RECOMP_GL_GLOW","Bright things bleed light: streetlights, neon, headlights and tail lights. Dark areas are left alone."},
+        {"RECOMP_GL_VIGNETTE","Darkens the corners of the picture, brightest in the middle. Cosmetic; it pulls the eye to the road."},
+        {"RECOMP_GL_COLOUR","More colour and a slightly warm tint, without changing how bright the scene is. Grading, not a contrast boost."},
+        {"RECOMP_GL_AO","Soft shadows where surfaces meet: under the car, along kerbs, in corners. Subtle, and the most expensive of the four effects."},
+        {"RECOMP_GL_QUEUE_FRAMES","How many frames the renderer may have in flight. Two is smoother; one lowers input latency."},
+
+        /* Controls */
+        {"MC3_RUMBLE_STRENGTH","Strength of controller vibration. Off disables it; the game's original level is 100%."},
+        {"MC3_WHEEL","Enables force-feedback steering wheels. Needs a wheel Windows recognises through SDL."},
+        {"MC3_WHEEL_RUMBLE","Force feedback strength for the wheel, independent of the controller setting."},
+        {"MC3_WHEEL_DEVICE","Which connected wheel to use. Auto detect takes the first one Windows offers."},
+        {"MC3_WHEEL_STEER_AXIS","Which axis of the wheel steers. Wrong values leave the car unable to turn."},
+        {"MC3_WHEEL_THROTTLE_AXIS","Which axis is the accelerator pedal."},
+        {"MC3_WHEEL_BRAKE_AXIS","Which axis is the brake pedal."},
+        {"MC3_WHEEL_STEER_INVERT","Flip steering if left and right come out the wrong way round."},
+        {"MC3_WHEEL_THROTTLE_INVERT","Flip the throttle if the pedal reads pressed when it is not."},
+        {"MC3_WHEEL_BRAKE_INVERT","Flip the brake if the pedal reads pressed when it is not."},
+        {"MC3_WHEEL_DEADZONE","How far the wheel can be turned before the game responds. Raise it if the car drifts on its own."},
+
+        /* Music */
+        {"MC3_PC_MUSIC","Plays music from your PC in place of the game's radio while you drive. Off leaves the game's own soundtrack alone."},
+        {"MC3_PC_MUSIC_HUD","Where the track name appears. Overlay draws it yourself; Radio + fallback shows it in the game's radio slot when it has room."},
+        {"MC3_PC_MUSIC_VOLUME","Volume of PC music, separate from the game's own audio."},
+
+        /* Advanced */
+        {"MC3_FPS_OVERLAY","Shows the frame rate and how long each frame took, in the corner of the screen."},
+        {"MC3_SKIP_MOVIES","Presses through the boot movies so the game reaches the menu sooner. Off plays them as an Xbox would."},
+        {"MC3_UNLOCK_ALL","Every car, part, rim, paint and driving ability is available, and every race and city is open. Your career save and money are untouched."}
+    };
+
+    void Choice(Control host,ref int y,string name,string key,string[] labels,string[] vals,string fallback){
         var title=LabelAt(name,10,false);title.TextAlign=ContentAlignment.MiddleLeft;title.SetBounds(24,y,220,42);host.Controls.Add(title);
         int x=Math.Max(245,host.Width-270);string value=ReadSetting(key,fallback);int ix=Array.IndexOf(vals,value);
         if(ix<0){double target;if(double.TryParse(value,System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out target))for(int i=0;i<vals.Length;i++){double v;if(double.TryParse(vals[i],System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out v)&&Math.Abs(v-target)<.001)ix=i;}}if(ix<0)ix=0;
         var label=LabelAt(labels[ix],10,true);label.SetBounds(x+42,y,160,42);label.TextAlign=ContentAlignment.MiddleCenter;label.Anchor=AnchorStyles.Right|AnchorStyles.Top;host.Controls.Add(label);
         Action<int> change=delta=>{try{if(GameRunning()){MessageBox.Show(this,"Save and close the game first. In-game Port Options can apply live changes.","Game is running");return;}int next=(ix+delta+vals.Length)%vals.Length;SavePreference(key,vals[next]);ix=next;label.Text=labels[ix];if(key=="MC3_GRAPHICS_PRESET")ShowSettings(category);else if(key=="MC3_WHEEL")ShowSettings("Controls");}catch(Exception ex){MessageBox.Show(this,ex.Message,"Could not save settings",MessageBoxButtons.OK,MessageBoxIcon.Error);}};
         int rowY=y;int rowNameWidth=220;
+        /* The description is a tooltip on the row's name, its value and both
+         * arrows: hovering anywhere on the row explains it. As page text the
+         * same words became twelve lines of grey between the values. */
+        string helpNow=null;
+        SettingHelp.TryGetValue(key,out helpNow);
+        if(helpNow!=null){tips.SetToolTip(title,helpNow);tips.SetToolTip(label,helpNow);}
         var left=ButtonAt(host,"❮",x,y,38,()=>change(-1));left.Anchor=AnchorStyles.Right|AnchorStyles.Top;left.AccessibleName="Decrease "+name;
         var right=ButtonAt(host,"❯",x+206,y,38,()=>change(1));right.Anchor=AnchorStyles.Right|AnchorStyles.Top;right.AccessibleName="Increase "+name;
+        if(helpNow!=null){tips.SetToolTip(left,helpNow);tips.SetToolTip(right,helpNow);}
         if(settingsCard!=null&&host==settingsCard){var t2=title;var l2=label;var b1=left;var b2=right;cardRows.Add(()=>{int nx=Math.Max(245,host.ClientSize.Width-270);t2.SetBounds(24,rowY,rowNameWidth,42);l2.SetBounds(nx+42,rowY,160,42);b1.SetBounds(nx,rowY,38,42);b2.SetBounds(nx+206,rowY,38,42);});}
         y+=62;
     }
