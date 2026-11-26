@@ -1243,9 +1243,41 @@ void sub_0041B170(void)
 #else
             unsigned per_vblank = gameplay ? 1u : 0u;
 #endif
+            /* The cadence has to follow the step the world is actually being
+             * advanced by, not the rate the player asked for.
+             *
+             * The two are decided in different places: the step is halved to
+             * 1/60 (or 1/120) per frame in sub_002D5400, and only while
+             * `gameplay` reads true there, because the game rewrites 1/30 into
+             * 0x4B2D58 every frame. Nothing above checks that the halving
+             * happened. So a frame where the gameplay guess is wrong retires
+             * 60 flips a second while the world advances 30 a second: 2 s of
+             * world per second, exactly double speed, until the guess
+             * recovers. 30 fps mode never reaches here, which is why only 60
+             * and 120 were ever reported.
+             *
+             * Clamping to the step costs nothing when the two agree, and makes
+             * a mismatch run at the right speed with fewer frames instead of
+             * twice as fast. */
+            {
+                float step = MEMF(0x004B2D58u);
+                unsigned by_step = step > 0.0f && step < 0.0221f
+                                   ? (frame_rate_mode >= 120 && step < 0.0120f ? 2u : 1u)
+                                   : 0u;          /* 1/30 or slower: interval two */
+                if (per_vblank > by_step) {
+                    static int said;
+                    if (!said && getenv("MC3_FLIP_PACE_TRACE")) {
+                        said = 1;
+                        fprintf(stderr, "  [FLIP] %d fps asked, step %.4f s: "
+                                        "retiring %u frame(s) per vblank, not %u\n",
+                                frame_rate_mode, step, by_step, per_vblank);
+                    }
+                    per_vblank = by_step;
+                }
+            }
             unsigned want = per_vblank;
-            if (!gameplay && !(vblank & 1u))
-                want = 1;                          /* menus: one per two vblanks */
+            if (want == 0u && !(vblank & 1u))
+                want = 1;                  /* menus, and any step of 1/30 or slower */
             if (vblank != last_retire_vblank) {
                 last_retire_vblank = vblank;
                 retires_this_vblank = 0;

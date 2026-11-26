@@ -107,6 +107,16 @@ pixels tall.
 
 ### Stability
 
+- **60 and 120 FPS can no longer run at double speed.** The frame cadence and the world's
+  simulation step are chosen in two different places, and only the step was conditional: it is
+  halved to 1/60 or 1/120 each frame, but only while the game is classified as being in a race.
+  The flip count assumed that halving always happened. On any frame where the classification was
+  wrong, the port retired 60 frames a second while advancing the world 30 times a second — two
+  seconds of game per second, which came and went as the classification recovered. The cadence is
+  now derived from the step the world is actually being advanced by, so a mismatch runs at the
+  right speed with fewer frames instead of twice as fast. Nothing changes when the two agree, and
+  30 FPS never used this path, which is why only 60 and 120 were ever reported.
+  `MC3_FLIP_PACE_TRACE=1` prints a line the first time the clamp engages.
 - A guest thread parked while nothing is presented now logs a heartbeat instead of freezing
   silently.
 - The GPU command walker resumes at PUT when it loses the stream, which is what stopped a
