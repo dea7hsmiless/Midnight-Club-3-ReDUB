@@ -958,11 +958,35 @@ public sealed class Launcher : Form {
         }catch{}
     }
     /* The description of an unacknowledged crash, or null. */
+    /* The newest crash report the game wrote, or null.
+     *
+     * The exit stamp above only exists when *this launcher* started the game:
+     * a crash after starting the exe directly, or after closing the launcher
+     * while the game ran, left no stamp at all. The game writes
+     * crash-<time>.txt itself on an unhandled exception, so that file is the
+     * evidence that survives every launch path. */
+    static string NewestCrashReport(string root){
+        try{
+            string dir=Path.Combine(root,@"work-remix\logs");
+            if(!Directory.Exists(dir))return null;
+            string best=null;DateTime newest=DateTime.MinValue;
+            foreach(string f in Directory.GetFiles(dir,"crash-*.txt")){
+                DateTime when=File.GetLastWriteTimeUtc(f);
+                if(when>newest){newest=when;best=f;}
+            }
+            return best;
+        }catch{return null;}
+    }
     static string LastCrash(string root){
         try{
-            string m=CrashMarker(root);if(!File.Exists(m))return null;
-            string[] f=File.ReadAllText(m).Split('\t');if(f.Length<2)return null;
-            return "exit "+f[0]+" at "+f[1];
+            string m=CrashMarker(root);
+            if(File.Exists(m)){
+                string[] f=File.ReadAllText(m).Split('\t');
+                if(f.Length>=2)return "exit "+f[0]+" at "+f[1];
+            }
+            string report=NewestCrashReport(root);
+            if(report!=null)return Path.GetFileName(report)+" at "+File.GetLastWriteTime(report).ToString("yyyy-MM-dd HH:mm");
+            return null;
         }catch{return null;}
     }
     static string LauncherVersion(){try{return Assembly.GetExecutingAssembly().GetName().Version.ToString(3);}catch{return "unknown";}}
@@ -989,13 +1013,24 @@ public sealed class Launcher : Form {
         try{if(File.Exists(zip))File.Delete(zip);}catch{}
         try{
             using(var z=new ZipArchive(new FileStream(zip,FileMode.Create),ZipArchiveMode.Create)){
-                foreach(string f in Directory.GetFiles(logs,"*.log*")){
-                    var e=z.CreateEntry(Path.GetFileName(f),CompressionLevel.Optimal);
-                    using(var s=e.Open())using(var i=new FileStream(f,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))i.CopyTo(s);
-                }
+                /* "*.log*" alone dropped the two things a report needs most: the
+                 * game's own crash-<time>.txt (the exception, registers, guest
+                 * call chain) and build.txt (version, edition, settings). */
+                foreach(string f in Directory.GetFiles(logs,"*.log*"))
+                    AddToZip(z,f);
+                foreach(string f in Directory.GetFiles(logs,"crash-*.txt"))
+                    AddToZip(z,f);
+                string build=Path.Combine(logs,"build.txt");
+                if(File.Exists(build))AddToZip(z,build);
             }
         }catch{return null;}
         return zip;
+    }
+    static void AddToZip(ZipArchive z,string file){
+        try{
+            var e=z.CreateEntry(Path.GetFileName(file),CompressionLevel.Optimal);
+            using(var s=e.Open())using(var i=new FileStream(file,FileMode.Open,FileAccess.Read,FileShare.ReadWrite))i.CopyTo(s);
+        }catch{}
     }
     static string NewIssueUrl(string title,string body){
         return "https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/issues/new?labels=crash&title="+Uri.EscapeDataString(title)+"&body="+Uri.EscapeDataString(body);
