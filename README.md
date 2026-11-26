@@ -50,14 +50,14 @@ An existing installation is detected automatically and can play immediately. Rep
 
 ## Linux AppImage
 
-Download **ReDUB-0.2.5-x86_64.AppImage** from [Releases](https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases/latest). Mark it executable, then select your extracted Xbox Remix game folder once:
+Download **ReDUB-0.2.6-x86_64.AppImage** from [Releases](https://github.com/dea7hsmiless/Midnight-Club-3-ReDUB/releases/latest). Mark it executable, then select your extracted Xbox Remix game folder once:
 
 ```sh
-chmod +x ReDUB-0.2.5-x86_64.AppImage
-./ReDUB-0.2.5-x86_64.AppImage --game-dir "/path/to/extracted/game"
+chmod +x ReDUB-0.2.6-x86_64.AppImage
+./ReDUB-0.2.6-x86_64.AppImage --game-dir "/path/to/extracted/game"
 ```
 
-A plain `ReDUB-0.2.5-x86_64.tar.gz` carries the same AppDir. `--portable DIR` keeps config, data, cache and state beside the package instead of in XDG directories. The folder is remembered for later launches. Requires x86_64 Linux, glibc 2.39+ (Ubuntu 24.04 / Debian 13 tested), X11/XWayland, and OpenGL 3.3. The package bundles SDL2, D-Bus, Bink-only FFmpeg, and the ReDUB logo artwork. Saves and Port Options live in user directories; original game files may be read-only. If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB-0.2.5-x86_64.AppImage`.
+A plain `ReDUB-0.2.6-x86_64.tar.gz` carries the same AppDir. `--portable DIR` keeps config, data, cache and state beside the package instead of in XDG directories. The folder is remembered for later launches. Requires x86_64 Linux, glibc 2.39+ (Ubuntu 24.04 / Debian 13 tested), X11/XWayland, and OpenGL 3.3. The package bundles SDL2, D-Bus, Bink-only FFmpeg, and the ReDUB logo artwork. Saves and Port Options live in user directories; original game files may be read-only. If FUSE is unavailable, use `APPIMAGE_EXTRACT_AND_RUN=1 ./ReDUB-0.2.6-x86_64.AppImage`.
 
 Shared menu, synchronization, pushbuffer, and movie fixes match the Windows release source; the entry/page title uses **Port Options** capitalization. Linux PC Music uses MPRIS, with transliterated song text. Native Wayland and experimental 60/120 FPS are excluded. Native desktop sound and MPRIS output remain unverified in our WSLg environment. See [Linux setup and build instructions](BUILDING-LINUX.md).
 

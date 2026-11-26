@@ -1,5 +1,133 @@
 # Release notes
 
+## v0.2.6 - 2026-11-26
+
+**The look of the game becomes adjustable, and a crash finally leaves evidence.**
+No new claims about online play; the networking story is unchanged from 0.2.5.
+
+### Post effects: glow, vignette and colour
+
+Three effects drawn after the scene, each off by default and each with its own strength in
+the launcher's Graphics page.
+
+- **Glow** — bright things bleed light. Streetlights, neon, headlights and tail lights pick up
+  a soft halo; dark areas are left alone, so the night does not turn grey.
+- **Vignette** — the corners of the picture are gently darkened, brightest in the middle.
+- **Colour** — more saturation around each pixel's own brightness, plus a slightly warm tint.
+  It does not touch contrast: an earlier version did, and measuring showed it made the night
+  8% darker overall, so that part was removed.
+
+All three read the frame after it is drawn, so the HUD and menus are untouched. They are
+driving-only and cost eight texture samples per pixel for glow; vignette and colour are
+almost free.
+
+### Ambient occlusion
+
+Soft contact shadows where surfaces meet: under the car, along the kerbs, in corners, where a
+wall meets the pavement. It reads the scene's own depth buffer, so it follows the geometry
+rather than guessing from the colour image. Measured on a night race: mean brightness 5.5%
+lower, 7.9% of pixels more than 8 levels darker, 0.08 levels on the HUD, no halos, no frame
+cost. `RECOMP_GL_AO_RADIUS` sets how far the shadows reach.
+
+### Crash reports on Windows
+
+A crash used to leave half a log line and nothing else. Windows now writes, next to the run
+log:
+
+- `crash-<time>.txt` — the exception, the faulting address and its guest address, host and
+  guest registers, the Xbox return addresses still on the stack, the recent indirect-call
+  targets, and the thread id (with a note when the fault was on a host thread that has no
+  guest context, so empty registers are not misread as "the guest was at zero");
+- `build.txt` — version, edition, OS and the settings that matter, rewritten at crash time so
+  it describes the run that died rather than the one that started.
+
+A first-chance handler logs access violations, illegal instructions, stack overflow and
+divide-by-zero, at most eight lines so a loop cannot fill a disk. The exception is not
+swallowed: a game that carries on with a corrupted heap is a worse bug later.
+
+The launcher turns that into something sendable. When a run fails it offers **Report the last
+crash**: a prefilled issue and a `ReDUB-crash-report.zip` with the run log, the previous log,
+the crash report and `build.txt`, ready to attach. Nothing is ever uploaded by itself.
+
+No minidump is written. `MiniDumpWriteDump` refuses with `0x80070066` unless the process holds
+`SeDebugPrivilege`, which a normal player session does not; asking for it failed here, and a
+zero-byte `.dmp` beside a crash report is worse than none. The guest call chain is the more
+useful half anyway — a host stack names a `recomp_00xx.c` line and stops.
+
+### An incomplete install is refused instead of crashing
+
+`Xdvdfs.Verify`, the only thing an import checked, looked at `default.xbe` and nothing else.
+A disc copy whose data archives were missing or cut short therefore passed Install, and the
+game then died at the first frame that needed the absent bytes — `0xC0000034` or a `KeBugCheck`
+mid-race, the path `roam_game.c` documents for `assets_x.dat_2`.
+
+The launcher now reads the Dave pack header: the magic (`Dave`/`DAVE`), the entry count and
+the table of 12-byte entries. The file must be long enough for its own table and every entry
+that names data must end inside the file. Numbered parts are read in order, so a gap is caught
+— which is the failure that matters, since the game opens them by number. `banks.dat` is
+checked the same way. Play, Verify setup, the CLI and RecompLauncher's import all refuse with
+the file named.
+
+### Rebindable keyboard
+
+Settings → Controls → **Rebind keyboard…** captures a key and writes it for the game, with
+defaults and a reset. `MC3_KEY_TRACE=1` logs every key that becomes a pad button, which is the
+quickest answer to "my rebound key does nothing".
+
+### Quality of life
+
+- **Pause on focus loss** (`RECOMP_PAUSE_ON_FOCUS`) opens the game's own pause menu when you
+  switch to another window, so a race does not run on while you are away.
+- **Loading screen minimum** (`RECOMP_LOADING_MIN_MS`) keeps a fast load's screen visible for
+  at least the time you choose. A small load on a fast machine can otherwise finish between
+  two of the screen's own frames and never be seen at all. The movie keeps animating while it
+  waits, and only the first frame of a load is held, so a long load is never made longer.
+- **Tooltips** — every setting in the launcher explains itself on hover.
+
+### Settings pages
+
+The Graphics page carries the four new effects below Sharpening; Display carries the two new
+options. Every row's name, value and arrows now share one baseline (they were up to 10 pixels
+apart), and the two arrow glyphs are real chevrons rather than quote marks that drew five
+pixels tall.
+
+### Stability
+
+- A guest thread parked while nothing is presented now logs a heartbeat instead of freezing
+  silently.
+- The GPU command walker resumes at PUT when it loses the stream, which is what stopped a
+  bad target being re-read for ever; the test now asserts it.
+- A game folder another process still holds open is retried for about a second instead of
+  failing the import and losing the career.
+- `--check` and `--check-data` answer before the launcher unpacks its source bundle, which is
+  what made them slow and, on a bare folder, left a message box with no exit code.
+
+### Settings are kept when game files are replaced
+
+Adding or replacing game files used to replace the whole game folder, taking the career save
+and the title's own settings with it. The import now stages the copy, verifies it, carries the
+player's UDATA/TDATA across, and only then swaps the folder in. It also refuses while the game
+is running, since a running game holds those files open.
+
+### Known issues
+
+- **Crashes inside guest code still produce no report on Windows** if the fault is a hang
+  rather than an exception. A freeze leaves nothing; a crash leaves the files above.
+- **No minidump** (see above), so "which function faulted" is answerable and "what was the
+  corrupted pointer pointing at" often is not.
+- **The pause-on-focus menu** was verified as a hook firing; the menu appearing was not
+  recorded on screen.
+- **Controller and phone builds are unchanged** from 0.2.5.
+
+### Not in this release
+
+- **Nothing new for online.** The relay, rooms and matchmaking described in
+  `docs/0.2.6-PLAN.md` are still ahead; this release is the single-player and diagnostics work.
+- **PlayStation and Switch button glyphs**, deferred from 0.2.5.
+- **Music playlists**, deferred from 0.2.5; the built-in PC Music integration is unchanged.
+- **The twelve advanced tuning settings** (`MC3_PERF`, `MC3_HANG_SECS`, `RECOMP_NET_*` and the
+  rest) remain file-only; they are documented in `mcdub3remix_env.example.txt`.
+
 ## v0.2.5 - 2026-11-24
 
 ### Split-screen, verified

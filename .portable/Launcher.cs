@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -17,8 +17,8 @@ using System.IO.Compression;
 [assembly: AssemblyProduct("ReDUB")]
 [assembly: AssemblyCompany("ReDUB")]
 [assembly: AssemblyCopyright("Fan project; Midnight Club 3 is a trademark of its owners")]
-[assembly: AssemblyVersion("0.2.5.0")]
-[assembly: AssemblyFileVersion("0.2.5.0")]
+[assembly: AssemblyVersion("0.2.6.0")]
+[assembly: AssemblyFileVersion("0.2.6.0")]
 namespace ReDUB {
 public class RedubButton : Control, IButtonControl {
     public bool Primary, Selected;
