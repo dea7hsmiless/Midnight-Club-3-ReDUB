@@ -223,105 +223,205 @@ public sealed class Launcher : Form {
      *  - the capture only listened for KeyDown, so pressing a bound key gave no
      *    feedback that it had been taken.
      */
+    /* The keyboard layout, laid out like the settings pages rather than as a
+     * list of bars: one group per part of the pad, the action on the left and
+     * its key in a field on the right. Click a field and it reads "Press a
+     * key..."; the next key you press becomes it. Escape cancels, or closes the
+     * page when nothing is being captured.
+     *
+     * Nothing in the capture path is modal. A key that is already in use turns
+     * the field amber, names the action holding it in the status line, and is
+     * taken only if the same key is pressed again -- a prompt for this arrived
+     * mid-finger-stroke and had to be read before it could be answered.
+     */
     void ShowKeyBindings(){
         if(GameRunning()){MessageBox.Show(this,"Save and close the game first: the layout is read when the game starts.","Game is running");return;}
-        var f=new Form{Text="Keyboard (player 1)",ClientSize=new Size(560,700),StartPosition=FormStartPosition.CenterParent,FormBorderStyle=FormBorderStyle.FixedDialog,MaximizeBox=false,MinimizeBox=false,BackColor=Bg,ForeColor=Color.FromArgb(228,232,240)};
-        var list=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(16),BackColor=Bg};f.Controls.Add(list);
-        var bar=new Panel{Dock=DockStyle.Bottom,Height=56,BackColor=Bg};f.Controls.Add(bar);
 
-        var names=new Dictionary<string,Label>();
-        var buttons=new Dictionary<string,RedubButton>();
-        string capturing=null;
-        RedubButton captureButton=null;
+        /* Header, message prefix ("" = the short name reads fine on its own),
+         * then the actions in that group. */
+        string[][] groups={
+            new[]{"D-PAD","D-PAD","DPAD_UP","DPAD_DOWN","DPAD_LEFT","DPAD_RIGHT"},
+            new[]{"FACE BUTTONS","","A","B","X","Y"},
+            new[]{"SHOULDERS & TRIGGERS","","WHITE","BLACK","LT","RT"},
+            new[]{"SYSTEM","","START","BACK","LSTICK","RSTICK"},
+            new[]{"LEFT STICK","Left stick","LSTICK_LEFT","LSTICK_RIGHT","LSTICK_UP","LSTICK_DOWN"},
+            new[]{"RIGHT STICK","Right stick","RSTICK_LEFT","RSTICK_RIGHT","RSTICK_UP","RSTICK_DOWN"}
+        };
+        var names=new Dictionary<string,string>();
+        names["DPAD_UP"]="Up";names["DPAD_DOWN"]="Down";names["DPAD_LEFT"]="Left";names["DPAD_RIGHT"]="Right";
+        names["A"]="A";names["B"]="B";names["X"]="X";names["Y"]="Y";
+        names["WHITE"]="White";names["BLACK"]="Black";names["LT"]="Left trigger";names["RT"]="Right trigger";
+        names["START"]="Start";names["BACK"]="Back";names["LSTICK"]="Left stick click";names["RSTICK"]="Right stick click";
+        names["LSTICK_LEFT"]="Left";names["LSTICK_RIGHT"]="Right";names["LSTICK_UP"]="Up";names["LSTICK_DOWN"]="Down";
+        names["RSTICK_LEFT"]="Left";names["RSTICK_RIGHT"]="Right";names["RSTICK_UP"]="Up";names["RSTICK_DOWN"]="Down";
+        var full=new Dictionary<string,string>();
 
-        /* What an action is set to, as the game will read it. */
-        Func<string,string> current=action=>{
-            string v=ReadSetting("MC3_KEY_"+action,KeyDefaults[Array.IndexOf(KeyActions,action)]);
-            if(v==null||v.Length==0||v=="-1"||v=="none")return "not set";
-            return v;
+        string hint="Click a key, then press the one you want. Right-click a key to clear it.";
+        Color ink=Color.FromArgb(235,239,247),amber=Color.FromArgb(245,180,120);
+
+        var f=new Form{Text="Keyboard (player 1)",ClientSize=new Size(820,704),StartPosition=FormStartPosition.CenterParent,FormBorderStyle=FormBorderStyle.FixedDialog,MaximizeBox=false,MinimizeBox=false,BackColor=Bg,ForeColor=ink};
+        var head=LabelAt("Keyboard",22,true);head.SetBounds(32,26,500,38);f.Controls.Add(head);
+        var sub=LabelAt("Player 1's pad buttons on the keyboard. Saved keys apply at the next launch.",10,false);
+        sub.ForeColor=Muted;sub.SetBounds(34,64,740,24);f.Controls.Add(sub);
+
+        var card=new Panel{BackColor=Card,Location=new Point(28,100),Size=new Size(764,500)};f.Controls.Add(card);
+
+        var fieldFont=new Font("Segoe UI",9.5f,FontStyle.Bold);
+        var headerFont=new Font("Segoe UI",8.5f,FontStyle.Bold);
+        var fields=new Dictionary<string,RedubButton>();
+        var fieldAction=new Dictionary<Control,string>();
+        string capturing=null,selected=null,conflictKey=null,menuAction=null;
+
+        /* What the game will read for an action. */
+        Func<string,string> stored=action=>ReadSetting("MC3_KEY_"+action,KeyDefaults[Array.IndexOf(KeyActions,action)]);
+        /* How a stored name reads on a button. */
+        Func<string,string> face=value=>{
+            if(value==null||value.Length==0||value=="-1"||value=="none")return "\u2014";
+            switch(value){
+            case "Return":return "Enter";
+            case "Up":return "\u2191";
+            case "Down":return "\u2193";
+            case "Left":return "\u2190";
+            case "Right":return "\u2192";
+            case "Left Shift":return "LShift";
+            case "Right Shift":return "RShift";
+            case "Left Ctrl":return "LCtrl";
+            case "Right Ctrl":return "RCtrl";
+            case "Left Alt":return "LAlt";
+            case "Right Alt":return "RAlt";
+            case "CapsLock":return "Caps Lock";
+            }
+            if(value.StartsWith("Keypad ",StringComparison.Ordinal))return "Num "+value.Substring(7);
+            return value;
         };
         /* The action already using `key`, other than `except`, or null. */
         Func<string,string,string> usedBy=(key,except)=>{
             foreach(string a in KeyActions){
                 if(a==except)continue;
-                string v=ReadSetting("MC3_KEY_"+a,KeyDefaults[Array.IndexOf(KeyActions,a)]);
+                string v=stored(a);
                 if(v!=null&&string.Equals(v,key,StringComparison.OrdinalIgnoreCase))return a;
             }
             return null;
         };
-        Func<string,string> pretty=action=>action.Replace("RSTICK","RIGHT STICK").Replace("LSTICK","LEFT STICK").Replace("DPAD","D-PAD").Replace('_',' ');
 
-        /* Only ever updates text: adding controls here is what caused the
-         * doubled labels. */
+        RedubButton clearButton=null;
+        var foot=LabelAt(hint,9,false);foot.Name="status";foot.ForeColor=Muted;foot.SetBounds(32,612,756,20);f.Controls.Add(foot);
+        Action<string> say=text=>foot.Text=text;
+
+        /* Only ever updates text and colour: adding controls per refresh is what
+         * once left every row with a second label drawn over the first. */
         Action refresh=()=>{
             foreach(string action in KeyActions){
-                string v=capturing==action?"Press a key...":current(action);
-                buttons[action].Text=v;
-                bool conflicting=false;
-                if(capturing==null){
-                    string raw=current(action);
-                    if(raw!="not set")conflicting=usedBy(raw,action)!=null;
+                RedubButton b=fields[action];
+                bool active=capturing==action;
+                string conflict=active&&conflictKey!=null&&conflictKey.Length>0?conflictKey:null;
+                b.Selected=active||selected==action;
+                if(active){
+                    b.Text=conflict!=null?face(conflict):"Press a key\u2026";
+                    b.ForeColor=conflict!=null?amber:ink;
+                }else{
+                    string raw=stored(action);
+                    b.Text=face(raw);
+                    b.ForeColor=raw=="-1"||raw=="none"||raw==null||raw.Length==0?Muted:(usedBy(raw,action)!=null?amber:ink);
                 }
-                buttons[action].ForeColor=conflicting?Color.FromArgb(245,180,120):Color.FromArgb(228,232,240);
             }
+            if(clearButton!=null)clearButton.Enabled=selected!=null;
         };
 
-        var hint=LabelAt("Click a key, then press the one you want. Escape cancels. A key used twice is highlighted.",9,false);
-        hint.ForeColor=Muted;hint.SetBounds(0,0,500,36);list.Controls.Add(hint);
+        /* Write one binding and say so. */
+        Action<string,string> set=(action,value)=>{
+            try{SavePreference("MC3_KEY_"+action,value);}catch(Exception x){say("Could not save: "+x.Message);return;}
+            if(capturing==action){capturing=null;conflictKey=null;}
+            refresh();
+            say(full[action]+(value=="-1"?" is unbound.":" is "+face(value)+"."));
+        };
 
-        int y=40;
-        foreach(string action in KeyActions){
-            var name=LabelAt(pretty(action),9,false);name.ForeColor=Color.FromArgb(228,232,240);name.SetBounds(0,y,220,36);list.Controls.Add(name);names[action]=name;
-            var b=ButtonAt(list,"",230,y,220,()=>{});
-            buttons[action]=b;
-            string captured=action;
-            b.Click+=(s,e)=>{
-                if(capturing==action){                 // second click: cancel
-                    capturing=null;captureButton=null;refresh();return;
-                }
-                capturing=action;captureButton=b;
-                refresh();
-                f.Focus();
-            };
-            y+=44;
+        /* Right-click: clear or reset the row under the pointer. */
+        var menu=new ContextMenuStrip{BackColor=Card,ForeColor=ink,ShowImageMargin=false};
+        menu.Items.Add("Clear this key");
+        menu.Items.Add("Reset this key");
+        menu.Opening+=(s,e)=>{Control src=menu.SourceControl;menuAction=src!=null&&fieldAction.ContainsKey(src)?fieldAction[src]:null;};
+        menu.Items[0].Click+=(s,e)=>{if(menuAction!=null)set(menuAction,"-1");};
+        menu.Items[1].Click+=(s,e)=>{if(menuAction!=null)set(menuAction,KeyDefaults[Array.IndexOf(KeyActions,menuAction)]);};
+
+        int y=14;
+        for(int g=0;g<groups.Length;g++){
+            int column=g<3?0:1;
+            int colX=column==0?24:408;
+            if(column==1&&g==3)y=14;
+            var header=LabelAt(groups[g][0],8.5f,true);header.UseMnemonic=false;header.ForeColor=Muted;
+            header.SetBounds(colX,y,330,20);card.Controls.Add(header);
+            y+=22;
+            for(int i=2;i<groups[g].Length;i++){
+                string action=groups[g][i];
+                full[action]=groups[g][1].Length==0?names[action]:groups[g][1]+" "+names[action];
+                var label=LabelAt(names[action],10,false);label.TextAlign=ContentAlignment.MiddleLeft;
+                label.SetBounds(colX,y,196,32);card.Controls.Add(label);
+                var b=new RedubButton{Text="",Tag=action};b.Font=fieldFont;
+                b.SetBounds(colX+206,y,134,30);card.Controls.Add(b);
+                fields[action]=b;fieldAction[b]=action;
+                b.ContextMenuStrip=menu;
+                string bind=action;
+                b.Click+=(s,e)=>{
+                    if(capturing==bind){capturing=null;conflictKey=null;selected=bind;refresh();say(hint);return;}
+                    capturing=bind;selected=bind;conflictKey=null;refresh();
+                    say("Press the key you want for "+full[bind]+", or Esc to cancel.");
+                };
+                y+=32;
+            }
+            y+=4;
         }
-        list.AutoScrollMinSize=new Size(0,y+8);
+
+        clearButton=ButtonAt(f,"Clear key",28,642,140,()=>{
+            if(selected==null){say("Click the key you want to clear first.");return;}
+            set(selected,"-1");
+        });
+        ButtonAt(f,"Reset to defaults",506,642,170,()=>{
+            if(MessageBox.Show(f,"Set every key back to its default?","Reset keyboard",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+            try{for(int i=0;i<KeyActions.Length;i++)SavePreference("MC3_KEY_"+KeyActions[i],KeyDefaults[i]);}
+            catch(Exception x){say("Could not save: "+x.Message);return;}
+            capturing=null;conflictKey=null;refresh();say("Every key is back to its default.");
+        });
+        ButtonAt(f,"Done",696,642,96,()=>f.Close());
+
         refresh();
 
         f.KeyPreview=true;
         f.KeyDown+=(s,e)=>{
-            if(capturing==null)return;
-            e.Handled=true;e.SuppressKeyPress=true;
-            if(e.KeyCode==Keys.Escape){capturing=null;captureButton=null;refresh();return;}
-            string n=SdlKeyName(e.KeyCode);
-            if(n==null){MessageBox.Show(f,"That key cannot be sent to the game. Try a letter, a digit, an F-key, an arrow, or a modifier.","Keyboard");return;}
-            /* A key already doing something else is a mistake worth naming, not
-             * a silent second binding. */
-            string other=usedBy(n,capturing);
-            if(other!=null){
-                var answer=MessageBox.Show(f,pretty(other)+" is already set to "+n+".\n\nUse it for "+pretty(capturing)+" as well?",
-                                            "Key already used",MessageBoxButtons.YesNo,MessageBoxIcon.Question);
-                if(answer!=DialogResult.Yes)return;
+            if(capturing==null){
+                if(e.KeyCode==Keys.Escape){e.Handled=true;e.SuppressKeyPress=true;f.Close();}
+                return;
             }
-            try{SavePreference("MC3_KEY_"+capturing,n);}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);return;}
-            capturing=null;captureButton=null;refresh();
+            e.Handled=true;e.SuppressKeyPress=true;
+            if(e.KeyCode==Keys.Escape){capturing=null;conflictKey=null;refresh();say(hint);return;}
+            string n=SdlKeyName(e.KeyCode);
+            if(n==null){say("That key cannot be sent to the game. Try a letter, a digit, an F-key, an arrow or a modifier.");return;}
+            /* A key already doing something else is named, then taken only if
+             * pressed again: two actions on one key is otherwise silent. */
+            string other=usedBy(n,capturing);
+            if(other!=null&&conflictKey!=n){
+                conflictKey=n;
+                refresh();
+                say(n+" is already "+full[other]+". Press "+n+" again to use it for both, or press another key.");
+                return;
+            }
+            string done=full[capturing];
+            set(capturing,n);
+            say(done+" is now "+face(n)+". Applies at the next launch.");
         };
 
-        /* Clear the action being captured (or the selected one), which the
-         * game reads as an unbound button ("-1"). */
-        ButtonAt(bar,"Clear",16,8,120,()=>{
-            if(capturing==null){MessageBox.Show(f,"Click the key you want to clear first.","Keyboard");return;}
-            try{SavePreference("MC3_KEY_"+capturing,"-1");}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);return;}
-            capturing=null;captureButton=null;refresh();
-        });
-        ButtonAt(bar,"Reset to defaults",148,8,190,()=>{
-            if(MessageBox.Show(f,"Set every key back to its default?","Reset keyboard",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
-            try{for(int i=0;i<KeyActions.Length;i++)SavePreference("MC3_KEY_"+KeyActions[i],KeyDefaults[i]);}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);return;}
-            capturing=null;captureButton=null;refresh();Append("Keyboard layout reset to defaults.");
-        });
-        ButtonAt(bar,"Done",348,8,190,()=>f.Close());
+        /* The layout is fixed pixels, so at a scaled display the framework
+         * moves the controls in points but not the window: size the window to
+         * whatever the laid-out content actually needs, and nothing is cut. */
+        f.Load+=(s,e)=>{
+            int right=0,bottom=0;int inset=f.ClientSize.Width-Width;
+            foreach(Control c in f.Controls){if(c.Right>right)right=c.Right;if(c.Bottom>bottom)bottom=c.Bottom;}
+            f.ClientSize=new Size(Math.Max(f.ClientSize.Width,right+28),Math.Max(f.ClientSize.Height,bottom+20));
+        };
 
         f.ShowDialog(this);
+        fieldFont.Dispose();
+        headerFont.Dispose();
     }
 
         /* What each setting does, for the row's tooltip. Keyed by the setting name

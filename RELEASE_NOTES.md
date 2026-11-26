@@ -70,14 +70,20 @@ the file named.
 
 ### Rebindable keyboard
 
-Settings → Controls → **Rebind keyboard…** works the way a modern game's does: click the key you
-want to change, the field reads *Press a key…*, and the next key you press becomes it. Escape
-cancels, **Clear** unbinds the action, **Reset to defaults** puts every key back.
+Settings → Controls → **Rebind keyboard…** opens a page grouped by part of the pad — D-PAD, face
+buttons, shoulders and triggers, system, and each stick — with every action on the left and its key
+in a field on the right.
 
-Two things it used to get wrong are fixed. Changing a key drew a second label over the first, so
-rows ended up doubled after any edit. And a key already used by another action was taken silently,
-leaving two actions on one key with nothing to explain why: the prompt now names the action that
-holds it, and a row sharing a key is highlighted.
+Click a field and it reads *Press a key…*; the next key you press becomes it, and the line at the
+bottom says what changed. Escape cancels, or closes the page when nothing is selected. **Clear key**
+unbinds the selected row, right-click clears or resets a single row, and **Reset to defaults** puts
+every key back.
+
+A key already in use is not taken silently: the field turns amber, the bottom line names the action
+holding it, and pressing it again uses it for both — the two rows then stay highlighted so the
+overlap is visible later. None of that is a message box any more, which used to interrupt the
+keystroke you were in the middle of answering. Rebinding also no longer draws a second label over
+the first, which used to double every row after one edit.
 
 `MC3_KEY_TRACE=1` logs every key that becomes a pad button, which is the quickest answer to
 "my rebound key does nothing".

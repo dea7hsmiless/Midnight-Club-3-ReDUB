@@ -1,17 +1,24 @@
-# Does the keyboard rebind dialog behave like a modern game's?
+# Does the keyboard rebind page behave like a modern game's?
 #
 #   powershell -File tools/windows/Test-Keyboard-Rebind.ps1
 #
-# Click the key you want to change, the field says "Press a key...", the next
-# key you press becomes it. Escape cancels, Clear unbinds, Reset restores the
-# defaults, and a key already doing something else asks before it is taken --
-# because two actions on one key is otherwise silent and unfixable in game.
+# The page is a grid: one group per part of the pad, the action on the left and
+# its key in a field on the right. Click a field and it reads "Press a key...";
+# the next key you press becomes it. Escape cancels, or closes the page when
+# nothing is being captured. Clear unbinds the selected row, Reset restores the
+# defaults, right-click clears one row.
 #
-# The dialog is modal (ShowDialog blocks its caller), so the probe cannot drive
-# it from outside. A timer is queued on the UI thread instead, which runs inside
-# the dialog's own message loop: exactly where a player's click happens. A
-# watchdog thread reports and closes any message box that appears, so a prompt
-# that should appear is an observable event rather than a hang.
+# The important part: nothing in the capture path is modal. A key that is
+# already used turns the field amber, names the action holding it in the status
+# line, and is taken only if it is pressed again. A prompt there would arrive
+# mid-finger-stroke and had to be read before it could be answered, so the
+# checks below assert that no message box appears at all.
+#
+# The page is modal (ShowDialog blocks its caller), so the probe cannot drive it
+# from outside. A timer is queued on the UI thread instead, which runs inside the
+# page's own message loop: exactly where a player's click happens. A watchdog
+# thread reports and answers any message box, so one where none belongs is a
+# failure rather than a hang.
 #
 # Exit 0 = all pass. Needs the .NET Framework compiler, like the launcher.
 param(
@@ -37,6 +44,7 @@ try {
     @'
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -57,7 +65,13 @@ class RebindProbe {
     static readonly object gate = new object();
     static string logPath;
     static int fails;
-    static int boxes;
+    static volatile int boxes;
+    static Form dialogRef;
+    static bool expectClose;
+
+    static readonly Color Ink = Color.FromArgb(235, 239, 247);
+    static readonly Color Amber = Color.FromArgb(245, 180, 120);
+    static readonly Color Muted = Color.FromArgb(153, 165, 188);
 
     static void Log(string s) {
         lock (gate) File.AppendAllText(logPath, s + "\r\n", Encoding.UTF8);
@@ -88,20 +102,33 @@ class RebindProbe {
     }
 
     // A message box blocks the UI thread, which is where this probe runs. The
-    // watchdog closes it (WM_CLOSE answers No for a Yes/No box) so the run
-    // continues; its title is recorded for the assertion.
+    // watchdog answers it so a run cannot hang, and records the title.
     static void ExpectBox(string title, int before) {
         for (int i = 0; i < 24 && boxes == before; i++) Thread.Sleep(100);
-        Check("a " + title + " prompt appears", boxes > before, boxes - before + " box(es)");
+        Check("a \"" + title + "\" prompt appears", boxes > before, boxes - before + " box(es)");
         for (int i = 0; i < 10 && Tail().IndexOf("title=[" + title + "]") < 0; i++) Thread.Sleep(100);
-        Check("  the prompt is titled \"" + title + "\"",
-              Tail().IndexOf("title=[" + title + "]") >= 0, "log");
     }
 
-    static Control FindByText(Control root, string text) {
+    static Control ByTag(Control root, string tag) {
+        foreach (Control c in root.Controls) {
+            if (c.Tag as string == tag) return c;
+            Control d = ByTag(c, tag);
+            if (d != null) return d;
+        }
+        return null;
+    }
+    static Control ByText(Control root, string text) {
         foreach (Control c in root.Controls) {
             if (c.Text == text) return c;
-            Control d = FindByText(c, text);
+            Control d = ByText(c, text);
+            if (d != null) return d;
+        }
+        return null;
+    }
+    static Control ByName(Control root, string name) {
+        foreach (Control c in root.Controls) {
+            if (c.Name == name) return c;
+            Control d = ByName(c, name);
             if (d != null) return d;
         }
         return null;
@@ -131,6 +158,7 @@ class RebindProbe {
     static bool Wrote(string text, string line) {
         return text.Replace(" ", "").IndexOf(line.Replace(" ", ""), StringComparison.Ordinal) >= 0;
     }
+    static bool Same(Color a, Color b) { return a.R == b.R && a.G == b.G && a.B == b.B; }
 
     [STAThread]
     static int Main(string[] args) {
@@ -140,7 +168,7 @@ class RebindProbe {
         uint pid = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
         var seen = new HashSet<IntPtr>();
         var watchdog = new Thread(() => {
-            for (int i = 0; i < 200; i++) {
+            for (int i = 0; i < 400; i++) {
                 Thread.Sleep(150);
                 foreach (IntPtr h in WindowsOfClass(pid, "#32770")) {
                     if (!seen.Add(h)) continue;
@@ -150,8 +178,6 @@ class RebindProbe {
                         var cls = new StringBuilder(64); GetClassName(c, cls, 64);
                         string text = TextOf(c);
                         if (cls.ToString() == "Button") {
-                            // Answer No / OK: the declining answer, so an
-                            // accidental prompt cannot change a setting.
                             if (text.IndexOf("No", StringComparison.OrdinalIgnoreCase) >= 0 && answer == IntPtr.Zero)
                                 answer = c;
                         } else if (text.Length > 0) {
@@ -166,7 +192,7 @@ class RebindProbe {
                             return true;
                         }, IntPtr.Zero);
                     }
-                    lock (gate) boxes++;
+                    boxes++;
                     Log("!! MESSAGE BOX: title=[" + TextOf(h) + "] body=[" + body + "]");
                     if (answer != IntPtr.Zero) SendMessage(answer, 0x00F5 /* BM_CLICK */, IntPtr.Zero, IntPtr.Zero);
                     else PostMessage(h, 0x0010, IntPtr.Zero, IntPtr.Zero);
@@ -186,8 +212,7 @@ class RebindProbe {
         string envPath = Path.Combine(root, @"work-remix\build-windows-x86_64\dist\mcdub3remix_env.txt");
         Directory.CreateDirectory(Path.GetDirectoryName(envPath));
         // The launcher refuses to save unless the settings file exists, which is
-        // the "Install the game before saving settings" guard. A scratch install
-        // needs one to write into.
+        // the "Install the game before saving settings" guard.
         if (!File.Exists(envPath)) File.WriteAllText(envPath, "# scratch settings\r\n");
 
         var t = new System.Windows.Forms.Timer { Interval = 400 };
@@ -197,79 +222,115 @@ class RebindProbe {
                 if (f != app && f.Text == "Keyboard (player 1)") dialog = f;
             if (dialog == null) return;
             t.Stop();
+            dialogRef = dialog;
             try { Run(app, dialog, envPath); }
             catch (Exception ex) { Log("EXCEPTION: " + ex.ToString().Split('\n')[0]); fails++; }
-            Environment.Exit(fails == 0 ? 0 : 1);
+            // The last step closes the page, which unwinds the modal loop this
+            // timer runs inside; Main reports the result once ShowDialog returns.
+            if (!expectClose) Environment.Exit(fails == 0 ? 0 : 1);
         };
         t.Start();
 
         type.GetMethod("ShowKeyBindings", BindingFlags.NonPublic | BindingFlags.Instance)
             .Invoke(app, null);
-        Log("FAIL: the dialog closed without the probe running");
-        return 1;
+        if (!expectClose) {
+            Log("FAIL: the page closed without the probe running");
+            fails++;
+        } else {
+            Check("Escape closes the page when idle",
+                  dialogRef == null || !dialogRef.Visible,
+                  dialogRef == null ? "gone" : "visible=" + dialogRef.Visible);
+        }
+        Log(fails == 0 ? "ALL PASS" : fails + " FAILED");
+        return fails == 0 ? 0 : 1;
     }
 
     static void Run(Form app, Form dialog, string envPath) {
-        var fields = Fields(dialog);
-        Check("every action has a field", fields.Count == 27, fields.Count + " buttons");
+        string[] actions = {
+            "DPAD_UP","DPAD_DOWN","DPAD_LEFT","DPAD_RIGHT","START","BACK","LSTICK","RSTICK",
+            "A","B","X","Y","WHITE","BLACK","LT","RT",
+            "LSTICK_LEFT","LSTICK_RIGHT","LSTICK_UP","LSTICK_DOWN",
+            "RSTICK_LEFT","RSTICK_RIGHT","RSTICK_UP","RSTICK_DOWN"
+        };
+
+        int bound = 0;
+        foreach (string act in actions) if (ByTag(dialog, act) != null) bound++;
+        Check("every action has a field", bound == 24, bound + " of 24");
+        Check("the page is grouped, not one long list", ByText(dialog, "D-PAD") != null && ByText(dialog, "FACE BUTTONS") != null,
+              "group headers");
+
+        var status = ByName(dialog, "status");
+        Check("the status line exists", status != null, status == null ? "missing" : "named");
+        var clear = ByText(dialog, "Clear key");
+        Check("Clear is disabled until a key is selected", clear != null && !clear.Enabled,
+              clear == null ? "no button" : "Enabled=" + clear.Enabled);
+
+        var a = ByTag(dialog, "A");
+        var b = ByTag(dialog, "B");
+        Check("a field shows its current key", a.Text == "A", a.Text);
+        // Keys are shown the way a player reads them, not as the setting's name.
+        Check("Return reads as Enter", ByTag(dialog, "START").Text == "Enter", ByTag(dialog, "START").Text);
+
+
         int labelsBefore = CountLabels(dialog);
+        int boxesBefore = boxes;
 
-        var target = fields[8];                       // A, default "A"
-        Check("a field shows its current key", target.Text == "A", target.Text);
-
-        Click(target);
-        Check("clicking a field asks for a key", target.Text.StartsWith("Press a key"), target.Text);
+        Click(a);
+        Check("clicking a field asks for a key", a.Text.StartsWith("Press a key"), a.Text);
+        Check("  and the status line names the action", status.Text.Contains("A"), status.Text);
+        Check("  and Clear becomes available", clear.Enabled, "Enabled=" + clear.Enabled);
 
         Key(dialog, Keys.P);
-        Check("the pressed key becomes the binding", target.Text == "P", target.Text);
+        Check("the pressed key becomes the binding", a.Text == "P", a.Text);
         Check("the binding is written for the game", Wrote(Env(envPath), "MC3_KEY_A=P"), "MC3_KEY_A=P");
+        Check("saving says what happened", status.Text.Contains("now P"), status.Text);
         Check("no duplicated labels after a rebind", CountLabels(dialog) == labelsBefore,
               labelsBefore + " -> " + CountLabels(dialog));
 
-        Click(target);
+        Click(a);
         Key(dialog, Keys.Escape);
-        Check("Escape cancels and keeps the key", target.Text == "P", target.Text);
+        Check("Escape cancels and keeps the key", a.Text == "P", a.Text);
+        Check("  and puts the hint back", status.Text.StartsWith("Click a key"), status.Text);
 
-        // A key that already does something else must be named, not silently
-        // taken: two actions on one key cannot be untangled in game.
-        var second = fields[9];                       // B
-        int before = boxes;
-        Click(second);
+        // A key already doing something else is named, not taken.
+        Click(b);
         Key(dialog, Keys.P);
-        ExpectBox("Key already used", before);
-        Check("declining leaves the second action unbound", !Wrote(Env(envPath), "MC3_KEY_B=P"), "MC3_KEY_B not written");
-        Check("declining leaves the first binding alone", target.Text == "P", target.Text);
-        // Declining keeps the field waiting, so the player can simply press
-        // another key instead of starting over.
-        int before2 = boxes;
-        Key(dialog, Keys.H);
-        Check("a different key is taken straight away", second.Text == "H", second.Text);
-        Check("  and it does not ask again", boxes == before2, boxes - before2 + " box(es)");
+        Check("a key in use stays in the field, amber", b.Text == "P" && Same(b.ForeColor, Amber), b.Text);
+        Check("  the status line names the action holding it", status.Text.Contains("already") && status.Text.Contains("A"), status.Text);
+        Check("  and nothing is written yet", !Wrote(Env(envPath), "MC3_KEY_B=P"), "MC3_KEY_B not written");
+        Check("  no message box interrupts the capture", boxes == boxesBefore, boxes - boxesBefore + " box(es)");
 
-        Click(target);
-        var clear = FindByText(dialog, "Clear");
-        Check("a Clear button exists", clear != null, clear == null ? "missing" : "present");
+        Key(dialog, Keys.P);
+        Check("pressing it again takes it", b.Text == "P" && Wrote(Env(envPath), "MC3_KEY_B=P"), "MC3_KEY_B=P");
+        Check("  a shared key is highlighted on both rows", Same(a.ForeColor, Amber) && Same(b.ForeColor, Amber), "amber");
+
+        // Clear works on the selected row.
+        Click(a);
+        Key(dialog, Keys.Escape);
+        clear = ByText(dialog, "Clear key");
         Click(clear);
-        Check("Clear unbinds the action", target.Text == "not set", target.Text);
-        Check("Clear writes -1, which the game reads as unbound", Wrote(Env(envPath), "MC3_KEY_A=-1"), "-1");
+        Check("Clear unbinds the selected row", a.Text == "\u2014", a.Text);
+        Check("  an unbound key is a dash", a.Text == "\u2014", a.Text);
+        Check("  shown muted, not as an error", Same(a.ForeColor, Muted), a.ForeColor.ToString());
+        Check("  and writes -1, which the game reads as unbound", Wrote(Env(envPath), "MC3_KEY_A=-1"), "-1");
+        Check("  and says so", status.Text.Contains("unbound"), status.Text);
 
-        before = boxes;
-        Click(clear);
-        ExpectBox("Keyboard", before);
-        Check("Clear with nothing selected explains itself", true, "prompt shown");
+        // Right-click clears a single row without selecting it first.
+        Check("a row has a right-click menu", a.ContextMenuStrip != null, a.ContextMenuStrip == null ? "none" : "present");
+        if (a.ContextMenuStrip != null)
+            Check("  offering Clear and Reset", a.ContextMenuStrip.Items.Count == 2 &&
+                  a.ContextMenuStrip.Items[0].Text == "Clear this key", "items");
 
-        var reset = FindByText(dialog, "Reset to defaults");
-        Check("a Reset button exists", reset != null, reset == null ? "missing" : "present");
-        if (reset != null) {
-            before = boxes;
-            Click(reset);
-            ExpectBox("Reset keyboard", before);
-            // WM_CLOSE answers No, so the defaults must NOT have been applied yet.
-            Check("Reset asks first", target.Text == "not set", target.Text);
-        }
+        // Reset asks first; declining leaves every binding alone.
+        int beforeReset = boxes;
+        Click(ByText(dialog, "Reset to defaults"));
+        ExpectBox("Reset keyboard", beforeReset);
+        Check("Reset asks before touching anything", a.Text == "\u2014" && b.Text == "P", "unchanged");
 
-        Log(fails == 0 ? "ALL PASS" : fails + " FAILED");
-        dialog.Close();
+        // Escape closes the page when nothing is being captured. This is the
+        // last step: it unwinds the modal loop, so Main checks the result.
+        expectClose = true;
+        Key(dialog, Keys.Escape);
     }
 }
 '@ | Set-Content -Path $probe -Encoding UTF8
