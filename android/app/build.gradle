@@ -55,6 +55,13 @@ if (!sdl.exists())
 // outside the checkout), else the repo's CMakeLists.txt finds work-<game>/.
 def genDir = System.getenv('MC3_WORK') ? new File(System.getenv('MC3_WORK'), 'gen') : null
 
+// -PMC3_MUSIC=0 builds the APK that asks for no sensitive permission, which is
+// the only variant Google Play Protect will install from a browser in the
+// regions where its enhanced fraud protection runs (docs/ANDROID-INSTALL.md).
+// It swaps in a second manifest rather than using a product flavour, so the
+// task names stay assembleDebug / assembleRelease for both builds.
+def musicEnabled = !(project.hasProperty('MC3_MUSIC') && project.MC3_MUSIC.toString() == '0')
+
 // The launcher icon from the game's artwork (config/<game>/app.env APP_ICON,
 // per edition; personal, not in git), made by tools/app_icon.py into
 // build/generated/mc3-icon: an adaptive icon over SDL's. No artwork or no
@@ -127,6 +134,11 @@ android {
             // SDL's activity and its helpers, from the SDL source the native build uses
             java.srcDirs += new File(sdl, 'android-project/app/src/main/java')
             res.srcDirs += iconRes
+            // -PMC3_MUSIC=0: the manifest without the notification listener or
+            // all-files access. A whole file, not an overlay, because the
+            // merger cannot remove the service's permission attribute cleanly.
+            if (!musicEnabled)
+                manifest.srcFile 'src/nomusic/AndroidManifest.xml'
         }
     }
     signingConfigs {
@@ -149,12 +161,13 @@ android {
         }
     }
     // <app>-<version>.apk (mcdub3-0.1.0.apk, a beta mcdub3-0.1.0-beta.3.apk);
-    // debug builds -debug.apk
+    // debug builds -debug.apk. The -PMC3_MUSIC=0 build is -nomusic, so the two
+    // never overwrite each other in the output folder.
     applicationVariants.all { variant ->
         variant.outputs.all {
             def abiTag = abis.size() > 1 ? '-universal'
                          : abis[0] == 'arm64-v8a' ? '' : "-${abis[0]}"
-            outputFileName = "${app}-${versionLabel}${abiTag}${variant.buildType.name == 'release' ? '' : '-debug'}.apk"
+            outputFileName = "${app}-${versionLabel}${abiTag}${musicEnabled ? '' : '-nomusic'}${variant.buildType.name == 'release' ? '' : '-debug'}.apk"
         }
     }
     packagingOptions {

@@ -127,9 +127,31 @@ is running, since a running game holds those files open.
 
 Both mobile builds are now made from the same tree as everything else, on a Windows PC: the
 APK through the Android SDK and NDK, the IPA through clang and the iPhoneOS SDK with no Mac.
-The APK carries arm64, armv7 and x86_64; the IPA is arm64 and unsigned, for Sideloadly or
-AltStore to sign with your own certificate (it asks for the increased memory limit the game
-needs).
+The IPA is arm64 and unsigned, for Sideloadly or AltStore to sign with your own certificate (it
+asks for the increased memory limit the game needs).
+
+### Android ships two APKs, and you may need the second one
+
+Google Play Protect now **automatically blocks** the install of an app that asks for
+notification access when the file was opened from a browser, a messaging app or a file manager.
+ReDUB asks for it for one reason: so the in-game radio can read the song playing on your phone.
+It is not a malware warning, it is a rule about that permission, and it applies in some countries
+and not others.
+
+So this release carries two builds of the same game, same version, same key:
+
+| File | What it declares | Use it when |
+|---|---|---|
+| `ReDUB-0.2.6-android.apk` | notification listener + all-files access | you can install it, and want the now-playing radio and a disc from anywhere on the phone |
+| `ReDUB-0.2.6-android-nomusic.apk` | neither | Android refuses the first one |
+
+The second build is the same game. It loses the phone-music bridge and the ability to read a disc
+from a folder outside the app's own, and nothing else. It installs like any normal APK, because
+the rule only looks at what the app asks for.
+
+If you would rather keep the full build: `adb install` is not one of the checked sources, so it
+installs without the block and Play Protect stays on. On a Samsung phone, turn off Auto Blocker
+first, since it blocks USB installs as well.
 
 ### Known issues
 
