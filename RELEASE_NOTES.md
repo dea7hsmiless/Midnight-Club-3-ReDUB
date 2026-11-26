@@ -70,9 +70,17 @@ the file named.
 
 ### Rebindable keyboard
 
-Settings → Controls → **Rebind keyboard…** captures a key and writes it for the game, with
-defaults and a reset. `MC3_KEY_TRACE=1` logs every key that becomes a pad button, which is the
-quickest answer to "my rebound key does nothing".
+Settings → Controls → **Rebind keyboard…** works the way a modern game's does: click the key you
+want to change, the field reads *Press a key…*, and the next key you press becomes it. Escape
+cancels, **Clear** unbinds the action, **Reset to defaults** puts every key back.
+
+Two things it used to get wrong are fixed. Changing a key drew a second label over the first, so
+rows ended up doubled after any edit. And a key already used by another action was taken silently,
+leaving two actions on one key with nothing to explain why: the prompt now names the action that
+holds it, and a row sharing a key is highlighted.
+
+`MC3_KEY_TRACE=1` logs every key that becomes a pad button, which is the quickest answer to
+"my rebound key does nothing".
 
 ### Quality of life
 

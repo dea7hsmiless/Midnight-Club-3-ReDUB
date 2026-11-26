@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -210,45 +210,120 @@ public sealed class Launcher : Form {
         }
         return null;
     }
+    /* The keyboard layout, edited the way a modern game does it: click the key
+     * you want to change, the field says "Press a key", the next key you press
+     * becomes it. Escape cancels, "Clear" unbinds.
+     *
+     * Three things the previous version got wrong, all fixed here:
+     *
+     *  - redraw() added a fresh label per action on every call, so after a
+     *    rebind or a reset every row had a second label drawn over the first;
+     *  - a key already used elsewhere was accepted, leaving two actions on one
+     *    key with no warning;
+     *  - the capture only listened for KeyDown, so pressing a bound key gave no
+     *    feedback that it had been taken.
+     */
     void ShowKeyBindings(){
         if(GameRunning()){MessageBox.Show(this,"Save and close the game first: the layout is read when the game starts.","Game is running");return;}
-        var f=new Form{Text="Keyboard (player 1)",ClientSize=new Size(520,660),StartPosition=FormStartPosition.CenterParent,FormBorderStyle=FormBorderStyle.FixedDialog,MaximizeBox=false,MinimizeBox=false,BackColor=Bg,ForeColor=Color.FromArgb(228,232,240)};
+        var f=new Form{Text="Keyboard (player 1)",ClientSize=new Size(560,700),StartPosition=FormStartPosition.CenterParent,FormBorderStyle=FormBorderStyle.FixedDialog,MaximizeBox=false,MinimizeBox=false,BackColor=Bg,ForeColor=Color.FromArgb(228,232,240)};
         var list=new Panel{Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(16),BackColor=Bg};f.Controls.Add(list);
         var bar=new Panel{Dock=DockStyle.Bottom,Height=56,BackColor=Bg};f.Controls.Add(bar);
+
+        var names=new Dictionary<string,Label>();
         var buttons=new Dictionary<string,RedubButton>();
         string capturing=null;
-        Action redraw=()=>{
-            int y=0;
-            foreach(var action in KeyActions){
-                string pretty=action.Replace("RSTICK","RIGHT STICK").Replace("LSTICK","LEFT STICK").Replace("DPAD","D-PAD").Replace('_',' ');
-                var name=LabelAt(pretty,9,false);name.ForeColor=Color.FromArgb(228,232,240);name.SetBounds(0,y,200,36);list.Controls.Add(name);
-                string current=ReadSetting("MC3_KEY_"+action,KeyDefaults[Array.IndexOf(KeyActions,action)]);
-                if(current=="-1"||current=="")current="not set";
-                RedubButton b;
-                if(!buttons.TryGetValue(action,out b)){
-                    b=ButtonAt(list,current,210,y,180,()=>{});
-                    var captured=action;
-                    b.Click+=(s,e)=>{capturing=captured;b.Text="Press a key…";};
-                    buttons[action]=b;
-                }else b.Text=current;
-                y+=44;
-            }
-            list.AutoScrollMinSize=new Size(0,y+8);
+        RedubButton captureButton=null;
+
+        /* What an action is set to, as the game will read it. */
+        Func<string,string> current=action=>{
+            string v=ReadSetting("MC3_KEY_"+action,KeyDefaults[Array.IndexOf(KeyActions,action)]);
+            if(v==null||v.Length==0||v=="-1"||v=="none")return "not set";
+            return v;
         };
-        redraw();
+        /* The action already using `key`, other than `except`, or null. */
+        Func<string,string,string> usedBy=(key,except)=>{
+            foreach(string a in KeyActions){
+                if(a==except)continue;
+                string v=ReadSetting("MC3_KEY_"+a,KeyDefaults[Array.IndexOf(KeyActions,a)]);
+                if(v!=null&&string.Equals(v,key,StringComparison.OrdinalIgnoreCase))return a;
+            }
+            return null;
+        };
+        Func<string,string> pretty=action=>action.Replace("RSTICK","RIGHT STICK").Replace("LSTICK","LEFT STICK").Replace("DPAD","D-PAD").Replace('_',' ');
+
+        /* Only ever updates text: adding controls here is what caused the
+         * doubled labels. */
+        Action refresh=()=>{
+            foreach(string action in KeyActions){
+                string v=capturing==action?"Press a key...":current(action);
+                buttons[action].Text=v;
+                bool conflicting=false;
+                if(capturing==null){
+                    string raw=current(action);
+                    if(raw!="not set")conflicting=usedBy(raw,action)!=null;
+                }
+                buttons[action].ForeColor=conflicting?Color.FromArgb(245,180,120):Color.FromArgb(228,232,240);
+            }
+        };
+
+        var hint=LabelAt("Click a key, then press the one you want. Escape cancels. A key used twice is highlighted.",9,false);
+        hint.ForeColor=Muted;hint.SetBounds(0,0,500,36);list.Controls.Add(hint);
+
+        int y=40;
+        foreach(string action in KeyActions){
+            var name=LabelAt(pretty(action),9,false);name.ForeColor=Color.FromArgb(228,232,240);name.SetBounds(0,y,220,36);list.Controls.Add(name);names[action]=name;
+            var b=ButtonAt(list,"",230,y,220,()=>{});
+            buttons[action]=b;
+            string captured=action;
+            b.Click+=(s,e)=>{
+                if(capturing==action){                 // second click: cancel
+                    capturing=null;captureButton=null;refresh();return;
+                }
+                capturing=action;captureButton=b;
+                refresh();
+                f.Focus();
+            };
+            y+=44;
+        }
+        list.AutoScrollMinSize=new Size(0,y+8);
+        refresh();
+
         f.KeyPreview=true;
         f.KeyDown+=(s,e)=>{
             if(capturing==null)return;
             e.Handled=true;e.SuppressKeyPress=true;
-            if(e.KeyCode==Keys.Escape){capturing=null;redraw();return;}
+            if(e.KeyCode==Keys.Escape){capturing=null;captureButton=null;refresh();return;}
             string n=SdlKeyName(e.KeyCode);
             if(n==null){MessageBox.Show(f,"That key cannot be sent to the game. Try a letter, a digit, an F-key, an arrow, or a modifier.","Keyboard");return;}
-            try{SavePreference("MC3_KEY_"+capturing,n);capturing=null;redraw();}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+            /* A key already doing something else is a mistake worth naming, not
+             * a silent second binding. */
+            string other=usedBy(n,capturing);
+            if(other!=null){
+                var answer=MessageBox.Show(f,pretty(other)+" is already set to "+n+".\n\nUse it for "+pretty(capturing)+" as well?",
+                                            "Key already used",MessageBoxButtons.YesNo,MessageBoxIcon.Question);
+                if(answer!=DialogResult.Yes)return;
+            }
+            try{SavePreference("MC3_KEY_"+capturing,n);}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);return;}
+            capturing=null;captureButton=null;refresh();
         };
-        ButtonAt(bar,"Reset to defaults",16,8,200,()=>{try{for(int i=0;i<KeyActions.Length;i++)SavePreference("MC3_KEY_"+KeyActions[i],KeyDefaults[i]);redraw();Append("Keyboard layout reset to defaults.");}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);}});
-        ButtonAt(bar,"Done",286,8,200,()=>f.Close());
+
+        /* Clear the action being captured (or the selected one), which the
+         * game reads as an unbound button ("-1"). */
+        ButtonAt(bar,"Clear",16,8,120,()=>{
+            if(capturing==null){MessageBox.Show(f,"Click the key you want to clear first.","Keyboard");return;}
+            try{SavePreference("MC3_KEY_"+capturing,"-1");}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);return;}
+            capturing=null;captureButton=null;refresh();
+        });
+        ButtonAt(bar,"Reset to defaults",148,8,190,()=>{
+            if(MessageBox.Show(f,"Set every key back to its default?","Reset keyboard",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;
+            try{for(int i=0;i<KeyActions.Length;i++)SavePreference("MC3_KEY_"+KeyActions[i],KeyDefaults[i]);}catch(Exception x){MessageBox.Show(f,x.Message,"Could not save",MessageBoxButtons.OK,MessageBoxIcon.Error);return;}
+            capturing=null;captureButton=null;refresh();Append("Keyboard layout reset to defaults.");
+        });
+        ButtonAt(bar,"Done",348,8,190,()=>f.Close());
+
         f.ShowDialog(this);
     }
+
         /* What each setting does, for the row's tooltip. Keyed by the setting name
      * the game reads, so the text lives in one place and a row cannot be added
      * without one: the layout test asserts every row resolves a description. */
