@@ -29,7 +29,7 @@ It is also **not new in 0.2.6**. The 0.2.5 APK declares exactly the same service
 | File | Declares | Loses |
 |---|---|---|
 | `ReDUB-<version>-android.apk` | notification listener, `MANAGE_EXTERNAL_STORAGE` | — |
-| `ReDUB-<version>-android-lite.apk` | neither | now-playing radio, and a disc outside the app's reachable folders |
+| `ReDUB-<version>-android-compat.apk` | neither | now-playing radio, and a disc outside the app's reachable folders |
 
 Same package, same version code, same signing key: they replace each other. Install one.
 
@@ -59,7 +59,7 @@ cd android
 The two builds clear the APK output folder, so copy each one out before starting the other.
 
 `-PMC3_MUSIC=0` swaps the manifest rather than merging an overlay:
-`app/src/lite/AndroidManifest.xml` replaces `app/src/main/AndroidManifest.xml`. The merger
+`app/src/compat/AndroidManifest.xml` replaces `app/src/main/AndroidManifest.xml`. The merger
 cannot remove a service's `android:permission` attribute in a way that keeps
 `BIND_NOTIFICATION_LISTENER_SERVICE` out of the packaged manifest.
 

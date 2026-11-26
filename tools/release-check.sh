@@ -118,7 +118,7 @@ fi
 # 8. The two Android manifests stay in step (docs/ANDROID-INSTALL.md).
 # The no-music APK exists so Play Protect will install it; if the two manifests
 # drift it could ship with the permission it was built to remove, so compare them.
-if [ -f android/app/src/lite/AndroidManifest.xml ]; then
+if [ -f android/app/src/compat/AndroidManifest.xml ]; then
   if [ -z "${py:-}" ]; then
     for candidate in python3 python py; do
       if command -v "$candidate" >/dev/null 2>&1; then py=$candidate; break; fi
@@ -127,12 +127,12 @@ if [ -f android/app/src/lite/AndroidManifest.xml ]; then
   if [ -z "${py:-}" ]; then
     bad "no Python found to compare the Android manifests"
   elif "$py" tools/check_android_manifests.py; then
-    ok "the lite manifest differs only by the two blocked declarations"
+    ok "the compat manifest differs only by the two blocked declarations"
   else
     bad "android manifests drifted (see the FAIL lines above)"
   fi
 else
-  warn "no android/app/src/lite manifest; skipping the lite build check"
+  warn "no android/app/src/compat manifest; skipping the compat build check"
 fi
 
 echo
