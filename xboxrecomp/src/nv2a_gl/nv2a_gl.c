@@ -4047,6 +4047,17 @@ static void gl_make_window(void *unused)
         fprintf(stderr, "  [GL] SDL video: %s\n", SDL_GetError());
         return;
     }
+#if defined(__ANDROID__)
+    /* Landscape, whatever way the phone is held. The manifest's
+     * sensorLandscape is not enough: SDL_androidwindow.c hands
+     * SDL_GetHint(SDL_HINT_ORIENTATIONS) to SDLActivity.setOrientation, and with
+     * no hint -- and a resizable window -- setOrientationBis() asks Android for
+     * SCREEN_ORIENTATION_FULL_USER (13). The activity then followed the device
+     * and the game was given a 1080x2340 portrait surface on a phone held
+     * upright. Naming both landscape sides makes it ask for
+     * SENSOR_LANDSCAPE instead. Must be set before the window is created. */
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
     {
         /* OpenGL ES 3.2 on Android (ADR 0010), or where RECOMP_GL_GLES=1 asks
          * for it (a desktop driver with ES contexts, to test that path). */

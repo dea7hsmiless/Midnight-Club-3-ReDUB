@@ -119,6 +119,12 @@ public class LauncherActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        /* Immersive, like the game. The manifest gives this activity
+         * Theme.Material.NoActionBar (an action bar is gone, the status and
+         * navigation bars are not), so the start screen kept the system UI
+         * while the game hid it. minSdk is 33, so WindowInsetsController is
+         * always available. */
+        hideSystemBars();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         rows.clear();
         rows.addAll(rows());
@@ -216,6 +222,34 @@ public class LauncherActivity extends Activity {
         View v = new View(this);
         v.setLayoutParams(new LinearLayout.LayoutParams(1, dp(h)));
         return v;
+    }
+
+    /* ── Immersive ───────────────────────────────────────────────────── */
+
+    /* Hide the status and navigation bars; a swipe brings them back for a
+     * moment. The game's activity does the same (MainActivity), so the start
+     * screen and the game agree on how much of the screen they use. */
+    private void hideSystemBars() {
+        final View decor = getWindow().getDecorView();
+        decor.post(new Runnable() {
+            @Override public void run() {
+                android.view.WindowInsetsController c = decor.getWindowInsetsController();
+                if (c != null) {
+                    c.setSystemBarsBehavior(
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                    c.hide(android.view.WindowInsets.Type.systemBars());
+                }
+            }
+        });
+    }
+
+    /* Coming back from the file picker or the settings screen can restore the
+     * bars; put them away again. */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus)
+            hideSystemBars();
     }
 
     /* ── The shell: rail, page, status bar ───────────────────────────── */

@@ -8,6 +8,10 @@ import android.provider.Settings;
 import android.system.Os;
 import android.view.InputDevice;
 import android.view.KeyEvent;
+import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -31,6 +35,19 @@ public class MainActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle state) {
+        /* Landscape, regardless of how the phone is held. The manifest says
+         * sensorLandscape, but SDL overrides it. The orientation hint has to be
+         * set in C (nv2a_gl.c, SDL_HINT_ORIENTATIONS): SDL_androidwindow.c passes
+         * SDL_GetHint(SDL_HINT_ORIENTATIONS) to setOrientation, and with no hint
+         * and a resizable window SDLActivity.setOrientationBis() asks for
+         * SCREEN_ORIENTATION_FULL_USER (13) instead, which handed the game a
+         * 1080x2340 portrait surface. */
+
+        /* Immersive: the status and navigation bars go away and come back only
+         * as a transient swipe. theme Theme.NoTitleBar.Fullscreen (the manifest)
+         * is the pre-KitKat mechanism and does not hide the navigation bar, so
+         * the system UI stayed on screen. */
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         /* For android_host.c, before the game starts: it wins over the
          * settings file and the search. */
         String dir = getIntent() != null ? getIntent().getStringExtra(EXTRA_GAME_DIR) : null;
@@ -60,6 +77,31 @@ public class MainActivity extends SDLActivity {
             /* the native search and defaults then */
         }
         super.onCreate(state);
+        hideSystemBars();
+    }
+
+    /* minSdk is 33, so WindowInsetsController is always available. */
+    private void hideSystemBars() {
+        final View decor = getWindow().getDecorView();
+        decor.post(new Runnable() {
+            @Override public void run() {
+                WindowInsetsController c = decor.getWindowInsetsController();
+                if (c != null) {
+                    c.setSystemBarsBehavior(
+                        WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                    c.hide(WindowInsets.Type.systemBars());
+                }
+            }
+        });
+    }
+
+    /* A layout pass can bring the bars back (focus change, rotation, keyboard):
+     * put them away again rather than leaving the player with a shifted picture. */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus)
+            hideSystemBars();
     }
 
     @Override

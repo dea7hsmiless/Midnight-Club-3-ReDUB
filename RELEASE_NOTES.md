@@ -26,6 +26,31 @@ so it is now mapped onto `glDrawBuffers` for ES contexts - the same way this fil
 `glClearDepth` and `glDepthRange`, which are float-only in ES. On desktop the real function is
 found and the mapping is never used.
 
+### Landscape, and the system bars (Android)
+
+Both Android APKs were replaced on this release on 27 November with this fix; the file names and
+the signing key are unchanged, and the version inside is the same.
+
+The game could open in **portrait**, and the status and navigation bars stayed on screen. Neither
+was new to 0.2.6 - the manifest and the SDL settings are identical in 0.2.5 and 0.2.6 - so anyone
+who has seen it has seen it since the Android port landed.
+
+- **Portrait.** The manifest asks for `sensorLandscape`, but SDL overrides that. `SDL_androidwindow.c`
+  hands `SDL_HINT_ORIENTATIONS` to the activity, and with no hint and a resizable window
+  `SDLActivity.setOrientationBis()` asks Android for `SCREEN_ORIENTATION_FULL_USER` - follow the
+  device - so a phone held upright got a 1080x2340 portrait surface. The hint is now set before the
+  window is made, and the log shows `requestedOrientation=6` (sensor landscape) instead of `13`.
+  `resizeableActivity="false"` also stops a freeform window handing the game a portrait shape.
+- **System bars.** The game inherited `Theme.NoTitleBar.Fullscreen`, which is the pre-KitKat
+  fullscreen flag and does not hide the navigation bar, and the start screen set
+  `Theme.Material.NoActionBar`, which is not fullscreen at all. Both activities now hide the system
+  bars with `WindowInsetsController` (minSdk is 33, so it is always available) and restore them only
+  as a transient swipe. The start screen's theme is now `Theme.Material.NoActionBar.Fullscreen`.
+
+Verified on Android 15 with the phone held in portrait: the device reported `ROTATION_0` before
+launch and `ROTATION_90` after, the surface stayed 2340x1080 with no portrait flip, and the
+screenshots show no status bar and no navigation bar on either the start screen or the game.
+
 ### Verified, not assumed
 
 On an Android 15 emulator, against the shipped 0.2.6 APK: before, the log read
