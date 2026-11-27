@@ -45,11 +45,12 @@ problem.
 - **On iOS:** delete the old app and install this one. Saves live inside the app's own container,
   so copy them out first if you want to keep them.
 
-The Android version is 0.2.7 rather than 0.2.6.1 on purpose. The version code is built from the
-first three parts, so 0.2.6.1 would have produced the same code as the broken build (206999) and
-could not have been told apart from it. 0.2.7 gives 207999, which is a real step up. The iOS
-package keeps 0.2.6.1, matching the desktop version.
+Every file here is named ReDUB-0.2.6.1-*.
 
+Inside the Android APK the version reads 0.2.7, and its version code is 207999 rather than 206999.
+That is deliberate. The code is built from the first three parts of the version, so 0.2.6.1 would
+have produced the same 206999 as the broken build, and Android could not tell the two apart. 0.2.7
+is the smallest number that moves the code forward. The file name follows the release, as always.
 ## v0.2.6 - 2026-11-26
 
 **The look of the game becomes adjustable, and a crash finally leaves evidence.**
