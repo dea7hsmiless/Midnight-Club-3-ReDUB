@@ -38,7 +38,28 @@ if ! kill -0 "$launcher" 2>/dev/null; then cat "$HOME/.local/state/redub/latest.
 cp "$HOME/.local/state/redub/latest.log" /work/clean-startup-${TEST_DISTRO}.log
 child=$(pgrep -P "$launcher" -x mcdub3remix)
 if grep -q "\[CRASH\]" /work/clean-startup-${TEST_DISTRO}.log; then exit 1; fi
+# A running process is not a working picture. 0.2.6 booted, played audio and drew
+# nothing because one GL entry point was missing, and every check passed: the
+# renderer returns 0 and the game carries on with a black screen. Assert the
+# entry-point table resolved and that the frame actually has light in it.
+if grep -q "missing entry point" /work/clean-startup-${TEST_DISTRO}.log; then
+    echo "FAIL: a required GL entry point was missing; the screen would be black" >&2
+    grep "missing entry point" /work/clean-startup-${TEST_DISTRO}.log | head -5 >&2
+    exit 1
+fi
+if ! grep -q "\[GL\] screen" /work/clean-startup-${TEST_DISTRO}.log; then
+    echo "FAIL: the renderer never reached the screen-size line; it did not initialise" >&2
+    exit 1
+fi
 import -window root /work/clean-${TEST_DISTRO}.png
+# Mean pixel value of the screenshot: a black frame is ~0. The title screen is
+# well above this even before the intro film, so the bound is deliberately low.
+mean=$(convert /work/clean-${TEST_DISTRO}.png -colorspace Gray -format "%[fx:mean]" info: 2>/dev/null || echo "")
+if [ -n "$mean" ]; then
+    awk -v m="$mean" 'BEGIN { if (m + 0 < 0.02) { printf "FAIL: the captured frame is black (mean %.4f); nothing was drawn\n", m; exit 1 } else { printf "ok    frame has content (mean %.4f)\n", m } }' || exit 1
+else
+    echo "warn  imagemagick could not measure the screenshot; frame not verified" >&2
+fi
 # Stop only this isolated test's game process and wrapper.
 kill -TERM "$launcher" "$child"
 wait "$launcher" || :

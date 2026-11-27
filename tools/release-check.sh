@@ -161,6 +161,28 @@ else
   warn "no android/app/src/compat manifest; skipping the compat build check"
 fi
 
+# 9. Every required GL entry point exists in OpenGL ES, or is shimmed.
+# 0.2.6 added glDrawBuffer (desktop GL) to the required table. nv2a_gl_load()
+# treats one unresolved name as fatal, so Android and iOS showed a black screen
+# and played audio, and every check here passed. This is the check that was
+# missing; it fails on a new desktop-only name, or a shim that goes away.
+if [ -z "${py:-}" ]; then
+  for candidate in python3 python py; do
+    if command -v "$candidate" >/dev/null 2>&1; then py=$candidate; break; fi
+  done
+fi
+if [ -f xboxrecomp/src/nv2a_gl/gl_api.h ] && [ -f xboxrecomp/src/nv2a_gl/gl_api.c ]; then
+  if [ -z "${py:-}" ]; then
+    bad "no Python found to audit the GL entry points"
+  elif "$py" tools/check_gl_es_entrypoints.py; then
+    ok "every required GL entry point is in OpenGL ES or shimmed for it"
+  else
+    bad "a required GL entry point would be missing on Android and iOS (see above)"
+  fi
+else
+  warn "no nv2a_gl sources; skipping the OpenGL ES entry-point check"
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then
   note "release-check: PASS"
