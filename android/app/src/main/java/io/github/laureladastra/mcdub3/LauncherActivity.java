@@ -279,11 +279,25 @@ public class LauncherActivity extends Activity {
                                  "Midnight Club 3: DUB Edition Remix, statically recompiled for "
                                  + "Android.\n\nYour own disc is required: the app reads the extracted "
                                  + "folder that holds default.xbe. The runtime is bundled with the app; "
-                                 + "no native code is compiled here."); break;
+                                 + "no native code is compiled here.\n\n" + versionLine()); break;
         }
 
         if(current==PAGE_SUPPORT)page.addView(button("Share diagnostics",false,v->shareDiagnostics()));
         footer.setText(statusText());
+    }
+
+    /* The app's own version, read from the package so it can never disagree
+     * with the APK: versionName is ANDROID_VERSION, and the versionCode is the
+     * same number the release uses. Android's cadence differs from the game's,
+     * so this is the number to quote in a bug report. */
+    private String versionLine() {
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager()
+                .getPackageInfo(getPackageName(), 0);
+            return "ReDUB version " + pi.versionName + " (build " + pi.versionCode + ")";
+        } catch (Exception e) {
+            return "ReDUB version unknown";
+        }
     }
 
     private void shareDiagnostics() {

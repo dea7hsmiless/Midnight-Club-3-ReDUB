@@ -46,8 +46,13 @@ DEFS=(-D_GNU_SOURCE)
 DEFS+=("$(printf -- '-DMC3_APP=%s' '"mcdub3remix"')")
 DEFS+=("$(printf -- '-DMC3_SD_DIR=%s' '"mcdub3remix-nx"')")
 DEFS+=("$(printf -- '-DMC3_GAME_TITLE=%s' '"Midnight Club 3: DUB Edition Remix"')")
-DEFS+=("$(printf -- '-DMC3_VERSION=%s' '"0.2.5"')")
-DEFS+=("$(printf -- '-DMC3_BUILD_ID=%s' '"ios-v0.2.5"')")
+# One version for every asset: config/remix/app.env APP_VERSION, the same
+# source the APK, the launcher and the IPA's Info.plist read. Pinned here
+# until 0.2.6 it read 0.2.5, so the About page of a 0.2.6 app named 0.2.5.
+APP_VERSION=$(sed -n 's/^APP_VERSION="\(.*\)"/\1/p' config/remix/app.env)
+[ -n "$APP_VERSION" ] || { echo "no APP_VERSION in config/remix/app.env" >&2; exit 2; }
+DEFS+=("$(printf -- '-DMC3_VERSION=%s' "\"$APP_VERSION\"")")
+DEFS+=("$(printf -- '-DMC3_BUILD_ID=%s' "\"ios-v$APP_VERSION\"")")
 DEFS+=("$(printf -- '-DMC3_PACKAGE_EDITION=%s' '"eur"')")
 DEFS+=("$(printf -- '-DMC3_EDITION=%s' '"eur"')")
 
@@ -60,10 +65,24 @@ n=0
 # per-file check below only compares source timestamps, so without this a header
 # edit silently leaves stale objects (it did: the GL entry-point table grew but
 # gl_api.o still had the old pointers, and the link reported them undefined).
+# The defines are part of the same contract: MC3_VERSION lives in DEFS, not in
+# any source, so changing it rebuilt nothing and the About page kept the old
+# number (it did: 0.2.6 shipped a build whose ABOUT read 0.2.5). The stamp below
+# records the defines actually used, and a change to them recompiles everything.
 FORCE=0
+DEFS_STAMP="$(printf '%s\n' "${DEFS[@]}")"
 if [ -f "$OBJ/.headers" ]; then
     stale=$(find src config work-remix/gen xboxrecomp -name '*.h' -newer "$OBJ/.headers" -print -quit 2>/dev/null)
     [ -n "$stale" ] && FORCE=1
+    # No stamp at all is a tree built before the stamp existed, so its objects
+    # cannot be trusted to match these defines either.
+    if [ ! -f "$OBJ/.defs" ]; then
+        FORCE=1
+        echo "no defines stamp: recompiling everything"
+    elif [ "$(cat "$OBJ/.defs")" != "$DEFS_STAMP" ]; then
+        FORCE=1
+        echo "the compile defines changed: recompiling everything"
+    fi
 else
     FORCE=1
 fi
@@ -87,6 +106,7 @@ echo "---"
 echo "compiled $n, failed $fail"
 [ "$fail" -eq 0 ] || exit 1
 touch "$OBJ/.headers"
+printf '%s\n' "${DEFS[@]}" > "$OBJ/.defs"
 echo "linking..."
 
 # The Swift toolchain's own ld64.lld refuses "-platform_version ios" (LLD 21 is

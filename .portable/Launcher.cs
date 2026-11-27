@@ -17,8 +17,8 @@ using System.IO.Compression;
 [assembly: AssemblyProduct("ReDUB")]
 [assembly: AssemblyCompany("ReDUB")]
 [assembly: AssemblyCopyright("Fan project; Midnight Club 3 is a trademark of its owners")]
-[assembly: AssemblyVersion("0.2.6.0")]
-[assembly: AssemblyFileVersion("0.2.6.0")]
+[assembly: AssemblyVersion("0.2.6.1")]
+[assembly: AssemblyFileVersion("0.2.6.1")]
 namespace ReDUB {
 public class RedubButton : Control, IButtonControl {
     public bool Primary, Selected;
@@ -852,7 +852,7 @@ public sealed class Launcher : Form {
     }
 
     void ShowSupport(){var p=Standard("Support","Support & activity","Local setup output. Your game and saves are never uploaded.");ButtonAt(p,"Open log folder",36,140,190,()=>Open("work-remix/logs"));ButtonAt(p,"Check setup",240,140,190,()=>VerifySetup());ButtonAt(p,"Read guide",444,140,190,()=>Open("README.md"));ButtonAt(p,"Report a problem",648,140,190,()=>ReportProblem());log.SetBounds(36,205,Math.Max(600,content.Width-72),Math.Max(280,content.Height-245));log.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;p.Controls.Add(log);}
-    void ShowAbout(){var p=Standard("About","Midnight Club 3: ReDUB","A community edition of the original Xbox DUB Edition Remix.");var copy=LabelAt("Built on mcdub3-nx and xboxrecomp.\n\nNative Port Options, independent HUD quality, PC Music integration,\nand targeted controller, menu and GPU stability fixes.\n\nOriginal 30 FPS simulation\n\nNo game data is included. Use your own supported Xbox Remix disc.\nNot affiliated with Rockstar Games, Take-Two or Microsoft.\n\nLauncher design reference: SafeHouse by FridiNaTor1 and contributors.\nReDUB uses its own implementation and branding.",11,false);copy.SetBounds(38,150,790,330);p.Controls.Add(copy);ButtonAt(p,"Features & credits",36,510,230,()=>Open("README.md"));}
+    void ShowAbout(){var p=Standard("About","Midnight Club 3: ReDUB","A community edition of the original Xbox DUB Edition Remix.");var copy=LabelAt("ReDUB "+LauncherVersion()+"\n\nBuilt on mcdub3-nx and xboxrecomp.\n\nNative Port Options, independent HUD quality, PC Music integration,\nand targeted controller, menu and GPU stability fixes.\n\nOriginal 30 FPS simulation\n\nNo game data is included. Use your own supported Xbox Remix disc.\nNot affiliated with Rockstar Games, Take-Two or Microsoft.\n\nLauncher design reference: SafeHouse by FridiNaTor1 and contributors.\nReDUB uses its own implementation and branding.",11,false);copy.SetBounds(38,150,790,330);p.Controls.Add(copy);ButtonAt(p,"Features & credits",36,510,230,()=>Open("README.md"));}
     string PathAt(string p){return Path.Combine(root,p.Replace('/',Path.DirectorySeparatorChar));}
     void UpdateStatus(){bool running=GameRunning(),hasDisc=File.Exists(PathAt("game-remix/default.xbe")),runtime=RuntimePresent(root);play.Enabled=job==null&&!working&&!running;play.Text=running?"Game is running":Ready()?"▶   Play":"Install";string active="OpenGL • Native";if(working){status.Text=importStatus.Length>0?importStatus:"Installing game files...";return;}status.Text=job!=null?"Working — setup progress is in Support.":running?"Game is running • Save and close before changing launcher settings or installing builds.":Ready()?"Ready to play • "+active+" • shared Career saves":!runtime?"Game runtime missing • use the full ReDUB Windows zip, or Settings → Advanced → Rebuild from source.":hasDisc?"Game files found • choose Play to finish setup":"Not installed • choose Install to copy your own Xbox Remix disc.";}
     void Append(string text){if(IsDisposed)return;if(InvokeRequired){BeginInvoke(new Action<string>(Append),text);return;}log.AppendText(text+Environment.NewLine);log.SelectionStart=log.TextLength;log.ScrollToCaret();}
@@ -1164,7 +1164,11 @@ public sealed class Launcher : Form {
             return null;
         }catch{return null;}
     }
-    static string LauncherVersion(){try{return Assembly.GetExecutingAssembly().GetName().Version.ToString(3);}catch{return "unknown";}}
+    static string LauncherVersion(){try{var v=Assembly.GetExecutingAssembly().GetName().Version;
+        /* ToString(3) prints 0.2.6 for a 0.2.6.1 build, hiding the one digit that
+         * tells two hotfixes apart -- the confusion that made a 0.2.6 APK report
+         * 0.2.5. Show the fourth part when the version set one. */
+        return v.Revision>0?v.ToString(4):v.ToString(3);}catch{return "unknown";}}
     /* The last lines of a log that can be hundreds of megabytes: read a window
      * from the end, drop the partial first line, keep the tail asked for. */
     static string TailText(string path,int lines){

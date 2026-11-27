@@ -37,6 +37,32 @@ if [ -n "${ver:-}" ] && [ -f RELEASE_NOTES.md ]; then
   fi
 fi
 
+# 1b. Every platform's version is that same number.
+# 0.2.6.1 shipped a Windows launcher reporting 0.2.6.0 and an iOS binary built
+# with a hardcoded 0.2.5, both beside a game reporting 0.2.6.1. A version typed
+# in twice is a version that drifts, so each hand-written copy is checked here.
+if [ -n "${ver:-}" ]; then
+  # Windows launcher: [assembly: AssemblyVersion("x.y.z")]
+  lver=$(sed -n 's/^\[assembly: AssemblyVersion("\([^"]*\)")\].*/\1/p' .portable/Launcher.cs 2>/dev/null | head -1)
+  if [ -n "$lver" ]; then
+    [ "$lver" = "$ver" ] && ok ".portable/Launcher.cs AssemblyVersion=$ver" \
+      || bad ".portable/Launcher.cs AssemblyVersion=$lver, expected $ver (edit the literal)"
+  fi
+  # iOS build script: no version may be pinned in it any more.
+  if [ -f ios/build_ios.sh ]; then
+    pinned=$(grep -n -- '-DMC3_VERSION=%s.*"[0-9]' ios/build_ios.sh 2>/dev/null | head -3)
+    [ -z "$pinned" ] && ok "ios/build_ios.sh takes MC3_VERSION from app.env" \
+      || { bad "ios/build_ios.sh pins a version instead of reading APP_VERSION:"; printf '%s\n' "$pinned"; }
+  fi
+  # Android app version is its own number, but it must parse and never regress
+  # below the release: the APK and the release share a versionCode formula.
+  aver=$(bash -c 'source config/remix/app.env; echo "$ANDROID_VERSION"' 2>/dev/null | tr -d '\r')
+  if [ -n "$aver" ]; then
+    code=$(( (${aver%%.*} * 10000 + $(echo "$aver" | cut -d. -f2) * 100 + $(echo "$aver" | cut -d. -f3)) * 1000 + 999 ))
+    ok "config/remix ANDROID_VERSION=$aver (versionCode $code)"
+  fi
+fi
+
 # 3. Mojibake in tracked text (the launcher and the release body both hit this)
 mojibake=$(git grep -I -n -e 'â€' -e '├ó' -e 'Ã¢â' -e $'\uFFFD' -- . ':!tools/release-check.sh' 2>/dev/null | head -20)
 if [ -n "$mojibake" ]; then

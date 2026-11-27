@@ -32,6 +32,8 @@ void ios_host_unused(void) { }
 #include <string.h>
 #include <stdatomic.h>
 #include <pthread.h>
+#include <dirent.h>              /* carrying the old save folder across */
+#include <errno.h>
 #include <mach-o/dyld.h>          /* _NSGetExecutablePath: the bundle beside it */
 #include <sys/stat.h>
 #include <TargetConditionals.h>
@@ -556,6 +558,91 @@ static void seed_env_file(const char *home)
     fprintf(stderr, "[IOS] settings: created %s from the bundle\n", dst);
 }
 
+/* Copy a save folder, creating sub-folders. A failure is logged and skipped:
+ * carrying player state must never stop the game from booting. */
+static void ios_copy_tree(const char *from, const char *to)
+{
+    DIR *d;
+    struct dirent *e;
+    char src[2048], dst[2048];
+    struct stat st;
+
+    if (!(d = opendir(from))) return;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        snprintf(src, sizeof src, "%s/%s", from, e->d_name);
+        snprintf(dst, sizeof dst, "%s/%s", to, e->d_name);
+        if (lstat(src, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (mkdir(dst, 0755) != 0 && errno != EEXIST) continue;
+            ios_copy_tree(src, dst);
+        } else if (S_ISREG(st.st_mode)) {
+            FILE *in = fopen(src, "rb");
+            FILE *out;
+            char buf[64 * 1024];
+            size_t got;
+            if (!in) continue;
+            if (!(out = fopen(dst, "wb"))) { fclose(in); continue; }
+            while ((got = fread(buf, 1, sizeof buf, in)) > 0)
+                fwrite(buf, 1, got, out);
+            fclose(in);
+            fclose(out);
+        }
+    }
+    closedir(d);
+}
+
+/* Where the career lives, so it can be copied out before a reinstall.
+ *
+ * Until this, MC3_SAVE_DIR was left unset and xbox_path_init fell back to
+ * ~/.local/share/xboxrecomp: inside the sandbox, but outside Documents, so it
+ * did not appear in the Files app. A sideload update keeps the container, but
+ * deleting the app to install a differently-signed build does not, and there
+ * was no way to save the career first (Android, by contrast, keeps its saves in
+ * the app folder that its backup button copies).
+ *
+ * Documents/save is visible in Files (UIFileSharingEnabled is already set by
+ * ios/package_ipa.py), so the folder can be copied off the device.
+ *
+ * An existing player's saves are in the old place, so the old folder is carried
+ * across once, when the new one is empty. It is a copy, not a move: if anything
+ * goes wrong the old saves are still there. MC3_SAVE_DIR from the env file still
+ * wins, which is how a player overrides this. */
+static void ios_set_save_dir(const char *home)
+{
+    char dir[2048];
+    char legacy[2048];
+    struct stat st;
+    DIR *d;
+    struct dirent *e;
+    int empty = 1;
+
+    if (!home || !home[0] || getenv("MC3_SAVE_DIR")) return;
+    snprintf(dir, sizeof dir, "%s/Documents/save", home);
+    if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "[IOS] saves: cannot create %s (errno %d)\n", dir, errno);
+        return;
+    }
+    if ((d = opendir(dir)) != NULL) {
+        while ((e = readdir(d)) != NULL) {
+            if (strcmp(e->d_name, ".") && strcmp(e->d_name, "..")) { empty = 0; break; }
+        }
+        closedir(d);
+    }
+    if (empty) {
+        /* The pre-0.2.7 default, from xbox_path_init's XDG fallback. */
+        const char *xdg = getenv("XDG_DATA_HOME");
+        if (xdg && xdg[0]) snprintf(legacy, sizeof legacy, "%s/xboxrecomp", xdg);
+        else               snprintf(legacy, sizeof legacy, "%s/.local/share/xboxrecomp", home);
+        if (stat(legacy, &st) == 0 && S_ISDIR(st.st_mode)) {
+            fprintf(stderr, "[IOS] saves: carrying %s -> %s\n", legacy, dir);
+            ios_copy_tree(legacy, dir);
+        }
+    }
+    setenv("MC3_SAVE_DIR", dir, 1);
+    fprintf(stderr, "[IOS] saves: %s (Documents, visible in Files)\n", dir);
+}
+
 void ios_boot(void)
 {
     const char *home;
@@ -570,7 +657,10 @@ void ios_boot(void)
         snprintf(env_path, sizeof env_path, "%s/Documents/%s_env.txt",
                  doc ? doc : home, MC3_APP);
     }
+    /* The env file can set MC3_SAVE_DIR; read it first so a player's own value
+     * wins. ios_set_save_dir then only fills in the default when it is unset. */
     load_env_file();
+    ios_set_save_dir(home ? home : doc);
     apply_online_default();
     /* Phone online defaults (radius, blend cap): only when the file is silent. */
     {
