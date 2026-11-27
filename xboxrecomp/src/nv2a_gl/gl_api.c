@@ -15,6 +15,15 @@ static void (GLAPIENTRY *s_depth_rangef)(float, float);
 static void GLAPIENTRY es_clear_depth(GLdouble d) { s_clear_depthf((float)d); }
 static void GLAPIENTRY es_depth_range(GLdouble n, GLdouble f) { s_depth_rangef((float)n, (float)f); }
 
+/* OpenGL ES has the plural glDrawBuffers, not the desktop glDrawBuffer. The
+ * renderer only calls glDrawBuffer(GL_NONE) to detach colour from an FBO, so
+ * map that single case onto the ES equivalent. Without this the loader counts
+ * glDrawBuffer as missing on drivers that do not export the desktop name (the
+ * Android emulator's translator does not) and the whole renderer gives up:
+ * the title then boots, plays audio and stays black. */
+static void (GLAPIENTRY *s_draw_buffers)(GLsizei, const GLenum *);
+static void GLAPIENTRY es_draw_buffer(GLenum mode) { s_draw_buffers(1, &mode); }
+
 int nv2a_gl_es;
 
 int nv2a_gl_load(void *(*getproc)(const char *name))
@@ -25,6 +34,7 @@ int nv2a_gl_load(void *(*getproc)(const char *name))
         /* Before the checks below: the double versions are not in ES. */
         s_clear_depthf = (void (GLAPIENTRY *)(float))getproc("glClearDepthf");
         s_depth_rangef = (void (GLAPIENTRY *)(float, float))getproc("glDepthRangef");
+        s_draw_buffers = (void (GLAPIENTRY *)(GLsizei, const GLenum *))getproc("glDrawBuffers");
     }
 
 #define NV2A_GL_RESOLVE(ret, name, args) \
@@ -33,6 +43,8 @@ int nv2a_gl_load(void *(*getproc)(const char *name))
         p_##name = (PFN_##name)(void (*)(void))es_clear_depth; \
     if (!p_##name && nv2a_gl_es && !strcmp(#name, "glDepthRange") && s_depth_rangef) \
         p_##name = (PFN_##name)(void (*)(void))es_depth_range; \
+    if (!p_##name && nv2a_gl_es && !strcmp(#name, "glDrawBuffer") && s_draw_buffers) \
+        p_##name = (PFN_##name)(void (*)(void))es_draw_buffer; \
     if (!p_##name) { \
         fprintf(stderr, "  [GL] missing entry point %s\n", #name); \
         missing++; \
