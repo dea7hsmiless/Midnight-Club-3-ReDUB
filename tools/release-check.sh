@@ -134,8 +134,8 @@ else
   fi
   if [ -z "$py" ]; then
     bad "no Python found to audit release packages (set MC3_PYTHON or install python3)"
-  elif "$py" tools/check-release-package.py "${packages[@]}"; then
-    ok "release packages carry no player settings"
+  elif "$py" tools/check-release-package.py --version "${ver:-}" "${packages[@]}"; then
+    ok "release packages carry no player settings, and name the right version"
   else
     bad "release package audit failed (see the FAIL lines above)"
   fi

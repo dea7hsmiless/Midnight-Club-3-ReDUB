@@ -124,6 +124,86 @@ def _scan_tar(path: Path, findings: list[str]) -> None:
             _scan(member.name, data, findings)
 
 
+def _file_version(path: Path) -> str | None:
+    """The version a package claims it is, from its own file name.
+
+    ReDUB-<version>-Windows-x86_64.zip, ReDUB-<version>-x86_64.AppImage,
+    ReDUB-<version>-x86_64.tar.gz. A directory has no name to trust.
+    """
+    m = re.search(r"ReDUB-(\d+\.\d+(?:\.\d+)*)(?:-|\.)", path.name)
+    return m.group(1) if m else None
+
+
+def _binary_reports_version(data: bytes, version: str) -> bool:
+    """True/False when the bytes look like a ReDUB binary, None when they are
+    not a binary we can read a version out of.
+
+    The version is compiled into the executable (MC3_VERSION, from
+    config/remix/app.env) and appears as a plain byte string. If a build reused
+    a stale object the name and the binary disagree -- exactly what let a 0.2.6
+    APK report 0.2.5.
+    """
+    if len(data) < 4096:
+        return None
+    if b"MZ" not in data[:2] and b"\x7fELF" not in data[:4]:
+        return None
+    return version.encode("ascii") in data
+
+
+def check_versions(path: Path, expected: str | None, findings: list[str]) -> None:
+    """A package's file name, its binary and APP_VERSION must agree."""
+    want = expected or _file_version(path)
+    if not want:
+        return
+    found = _file_version(path)
+    if expected and found and found != expected:
+        findings.append(
+            f"{path.name}: named for {found}, but APP_VERSION is {expected}")
+    _scan_versions = {
+        "mcdub3remix.exe": None,
+        "mcdub3remix": None,
+    }
+    def accept(rel: str, data: bytes | None) -> None:
+        base = _base(rel)
+        if base not in _scan_versions or data is None:
+            return
+        got = _binary_reports_version(data, want)
+        if got is False:
+            findings.append(
+                f"{path.name}:{rel}: reports no version {want}; the build is stale "
+                f"or was made from another version")
+        elif got is True:
+            _scan_versions[base] = True
+
+    if path.is_dir():
+        for p in sorted(path.rglob("*")):
+            if p.is_file() and not p.is_symlink() and _base(str(p)) in _scan_versions:
+                if p.stat().st_size <= 200 * 1024 * 1024:
+                    accept(str(p.relative_to(path)), p.read_bytes())
+    elif zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            for info in archive.infolist():
+                if info.is_dir() or _base(info.filename) not in _scan_versions:
+                    continue
+                if info.file_size <= 200 * 1024 * 1024:
+                    with archive.open(info) as handle:
+                        accept(info.filename, handle.read())
+    elif tarfile.is_tarfile(path):
+        with tarfile.open(path, "r:*") as archive:
+            for member in archive.getmembers():
+                if not member.isfile() or _base(member.name) not in _scan_versions:
+                    continue
+                if member.size <= 200 * 1024 * 1024:
+                    extracted = archive.extractfile(member)
+                    if extracted is not None:
+                        accept(member.name, extracted.read())
+    if not any(_scan_versions.values()):
+        # No binary matched: either there is none in the package (fine for a
+        # relay or a source zip) or it could not be read. Say nothing rather
+        # than guess; the name check above still applied.
+        return
+
+
 def scan(path: Path) -> list[str]:
     findings: list[str] = []
     if path.is_dir():
@@ -206,6 +286,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("packages", nargs="*", help="directory, .zip or .tar.gz to audit")
     parser.add_argument("--self-test", action="store_true", help="test the checker itself")
+    parser.add_argument("--version", default=None,
+                        help="the release version from config/remix/app.env APP_VERSION; "
+                             "names and binaries must agree with it")
     args = parser.parse_args()
 
     if args.self_test:
@@ -217,13 +300,14 @@ def main() -> int:
     for raw in args.packages:
         path = Path(raw)
         findings = scan(path)
+        check_versions(path, args.version, findings)
         if findings:
             failed = True
             print(f"FAIL  {path}")
             for finding in findings:
                 print(f"      {finding}")
         else:
-            print(f"ok    {path}: no player settings, no PC-music default")
+            print(f"ok    {path}: no player settings, no PC-music default, version agrees")
     return 1 if failed else 0
 
 
