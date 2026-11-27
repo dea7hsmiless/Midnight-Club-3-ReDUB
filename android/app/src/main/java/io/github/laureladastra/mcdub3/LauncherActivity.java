@@ -63,7 +63,7 @@ import java.util.Map;
  * reads at boot (android_host.c, windows_port_settings_attach), exactly as the
  * iOS launcher writes Documents/mcdub3remix_env.txt. */
 public class LauncherActivity extends Activity {
-    private static final int PICK_FOLDER = 1, PICK_ISO = 2;
+    private static final int PICK_FOLDER = 1, PICK_ISO = 2, PICK_BACKUP_OUT = 3, PICK_BACKUP_IN = 4;
 
     private static final int PAGE_GAME = 0, PAGE_ONLINE = 1, PAGE_INSTALL = 2,
                              PAGE_SETTINGS = 3, PAGE_SUPPORT = 4, PAGE_ABOUT = 5;
@@ -106,6 +106,8 @@ public class LauncherActivity extends Activity {
         new android.os.Handler(android.os.Looper.getMainLooper());
     private final Map<String, TextView> values = new HashMap<>();
     private final List<Row> rows = new ArrayList<>();
+    /* The backup/restore progress line, updated from the copy thread. */
+    private TextView backupStatus;
     /* The chosen disc image and the import's progress (Install page). */
     private Uri isoUri;
     private String isoName;
@@ -440,6 +442,35 @@ public class LauncherActivity extends Activity {
             + "extracted files, and keep the app open during installation.", 12, false, MUTED);
         note.setPadding(0, dp(14), 0, 0);
         page.addView(note);
+
+        TextView head2 = label("Back up before you uninstall", 18, true, TEXT);
+        head2.setPadding(0, dp(24), 0, dp(4));
+        page.addView(head2);
+        TextView backupHelp = label("Uninstalling deletes this app's own folder, and that is where "
+            + "the disc and the career in save/ live. An update that needs an uninstall (0.2.6 does) "
+            + "should be preceded by a backup to a folder you choose, and followed by a restore.",
+            12, false, MUTED);
+        backupHelp.setPadding(0, dp(6), 0, 0);
+        page.addView(backupHelp);
+
+        LinearLayout backupRow = new LinearLayout(this);
+        backupRow.setOrientation(LinearLayout.HORIZONTAL);
+        backupRow.setPadding(0, dp(12), 0, 0);
+        page.addView(backupRow);
+
+        TextView backup = button("Back up game folder", false, v -> pickBackupOut());
+        backup.setEnabled(!busy);
+        backupRow.addView(backup, new LinearLayout.LayoutParams(dp(230), dp(44)));
+
+        TextView restore = button("Restore from backup", false, v -> pickBackupIn());
+        restore.setEnabled(!busy);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        rlp.leftMargin = dp(12);
+        backupRow.addView(restore, rlp);
+
+        backupStatus = label("", 12, false, MUTED);
+        backupStatus.setPadding(0, dp(10), 0, 0);
+        page.addView(backupStatus);
 
         List<String> found = folders();
         if (found.isEmpty())
@@ -889,6 +920,120 @@ public class LauncherActivity extends Activity {
         prefs.edit().putString(FOLDERS, String.join("\n", folders)).apply();
     }
 
+    /* -- Backing the game folder out, and back in ------------------------
+     *
+     * Uninstalling deletes getExternalFilesDir()/game-iso, which holds the disc
+     * and the career in save/. 0.2.6 has to be uninstalled over 0.2.5 (new
+     * signing key), so the folder has to be movable to somewhere that survives
+     * an uninstall, without adb. GameFolderBackup does the copying; it is plain
+     * java.io and is exercised in CI by tools/windows/Test-GameFolderBackup. */
+
+    private static final String BACKUP_DIR = "ReDUB-backup";
+
+    private File gameFolder() {
+        String chosen = selectedFolder();
+        return chosen == null ? null : new File(chosen);
+    }
+
+    private void pickBackupOut() {
+        if (busy)
+            return;
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_BACKUP_OUT);
+    }
+
+    private void pickBackupIn() {
+        if (busy)
+            return;
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_BACKUP_IN);
+    }
+
+    private void note(String text) {
+        if (backupStatus != null)
+            backupStatus.setText(text);
+    }
+
+    private void warn(String title, String body) {
+        new android.app.AlertDialog.Builder(this).setTitle(title).setMessage(body)
+            .setPositiveButton("OK", null).show();
+    }
+
+    private static String megabytes(long bytes) {
+        return (bytes / (1024L * 1024L)) + " MB";
+    }
+
+    private void backupOut(Uri tree) {
+        final File src = gameFolder();
+        if (src == null || !isGame(src)) {
+            warn("Choose a game folder first", "There is no installed game folder to back up.");
+            return;
+        }
+        final File dst = new File(new File(treePath(tree)), BACKUP_DIR);
+        if (dst.exists()) {
+            new android.app.AlertDialog.Builder(this)
+                .setTitle("Replace the backup?")
+                .setMessage(dst + "\n\nalready holds a backup. Replacing it deletes the old one.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Replace", (d, w) -> startCopy(src, dst, true))
+                .show();
+            return;
+        }
+        startCopy(src, dst, true);
+    }
+
+    private void backupIn(Uri tree) {
+        File picked = new File(treePath(tree));
+        File src = new File(picked, BACKUP_DIR);
+        if (!isGame(src))
+            src = isGame(picked) ? picked : null;     /* ReDUB-backup/, else the folder itself */
+        if (src == null) {
+            warn("No backup there", picked + "\n\nholds neither a " + BACKUP_DIR
+                + " folder nor a default.xbe.");
+            return;
+        }
+        final File dst = new File(getExternalFilesDir(null), "game-iso");
+        if (dst.exists() && !GameFolderBackup.isEmpty(dst)) {
+            warn("A game is already installed",
+                "Remove the installed folder on this page first, then restore.");
+            return;
+        }
+        startCopy(src, dst, false);
+    }
+
+    /** One worker for both directions: the only difference is where the result
+     *  is announced and whether the game page replaces the installed folder. */
+    private void startCopy(final File src, final File dst, final boolean out) {
+        busy = true;
+        render();
+        new Thread(() -> {
+            try {
+                final long[] last = {0};
+                GameFolderBackup.copyTree(src, dst, (copied, total, name) -> {
+                    if (copied - last[0] < 64L * 1024L * 1024L)
+                        return;                 /* do not flood the UI thread */
+                    last[0] = copied;
+                    runOnUiThread(() -> note((out ? "Backing up " : "Restoring ")
+                        + megabytes(copied) + " of " + megabytes(total)));
+                });
+                runOnUiThread(() -> {
+                    busy = false;
+                    if (!out) {
+                        prefs.edit().putString(LAST, dst.getAbsolutePath()).apply();
+                        current = PAGE_GAME;
+                    }
+                    render();
+                });
+            } catch (Exception e) {
+                final String why = e.getMessage();
+                runOnUiThread(() -> {
+                    busy = false;
+                    render();
+                    warn(out ? "Could not back up" : "Could not restore",
+                         why == null ? "The copy failed." : why);
+                });
+            }
+        }).start();
+    }
+
     private void pick() {
         startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER);
     }
@@ -918,6 +1063,14 @@ public class LauncherActivity extends Activity {
             }
             current = PAGE_INSTALL;
             render();
+            return;
+        }
+        if (req == PICK_BACKUP_OUT) {
+            backupOut(data.getData());
+            return;
+        }
+        if (req == PICK_BACKUP_IN) {
+            backupIn(data.getData());
             return;
         }
         if (req != PICK_FOLDER)

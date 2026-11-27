@@ -2774,6 +2774,180 @@ static void realtime_step(float real)
     MEMF(0x004B2D50u) = 1.0f / cl;
 }
 
+/* ── Finding the nitrous gauge (MC3_NITRO_SCAN=1) ──────────────────────
+ *
+ * Nitrous is script/data driven -- "UseNitro" is a script event name pushed
+ * by the code that dispatches it, and "Nitrous_Level" is an unlock-rule
+ * property, not the charge. There is no named global to read, and the game
+ * has no nitrous cheat (the known codes are heads, no-damage, cities, special
+ * moves and money; "unlimited nitro" belongs to Midnight Club II).
+ *
+ * So the charge is found by behaviour. It is a float in guest RAM that drains
+ * while the player uses it and refills afterwards. This watches for exactly
+ * that, and reports which pad buttons were held when it drained, so the
+ * button does not have to be guessed in advance.
+ *
+ *   stage 0  wait for a race (the same gameplay context FXAA and the music
+ *            HUD use), then take a snapshot of every dword in guest RAM.
+ *   stage 1  a second or so later, compare: anything that changed and parses
+ *            as a float in (0, 100] becomes a candidate. A few thousand of
+ *            sixteen million words.
+ *   stage 2  follow only those, remembering min, max and the pad mask at the
+ *            biggest drop, and print the ones that fell and came back.
+ *
+ * Cost: two passes over 64 MB when the race starts (a brief hitch, hence opt
+ * in), then a few thousand float compares a frame. Off by default. */
+
+static float nitro_as_float(uint32_t bits)
+{
+    float f;
+    memcpy(&f, &bits, sizeof f);
+    return f;
+}
+
+#define NITRO_LO        0x00010000u
+#define NITRO_HI        0x04000000u
+#define NITRO_MAX_CAND  40000u
+#define NITRO_MIN_SWING 0.25f     /* a refill smaller than this is noise */
+
+static void nitro_scan_frame(uint32_t pad_mask)
+{
+    static int on = -1;
+    static int stage;
+    static unsigned frames;
+    static uint32_t *snap;
+    static uint32_t *cand;
+    static float *lo, *hi, *prev;
+    static uint32_t *fall_mask;
+    static unsigned n;
+
+    if (on < 0) {
+        const char *e = getenv("MC3_NITRO_SCAN");
+        on = e && e[0] == '1';
+        if (on)
+            fprintf(stderr, "  [NITRO] scan on (MC3_NITRO_SCAN): start a race and use the "
+                            "nitrous; the report names the pad mask it fell under\n");
+    }
+    if (!on)
+        return;
+
+    {
+        extern int windows_media_gameplay_get(void);
+        if (!windows_media_gameplay_get() && stage < 2)
+            return;                       /* menus and the front end tell us nothing */
+    }
+
+    if (stage == 0) {
+        uint32_t va;
+        if (++frames < 45)
+            return;                       /* let the race settle first */
+        snap = (uint32_t *)malloc((NITRO_HI - NITRO_LO) / 4u * sizeof(uint32_t));
+        if (!snap) {
+            fprintf(stderr, "  [NITRO] out of memory for the snapshot; scan off\n");
+            on = 0;
+            return;
+        }
+        for (va = NITRO_LO; va < NITRO_HI; va += 4)
+            snap[(va - NITRO_LO) / 4u] = MEM32(va);
+        frames = 0;
+        stage = 1;
+        return;
+    }
+
+    if (stage == 1) {
+        uint32_t va;
+        if (++frames < 60)
+            return;
+        cand = (uint32_t *)malloc(NITRO_MAX_CAND * sizeof(uint32_t));
+        lo = (float *)malloc(NITRO_MAX_CAND * sizeof(float));
+        hi = (float *)malloc(NITRO_MAX_CAND * sizeof(float));
+        prev = (float *)malloc(NITRO_MAX_CAND * sizeof(float));
+        fall_mask = (uint32_t *)malloc(NITRO_MAX_CAND * sizeof(uint32_t));
+        if (!cand || !lo || !hi || !prev || !fall_mask) {
+            fprintf(stderr, "  [NITRO] out of memory for the candidate list; scan off\n");
+            free(snap); snap = 0;
+            on = 0;
+            return;
+        }
+        for (va = NITRO_LO; va < NITRO_HI && n < NITRO_MAX_CAND; va += 4) {
+            uint32_t now = MEM32(va);
+            float f;
+            if (now == snap[(va - NITRO_LO) / 4u])
+                continue;
+            f = nitro_as_float(now);
+            if (!(f > 0.0f && f <= 100.0f))
+                continue;                 /* NaN-safe: the comparison is false for NaN */
+            cand[n] = va;
+            lo[n] = hi[n] = prev[n] = f;
+            fall_mask[n] = 0;
+            n++;
+        }
+        free(snap);
+        snap = 0;
+        fprintf(stderr, "  [NITRO] watching %u candidate value(s) after the first second\n", n);
+        frames = 0;
+        stage = 2;
+        return;
+    }
+
+    /* stage 2: follow the candidates */
+    {
+        unsigned i, printed = 0;
+        /* Reported with each drop, so the button does not have to be known in
+         * advance: the caller reads the pad, which needs declarations this
+         * early in the file does not have. */
+        const uint32_t mask = pad_mask;
+
+        for (i = 0; i < n; i++) {
+            float f = MEMF(cand[i]);
+            if (!(f >= 0.0f && f <= 1000.0f))
+                continue;
+            if (f > hi[i]) hi[i] = f;
+            if (f < lo[i]) {
+                lo[i] = f;
+                fall_mask[i] = mask;      /* what was held as it drained */
+            }
+            prev[i] = f;
+        }
+
+        if (++frames < 120)
+            return;
+        frames = 0;
+        printed = 0;
+
+        /* biggest swing first */
+        {
+            unsigned rank;
+            for (rank = 0; rank < 12 && rank < n; rank++) {
+                unsigned best = n, i;
+                float best_swing = NITRO_MIN_SWING;
+                for (i = 0; i < n; i++) {
+                    float swing;
+                    if (hi[i] <= lo[i])
+                        continue;
+                    swing = hi[i] - lo[i];
+                    if (swing > best_swing) {
+                        best_swing = swing;
+                        best = i;
+                    }
+                }
+                if (best == n)
+                    break;
+                if (printed == 0)
+                    fprintf(stderr, "  [NITRO] values that fell and came back:\n");
+                fprintf(stderr, "  [NITRO]   0x%08X  now %7.3f  min %7.3f  max %7.3f"
+                                "  fell under pad mask 0x%04X\n",
+                        cand[best], MEMF(cand[best]), lo[best], hi[best], fall_mask[best]);
+                printed++;
+                /* retire it so the next rank finds the next-biggest */
+                lo[best] = hi[best] = 0.0f;
+            }
+        }
+        if (printed == 0)
+            fprintf(stderr, "  [NITRO] no candidate has swung yet (%u watched)\n", n);
+    }
+}
+
 /* Local 60 Hz investigation: the pedestrian/creature manager has two
  * frame-driven entry points.  Count them before changing their cadence so a
  * rendering call is never mistaken for simulation.  This is opt-in and is
@@ -4231,6 +4405,8 @@ static void port_media_frame(void)
     XBOX_INPUT_STATE media_input={0};uint16_t dpad=0;
     if(xbox_InputGetState(0,&media_input)==0)dpad=media_input.Gamepad.wButtons&
         (XBOX_GAMEPAD_DPAD_LEFT|XBOX_GAMEPAD_DPAD_RIGHT);
+    /* MC3_NITRO_SCAN: a live pad read, so a draining value can name its button */
+    nitro_scan_frame(media_input.Gamepad.wButtons);
     uint16_t pressed=dpad&~media_dpad;media_dpad=dpad;
     if(gameplay&&windows_port_pc_music_get()){
         if(pressed==XBOX_GAMEPAD_DPAD_LEFT)windows_media_skip(0);

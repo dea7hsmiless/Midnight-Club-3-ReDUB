@@ -11,38 +11,66 @@
       "xdvdfs": "default.xbe"
     },
     "dumps": [
-      { "name": "USA (Platinum Hits)", "size": 7825162240, "crc32": "a4337b2a" },
-      { "name": "Europe", "size": 7825162240, "crc32": "e0cad5e2" }
+      {
+        "name": "USA (Platinum Hits)",
+        "size": 7825162240,
+        "crc32": "a4337b2a"
+      },
+      {
+        "name": "Europe",
+        "size": 7825162240,
+        "crc32": "e0cad5e2"
+      }
     ]
   },
   "prepare": {
-    "program": ["ReDUB Launcher.exe"],
-    "args": ["--import", "{game}"],
+    "program": [
+      "ReDUB Launcher.exe"
+    ],
+    "args": [
+      "--import",
+      "{game}"
+    ],
     "label": "Copying your disc",
     "timeout": 1800,
-    "done": ["{install}/game-remix/default.xbe", "{install}/game-remix/assets_x.dat"]
+    "done": [
+      "{install}/game-remix/default.xbe",
+      "{install}/game-remix/assets_x.dat"
+    ]
   },
   "start": {
-    "program": ["work-remix/build-windows-x86_64/dist/mcdub3remix.exe"],
+    "program": [
+      "work-remix/build-windows-x86_64/dist/mcdub3remix.exe"
+    ],
     "env": {
-      "MC3_GAME_DIR": "{install}/game-remix"
-    }
+      "MC3_GAME_DIR": "{install}/game-remix",
+      "MC3_SAVE_DIR": "{install}/work-remix/save"
+    },
+    "args": [
+      "--play"
+    ]
   },
   "config": [
     {
       "id": "main",
       "format": "ini",
       "file": [
-        { "path": "{install}/work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt" }
+        {
+          "path": "{install}/work-remix/build-windows-x86_64/dist/mcdub3remix_env.txt"
+        }
       ]
     }
   ],
   "folders": {
     "saves": [
-      { "path": "{install}/work-remix/save" }
+      {
+        "path": "{install}/work-remix/save"
+      }
     ],
     "logs": [
-      { "path": "{install}/work-remix/logs" }
+      {
+        "path": "{install}/work-remix/logs"
+      }
     ]
   },
   "settings": [
@@ -51,143 +79,368 @@
       "label": "Frame rate",
       "help": "30 is the game's own rate. 60 and 120 keep real time on races that cannot hold the rate; 120 needs a 120 Hz display and a CPU that can keep up. Restart to apply.",
       "choices": [
-        { "label": "30 (original)", "set": { "MC3_FRAME_RATE": "30" } },
-        { "label": "60", "set": { "MC3_FRAME_RATE": "60" } },
-        { "label": "120", "set": { "MC3_FRAME_RATE": "120" } }
+        {
+          "label": "30 (original)",
+          "set": {
+            "MC3_FRAME_RATE": "30"
+          }
+        },
+        {
+          "label": "60",
+          "set": {
+            "MC3_FRAME_RATE": "60"
+          }
+        },
+        {
+          "label": "120",
+          "set": {
+            "MC3_FRAME_RATE": "120"
+          }
+        }
       ],
-      "defaults": { "MC3_FRAME_RATE": "30" }
+      "defaults": {
+        "MC3_FRAME_RATE": "30"
+      }
     },
     {
       "id": "internal_resolution",
       "label": "Internal resolution",
       "help": "What the game draws at, as a multiple of the console's 480p. Higher is sharper and costs more on the graphics card.",
       "choices": [
-        { "label": "1x (480p)", "set": { "RECOMP_GL_SCALE": "1" } },
-        { "label": "1.5x (720p)", "set": { "RECOMP_GL_SCALE": "1.5" } },
-        { "label": "2x (960p)", "set": { "RECOMP_GL_SCALE": "2" } },
-        { "label": "3x (1440p)", "set": { "RECOMP_GL_SCALE": "3" } },
-        { "label": "5x (2400p)", "set": { "RECOMP_GL_SCALE": "5" } }
+        {
+          "label": "1x (480p)",
+          "set": {
+            "RECOMP_GL_SCALE": "1"
+          }
+        },
+        {
+          "label": "1.5x (720p)",
+          "set": {
+            "RECOMP_GL_SCALE": "1.5"
+          }
+        },
+        {
+          "label": "2x (960p)",
+          "set": {
+            "RECOMP_GL_SCALE": "2"
+          }
+        },
+        {
+          "label": "3x (1440p)",
+          "set": {
+            "RECOMP_GL_SCALE": "3"
+          }
+        },
+        {
+          "label": "5x (2400p)",
+          "set": {
+            "RECOMP_GL_SCALE": "5"
+          }
+        }
       ],
-      "defaults": { "RECOMP_GL_SCALE": "2" }
+      "defaults": {
+        "RECOMP_GL_SCALE": "2"
+      }
     },
     {
       "id": "window",
       "label": "Window",
       "help": "Fullscreen gives the game the screen to itself. Borderless makes switching apps quicker. Windowed uses Window size.",
       "choices": [
-        { "label": "Fullscreen", "set": { "MC3_FULLSCREEN": "1" } },
-        { "label": "Borderless", "set": { "MC3_FULLSCREEN": "2" } },
-        { "label": "Windowed", "set": { "MC3_FULLSCREEN": "0" } }
+        {
+          "label": "Fullscreen",
+          "set": {
+            "MC3_FULLSCREEN": "1"
+          }
+        },
+        {
+          "label": "Borderless",
+          "set": {
+            "MC3_FULLSCREEN": "2"
+          }
+        },
+        {
+          "label": "Windowed",
+          "set": {
+            "MC3_FULLSCREEN": "0"
+          }
+        }
       ],
-      "defaults": { "MC3_FULLSCREEN": "1" }
+      "defaults": {
+        "MC3_FULLSCREEN": "1"
+      }
     },
     {
       "id": "window_size",
       "label": "Window size",
       "help": "The size of the game's window in Windowed mode. Automatic fits your screen.",
       "choices": [
-        { "label": "Automatic", "set": { "MC3_RESOLUTION": "auto" } },
-        { "label": "1280 x 720", "set": { "MC3_RESOLUTION": "1280x720" } },
-        { "label": "1600 x 900", "set": { "MC3_RESOLUTION": "1600x900" } },
-        { "label": "1920 x 1080", "set": { "MC3_RESOLUTION": "1920x1080" } },
-        { "label": "2560 x 1440", "set": { "MC3_RESOLUTION": "2560x1440" } }
+        {
+          "label": "Automatic",
+          "set": {
+            "MC3_RESOLUTION": "auto"
+          }
+        },
+        {
+          "label": "1280 x 720",
+          "set": {
+            "MC3_RESOLUTION": "1280x720"
+          }
+        },
+        {
+          "label": "1600 x 900",
+          "set": {
+            "MC3_RESOLUTION": "1600x900"
+          }
+        },
+        {
+          "label": "1920 x 1080",
+          "set": {
+            "MC3_RESOLUTION": "1920x1080"
+          }
+        },
+        {
+          "label": "2560 x 1440",
+          "set": {
+            "MC3_RESOLUTION": "2560x1440"
+          }
+        }
       ],
-      "defaults": { "MC3_RESOLUTION": "auto", "MC3_FULLSCREEN": "1" },
-      "when": { "MC3_FULLSCREEN": "0" }
+      "defaults": {
+        "MC3_RESOLUTION": "auto",
+        "MC3_FULLSCREEN": "1"
+      },
+      "when": {
+        "MC3_FULLSCREEN": "0"
+      }
     },
     {
       "id": "vsync",
       "label": "V-Sync",
       "help": "Waits for the screen between frames to stop tearing. Off can feel quicker but may tear. Restart to apply.",
       "choices": [
-        { "label": "On", "set": { "RECOMP_GL_VSYNC": "1" } },
-        { "label": "Off", "set": { "RECOMP_GL_VSYNC": "0" } }
+        {
+          "label": "On",
+          "set": {
+            "RECOMP_GL_VSYNC": "1"
+          }
+        },
+        {
+          "label": "Off",
+          "set": {
+            "RECOMP_GL_VSYNC": "0"
+          }
+        }
       ],
-      "defaults": { "RECOMP_GL_VSYNC": "0" }
-    },    {
+      "defaults": {
+        "RECOMP_GL_VSYNC": "0"
+      }
+    },
+    {
       "id": "display_shape",
       "label": "Aspect ratio",
       "help": "Auto shows a widescreen game at 16:9. 4:3 keeps the original shape with bars at the sides. Stretch fills the window. Restart to apply.",
       "choices": [
-        { "label": "Auto (16:9)", "set": { "RECOMP_GL_ASPECT": "auto" } },
-        { "label": "4:3", "set": { "RECOMP_GL_ASPECT": "4:3" } },
-        { "label": "Stretch", "set": { "RECOMP_GL_ASPECT": "fill" } }
+        {
+          "label": "Auto (16:9)",
+          "set": {
+            "RECOMP_GL_ASPECT": "auto"
+          }
+        },
+        {
+          "label": "4:3",
+          "set": {
+            "RECOMP_GL_ASPECT": "4:3"
+          }
+        },
+        {
+          "label": "Stretch",
+          "set": {
+            "RECOMP_GL_ASPECT": "fill"
+          }
+        }
       ],
-      "defaults": { "RECOMP_GL_ASPECT": "auto" }
+      "defaults": {
+        "RECOMP_GL_ASPECT": "auto"
+      }
     },
     {
       "id": "anisotropic",
       "label": "Texture filtering",
       "help": "Keeps road markings and signs sharp at shallow angles. Costs almost nothing.",
       "choices": [
-        { "label": "Game's own", "set": { "RECOMP_GL_ANISO": "1" } },
-        { "label": "4x", "set": { "RECOMP_GL_ANISO": "4" } },
-        { "label": "16x", "set": { "RECOMP_GL_ANISO": "16" } }
+        {
+          "label": "Game's own",
+          "set": {
+            "RECOMP_GL_ANISO": "1"
+          }
+        },
+        {
+          "label": "4x",
+          "set": {
+            "RECOMP_GL_ANISO": "4"
+          }
+        },
+        {
+          "label": "16x",
+          "set": {
+            "RECOMP_GL_ANISO": "16"
+          }
+        }
       ],
-      "defaults": { "RECOMP_GL_ANISO": "16" }
+      "defaults": {
+        "RECOMP_GL_ANISO": "16"
+      }
     },
     {
       "id": "sharpen",
       "label": "Sharpening",
       "help": "Sharpens the upscaled picture. A little helps at 1x; too much adds a halo around edges.",
       "choices": [
-        { "label": "Off", "set": { "RECOMP_GL_SHARPEN": "0" } },
-        { "label": "Light", "set": { "RECOMP_GL_SHARPEN": "0.25" } },
-        { "label": "Medium", "set": { "RECOMP_GL_SHARPEN": "0.5" } },
-        { "label": "Strong", "set": { "RECOMP_GL_SHARPEN": "0.75" } },
-        { "label": "Maximum", "set": { "RECOMP_GL_SHARPEN": "1" } }
+        {
+          "label": "Off",
+          "set": {
+            "RECOMP_GL_SHARPEN": "0"
+          }
+        },
+        {
+          "label": "Light",
+          "set": {
+            "RECOMP_GL_SHARPEN": "0.25"
+          }
+        },
+        {
+          "label": "Medium",
+          "set": {
+            "RECOMP_GL_SHARPEN": "0.5"
+          }
+        },
+        {
+          "label": "Strong",
+          "set": {
+            "RECOMP_GL_SHARPEN": "0.75"
+          }
+        },
+        {
+          "label": "Maximum",
+          "set": {
+            "RECOMP_GL_SHARPEN": "1"
+          }
+        }
       ],
-      "defaults": { "RECOMP_GL_SHARPEN": "0.5" }
+      "defaults": {
+        "RECOMP_GL_SHARPEN": "0.5"
+      }
     },
     {
       "id": "fps_overlay",
       "label": "Show FPS",
       "help": "The frame rate in the corner of the screen.",
       "choices": [
-        { "label": "Off", "set": { "MC3_FPS_OVERLAY": "0" } },
-        { "label": "On", "set": { "MC3_FPS_OVERLAY": "1" } }
+        {
+          "label": "Off",
+          "set": {
+            "MC3_FPS_OVERLAY": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "MC3_FPS_OVERLAY": "1"
+          }
+        }
       ],
-      "defaults": { "MC3_FPS_OVERLAY": "0" }
+      "defaults": {
+        "MC3_FPS_OVERLAY": "0"
+      }
     },
     {
       "id": "pc_music",
       "label": "Phone music in the radio",
       "help": "Plays music from your PC through the game's radio slot while driving.",
       "choices": [
-        { "label": "Off", "set": { "MC3_PC_MUSIC": "0" } },
-        { "label": "On", "set": { "MC3_PC_MUSIC": "1" } }
+        {
+          "label": "Off",
+          "set": {
+            "MC3_PC_MUSIC": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "MC3_PC_MUSIC": "1"
+          }
+        }
       ],
-      "defaults": { "MC3_PC_MUSIC": "0" }
+      "defaults": {
+        "MC3_PC_MUSIC": "0"
+      }
     },
     {
       "id": "unlock_all",
       "label": "Unlock everything",
       "help": "Every car, part, rim, paint and driving ability is available, and every race and city is open. Your career save and money are untouched. Restart to apply.",
       "choices": [
-        { "label": "Off", "set": { "MC3_UNLOCK_ALL": "0" } },
-        { "label": "On", "set": { "MC3_UNLOCK_ALL": "1" } }
+        {
+          "label": "Off",
+          "set": {
+            "MC3_UNLOCK_ALL": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "MC3_UNLOCK_ALL": "1"
+          }
+        }
       ],
-      "defaults": { "MC3_UNLOCK_ALL": "0" }
+      "defaults": {
+        "MC3_UNLOCK_ALL": "0"
+      }
     },
     {
       "id": "autostart_cruise",
       "label": "Start in Arcade Cruise",
       "help": "The game enters Arcade, Cruise on its own, pressing only what its menus allow. Any input of yours stops it; it needs an existing profile. Restart to apply.",
       "choices": [
-        { "label": "Off", "set": { "MC3_AUTOSTART": "0" } },
-        { "label": "Cruise", "set": { "MC3_AUTOSTART": "cruise" } }
+        {
+          "label": "Off",
+          "set": {
+            "MC3_AUTOSTART": "0"
+          }
+        },
+        {
+          "label": "Cruise",
+          "set": {
+            "MC3_AUTOSTART": "cruise"
+          }
+        }
       ],
-      "defaults": { "MC3_AUTOSTART": "0" }
+      "defaults": {
+        "MC3_AUTOSTART": "0"
+      }
     },
     {
       "id": "skip_movies",
       "label": "Skip intro movies",
       "help": "Presses through the boot movies. The Rockstar logos still play in full. Restart to apply.",
       "choices": [
-        { "label": "Off", "set": { "MC3_SKIP_MOVIES": "0" } },
-        { "label": "On", "set": { "MC3_SKIP_MOVIES": "1" } }
+        {
+          "label": "Off",
+          "set": {
+            "MC3_SKIP_MOVIES": "0"
+          }
+        },
+        {
+          "label": "On",
+          "set": {
+            "MC3_SKIP_MOVIES": "1"
+          }
+        }
       ],
-      "defaults": { "MC3_SKIP_MOVIES": "0" }
+      "defaults": {
+        "MC3_SKIP_MOVIES": "0"
+      }
     }
   ],
   "actions": [
@@ -203,5 +456,8 @@
       "help": "The last few runs, for a bug report.",
       "open": "logs"
     }
+  ],
+  "saves": [
+    "{install}/work-remix/save"
   ]
 }

@@ -51,6 +51,11 @@ jobs:
           mkdir -p work/android-save-tests
           javac -d work/android-save-tests android/app/src/main/java/io/github/laureladastra/mcdub3/DiscSaveData.java tools/windows/Test-DiscSaveData.java
           java -cp work/android-save-tests io.github.laureladastra.mcdub3.TestDiscSaveData work
+      - name: Android game folder backup
+        run: |
+          mkdir -p work/android-backup-tests
+          javac -d work/android-backup-tests android/app/src/main/java/io/github/laureladastra/mcdub3/GameFolderBackup.java tools/windows/Test-GameFolderBackup.java
+          java -cp work/android-backup-tests io.github.laureladastra.mcdub3.TestGameFolderBackup work
       - name: Version and release notes
         run: |
           source config/dub/app.env

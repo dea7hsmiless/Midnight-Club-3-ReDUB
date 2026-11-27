@@ -288,8 +288,20 @@ static void apply_online_default(void)
     _putenv_s("MC3_NETPLAY", "1");
 }
 
+static void ensure_save_dir(void);   /* defined below windows_boot */
+
 void windows_boot(void)
 {
+    /* The save folder is work-remix\save on purpose: recomplauncher.json
+     * declares exactly that, under folders.saves, and that declaration is what
+     * RecompLauncher reads when it syncs cloud saves. Pointing the game at a
+     * different folder would leave the manifest naming somewhere the title never
+     * writes, and a cloud save of an empty directory is worse than none.
+     *
+     * The defect was not the path but its absence: find_dir only accepts a
+     * candidate that already exists, so a fresh install left MC3_SAVE_DIR unset
+     * and the title chose for itself. ensure_save_dir creates this folder, so
+     * there is always one path, always the declared one. */
     static const char *const save[] = { "..\\..\\save", NULL };
     char *slash;
     if (!mc3_module_path(s_exe_dir, sizeof s_exe_dir)) return;
@@ -303,6 +315,31 @@ void windows_boot(void)
     apply_online_default();
     pick_game_dir();
     find_dir("MC3_SAVE_DIR", save);
+    ensure_save_dir();
+}
+
+/* A save folder that does not exist cannot be written to, and the launcher
+ * cannot show a path it was never given. Default to <install>\save -- one level
+ * above the game folder, so replacing the disc keeps it, and inside the tree the
+ * launcher knows about -- and create it. MC3_SAVE_DIR still wins. */
+static void ensure_save_dir(void)
+{
+    const char *cur = getenv("MC3_SAVE_DIR");
+    char p[sizeof s_exe_dir + 64];
+    if (cur && *cur) {
+        /* An explicit setting is the player's business: use it as given. */
+        fprintf(stderr, "saves: %s (MC3_SAVE_DIR)\n", cur);
+        return;
+    }
+    snprintf(p, sizeof p, "%s\\..\\..\\save", s_exe_dir);
+    if (!is_dir(p))
+        CreateDirectoryA(p, NULL);
+    if (is_dir(p)) {
+        mc3_setenv_utf8("MC3_SAVE_DIR", p);
+        fprintf(stderr, "saves: %s\n", p);
+    } else {
+        fprintf(stderr, "saves: could not create %s; the title will choose\n", p);
+    }
 }
 
 /* fatal() in main.c: the log is not where a player looks. */
