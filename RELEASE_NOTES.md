@@ -1,5 +1,55 @@
 # Release notes
 
+## v0.2.6.1 - 2026-11-26
+
+**The Android and iOS builds in 0.2.6 showed a black screen. This replaces them.**
+
+Desktop is unaffected and unchanged: if you already have 0.2.6 for Windows or Linux, there is
+nothing to do. The bug was in a code path only the two mobile builds take.
+
+### What went wrong
+
+0.2.6 added ambient occlusion, which needs a depth-only framebuffer, and to set that up it called
+`glDrawBuffer`. That is a desktop OpenGL function. OpenGL ES, which is all Android and iOS have,
+offers only the plural `glDrawBuffers`, so the name does not exist at any ES version. The renderer
+asks the driver for every entry point it needs and treats one missing name as fatal, so it stopped
+after creating the window and before drawing a single frame. Audio had already started, which is
+why the game could be heard with nothing on screen.
+
+Windows and Linux were never at risk: they get a real OpenGL 3.3 core context, where `glDrawBuffer`
+exists and resolves normally.
+
+### The fix
+
+The renderer only ever calls it as `glDrawBuffer(GL_NONE)`, to detach colour from that framebuffer,
+so it is now mapped onto `glDrawBuffers` for ES contexts - the same way this file already handles
+`glClearDepth` and `glDepthRange`, which are float-only in ES. On desktop the real function is
+found and the mapping is never used.
+
+### Verified, not assumed
+
+On an Android 15 emulator, against the shipped 0.2.6 APK: before, the log read
+`missing entry point glDrawBuffer` and the frame was entirely black (brightest pixel 0). After, no
+missing entry points, 1092 draws per frame, and the intro, title screen and profile menu all
+render. The same emulator plays the intro videos on 0.2.5, so the port itself was never the
+problem.
+
+### Upgrading
+
+- **From 0.2.6 on Android: install 0.2.7 straight over it.** This APK is signed with the same key
+  as 0.2.6, so Android accepts it as an update. Nothing is uninstalled, and the disc and career
+  stay where they are. Keep the app open until it finishes.
+- **From 0.2.5 on Android: uninstall first, and back up before you do.** 0.2.5 was signed with a
+  different key, so Android refuses to update it. Uninstalling deletes `Android/data/<package>`,
+  which is where both the extracted disc and `save/` live. Copy that folder somewhere else first.
+- **On iOS:** delete the old app and install this one. Saves live inside the app's own container,
+  so copy them out first if you want to keep them.
+
+The Android version is 0.2.7 rather than 0.2.6.1 on purpose. The version code is built from the
+first three parts, so 0.2.6.1 would have produced the same code as the broken build (206999) and
+could not have been told apart from it. 0.2.7 gives 207999, which is a real step up. The iOS
+package keeps 0.2.6.1, matching the desktop version.
+
 ## v0.2.6 - 2026-11-26
 
 **The look of the game becomes adjustable, and a crash finally leaves evidence.**
